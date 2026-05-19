@@ -1,0 +1,15 @@
+target/
+**/target/
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+out/
+**/out/
+.idea/
+.vscode/
+.xcodemap/
+*.log
+*.db
+*.sqlite
+*.sqlite3

@@ -1,0 +1,11 @@
+{
+  "name": "jarpatch-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JarPatch Studio 聚合启动脚本",
+  "scripts": {
+    "start": "npm --prefix frontend start",
+    "backend:build": "mvn -DskipTests package",
+    "frontend:start": "npm --prefix frontend start"
+  }
+}

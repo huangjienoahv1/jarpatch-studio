@@ -1,0 +1,17 @@
+server:
+  port: 18765
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  application:
+    name: jarpatch-studio-backend
+  datasource:
+    driver-class-name: org.sqlite.JDBC
+    url: jdbc:sqlite:${user.home}/.jarpatch-studio/jarpatch-studio.db
+
+jarpatch:
+  workspace-root: ${user.home}/.jarpatch-studio/projects

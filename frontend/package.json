@@ -1,0 +1,13 @@
+{
+  "name": "jarpatch-studio-frontend",
+  "version": "0.1.0",
+  "description": "JarPatch Studio Electron 前端",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.3.2"
+  }
+}

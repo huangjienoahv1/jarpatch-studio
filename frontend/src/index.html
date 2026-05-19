@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JarPatch Studio</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="notificationArea" class="notification-area" aria-live="polite"></div>
+  <div id="decompileDialog" class="modal-backdrop" aria-hidden="true">
+    <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="decompileDialogTitle">
+      <header class="modal-header">
+        <div>
+          <h2 id="decompileDialogTitle">选择需要反编译的 Jar</h2>
+          <p id="decompileDialogMeta">解析 pom.xml 后确认反编译范围</p>
+        </div>
+      </header>
+      <div id="decompileDialogSummary" class="modal-summary"></div>
+      <div class="modal-actions-row">
+        <button id="selectRecommendedBtn" class="tool-btn" type="button">推荐选择</button>
+        <button id="selectAllJarsBtn" class="tool-btn" type="button">全选</button>
+        <button id="clearJarSelectionBtn" class="tool-btn" type="button">清空</button>
+      </div>
+      <div id="decompileCandidateList" class="candidate-list"></div>
+      <footer class="modal-footer">
+        <button id="cancelDecompileBtn" class="tool-btn" type="button">取消</button>
+        <button id="confirmDecompileBtn" class="primary-action modal-primary" type="button">开始导入</button>
+      </footer>
+    </section>
+  </div>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">J</div>
+        <div>
+          <h1>JarPatch Studio</h1>
+          <p>Jar / Spring Boot / War 修复工作台</p>
+        </div>
+      </div>
+      <button id="openArchiveBtn" class="primary-action">打开 Jar/War</button>
+      <section class="panel">
+        <div class="panel-title">项目历史</div>
+        <div id="projectList" class="project-list"></div>
+      </section>
+    </aside>
+
+    <main class="workspace">
+      <header class="toolbar">
+        <div>
+          <div id="currentProjectName" class="project-name">未打开项目</div>
+          <div id="currentProjectMeta" class="project-meta">请选择一个 Jar 或 War 文件开始</div>
+        </div>
+        <div class="toolbar-actions">
+          <button id="analyzeBtn" class="tool-btn" disabled>分析</button>
+          <button id="compileBtn" class="tool-btn" disabled>编译</button>
+          <button id="exportBtn" class="tool-btn" disabled>导出</button>
+        </div>
+      </header>
+
+      <section id="contentGrid" class="content-grid">
+        <aside class="tree-panel">
+          <div class="section-header">文件树</div>
+          <div class="search-bar">
+            <input id="searchInput" type="search" placeholder="搜索文件名或内容">
+            <button id="searchBtn" class="tool-btn" disabled>搜索</button>
+          </div>
+          <div id="searchResults" class="search-results"></div>
+          <div id="fileTree" class="file-tree empty">暂无文件</div>
+        </aside>
+
+        <div id="treeResizeHandle" class="tree-resize-handle" role="separator" aria-label="调整文件树宽度" aria-orientation="vertical"></div>
+
+        <section class="editor-panel">
+          <div class="editor-header">
+            <div>
+              <div id="activeFileName" class="active-file">未选择文件</div>
+              <div id="activeFileKind" class="file-kind">可编辑 Java 与文本资源</div>
+            </div>
+            <button id="saveBtn" class="tool-btn" disabled>保存</button>
+          </div>
+          <textarea id="editor" spellcheck="false" wrap="off" disabled></textarea>
+        </section>
+
+        <button id="analysisToggleBtn" class="analysis-toggle" type="button" aria-expanded="false" aria-controls="analysisPanel">
+          <span>分析与风险</span>
+          <strong id="analysisBadge">未分析</strong>
+        </button>
+
+        <aside id="analysisPanel" class="analysis-panel" aria-hidden="true">
+          <div class="section-header analysis-header">
+            <span>分析与风险</span>
+            <button id="analysisCloseBtn" class="text-action" type="button">收起</button>
+          </div>
+          <div id="analysisResult" class="analysis-result empty">执行分析后显示包结构、依赖和导出风险</div>
+        </aside>
+      </section>
+
+      <section class="log-panel">
+        <div class="section-header">执行日志</div>
+        <pre id="logOutput"></pre>
+      </section>
+    </main>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
