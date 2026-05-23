@@ -65,6 +65,18 @@ ipcMain.handle('dialog:saveArchive', async (_, defaultName) => {
   return result.filePath;
 });
 
+ipcMain.handle('dialog:pickDirectory', async (_, defaultPath) => {
+  const result = await dialog.showOpenDialog({
+    title: '选择 JDK 安装目录',
+    defaultPath: defaultPath || undefined,
+    properties: ['openDirectory']
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   startBackend();

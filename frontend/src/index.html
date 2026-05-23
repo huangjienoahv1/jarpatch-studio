@@ -29,6 +29,34 @@
       </footer>
     </section>
   </div>
+  <div id="settingsDialog" class="modal-backdrop" aria-hidden="true">
+    <section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settingsDialogTitle">
+      <header class="modal-header">
+        <div>
+          <h2 id="settingsDialogTitle">JDK 配置</h2>
+          <p id="settingsDialogSummary">保存后编译服务会优先使用这里配置的 JDK 路径</p>
+        </div>
+      </header>
+      <div class="settings-grid">
+        <section class="settings-card">
+          <div class="section-header">JDK 安装目录</div>
+          <div class="settings-row">
+            <input id="jdkHomeInput" type="text" placeholder="例如：C:\\Program Files\\Java\\jdk-17">
+            <button id="browseJdkBtn" class="tool-btn" type="button">浏览</button>
+          </div>
+          <div id="jdkSettingsTip" class="settings-tip"></div>
+        </section>
+        <section class="settings-card">
+          <div class="section-header">当前状态</div>
+          <div id="jdkSettingsStatus" class="settings-status"></div>
+        </section>
+      </div>
+      <footer class="modal-footer">
+        <button id="closeSettingsBtn" class="tool-btn" type="button">取消</button>
+        <button id="saveJdkSettingsBtn" class="primary-action modal-primary" type="button">保存并校验</button>
+      </footer>
+    </section>
+  </div>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
@@ -55,6 +83,7 @@
           <button id="analyzeBtn" class="tool-btn" disabled>分析</button>
           <button id="compileBtn" class="tool-btn" disabled>编译</button>
           <button id="exportBtn" class="tool-btn" disabled>导出</button>
+          <button id="settingsBtn" class="tool-btn" type="button">⚙ 配置</button>
         </div>
       </header>
 

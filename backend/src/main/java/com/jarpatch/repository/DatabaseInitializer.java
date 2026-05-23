@@ -79,6 +79,14 @@ public class DatabaseInitializer {
                 "project_id TEXT NOT NULL, " +
                 "output_path TEXT NOT NULL, " +
                 "created_at TEXT NOT NULL)");
+
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS app_settings (" +
+                "setting_key TEXT PRIMARY KEY, " +
+                "setting_value TEXT NOT NULL, " +
+                "creator TEXT NOT NULL DEFAULT '" + JarPatchConstants.DEFAULT_AUDITOR + "', " +
+                "updater TEXT NOT NULL DEFAULT '" + JarPatchConstants.DEFAULT_AUDITOR + "', " +
+                "created_at TEXT NOT NULL, " +
+                "updated_at TEXT NOT NULL)");
     }
 
     /**

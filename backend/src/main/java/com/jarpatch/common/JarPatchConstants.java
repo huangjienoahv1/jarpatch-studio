@@ -50,16 +50,20 @@ public final class JarPatchConstants {
     public static final String MESSAGE_TASK_NOT_FOUND = "任务不存在";
     public static final String MESSAGE_TASK_CANCELLED = "任务已取消";
     public static final String MESSAGE_TASK_TYPE_EMPTY = "任务类型不能为空";
+    public static final String MESSAGE_JDK_HOME_REQUIRED = "请输入 JDK 安装目录";
+    public static final String MESSAGE_JDK_HOME_INVALID = "该目录下未找到可用的 javac";
+    public static final String MESSAGE_JDK_CONFIG_INVALID = "已保存的 JDK 路径不可用，请重新配置";
     public static final String MESSAGE_FILE_NOT_EDITABLE = "该文件不允许编辑";
     public static final String MESSAGE_FILE_BINARY_READONLY = "二进制文件只支持查看，不支持编辑";
     public static final String MESSAGE_FILE_SIGNATURE_READONLY = "签名文件只支持查看，不支持编辑";
     public static final String MESSAGE_FILE_OUT_OF_WORKSPACE = "文件路径不在项目工作区内";
     public static final String MESSAGE_UNSUPPORTED_PACKAGE = "仅支持 jar 和 war 文件";
-    public static final String MESSAGE_JDK_NOT_FOUND = "未检测到可用 JDK，请在系统环境变量配置 JAVA_HOME";
+    public static final String MESSAGE_JDK_NOT_FOUND = "未检测到可用 JDK，请先配置 JDK 路径或系统环境变量 JAVA_HOME";
     public static final String MESSAGE_NO_MODIFIED_JAVA = "没有需要编译的 Java 修改文件";
     public static final String MESSAGE_SEARCH_KEYWORD_EMPTY = "搜索关键词不能为空";
     public static final String MESSAGE_INVALID_NESTED_JAR_SOURCE_PATH = "嵌套 Jar 源码路径不正确";
     public static final String MESSAGE_PROJECT_HISTORY_DELETED = "项目历史已删除";
+    public static final String SETTING_KEY_JDK_HOME = "jdk.home";
 
     public static final Set<String> EDITABLE_RESOURCE_EXTENSIONS =
             Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(

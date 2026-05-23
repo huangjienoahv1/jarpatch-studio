@@ -26,6 +26,10 @@ const MESSAGE_COMPILE_FAILED = '编译失败';
 const MESSAGE_EXPORT_CANCELED = '已取消导出';
 const MESSAGE_EXPORT_SUCCESS = '导出完成';
 const MESSAGE_EXPORT_FAILED = '导出失败';
+const MESSAGE_SETTINGS_LOADING = '正在读取 JDK 配置';
+const MESSAGE_SETTINGS_LOAD_FAILED = '读取 JDK 配置失败';
+const MESSAGE_SETTINGS_SAVE_FAILED = '保存 JDK 配置失败';
+const MESSAGE_SETTINGS_SAVE_SUCCESS = 'JDK 配置已保存';
 const MESSAGE_PROJECT_HISTORY_EMPTY = '暂无项目历史';
 const MESSAGE_PROJECT_HISTORY_DELETE = '删除';
 const MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_PREFIX = '确认从项目历史删除“';
@@ -57,6 +61,9 @@ const MESSAGE_TASK_LABEL_IMPORT = '导入';
 const MESSAGE_TASK_LABEL_ANALYZE = '分析';
 const MESSAGE_TASK_LABEL_COMPILE = '编译';
 const MESSAGE_TASK_LABEL_EXPORT = '导出';
+const MESSAGE_SETTINGS_SUMMARY = '保存后编译服务会优先使用这里配置的 JDK 路径';
+const MESSAGE_SETTINGS_TIP = '请选择 JDK 安装目录，保存时会校验 bin 目录下的 javac。';
+const MESSAGE_SETTINGS_PLACEHOLDER = '例如：C:\\Program Files\\Java\\jdk-17';
 const TASK_TYPE_IMPORT = 'IMPORT';
 const TASK_TYPE_ANALYZE = 'ANALYZE';
 const TASK_TYPE_COMPILE = 'COMPILE';
@@ -126,6 +133,7 @@ const state = {
   currentTaskSocket: null,
   currentTaskAbortController: null,
   currentTaskCancelRequested: false,
+  jdkSettings: null,
   treePanelWidth: TREE_PANEL_DEFAULT_WIDTH,
   expandedPaths: new Set(['', 'sources', 'extracted'])
 };
@@ -138,6 +146,15 @@ const elements = {
   analyzeBtn: document.getElementById('analyzeBtn'),
   compileBtn: document.getElementById('compileBtn'),
   exportBtn: document.getElementById('exportBtn'),
+  settingsBtn: document.getElementById('settingsBtn'),
+  settingsDialog: document.getElementById('settingsDialog'),
+  settingsDialogSummary: document.getElementById('settingsDialogSummary'),
+  jdkHomeInput: document.getElementById('jdkHomeInput'),
+  browseJdkBtn: document.getElementById('browseJdkBtn'),
+  jdkSettingsTip: document.getElementById('jdkSettingsTip'),
+  jdkSettingsStatus: document.getElementById('jdkSettingsStatus'),
+  closeSettingsBtn: document.getElementById('closeSettingsBtn'),
+  saveJdkSettingsBtn: document.getElementById('saveJdkSettingsBtn'),
   taskStatusText: document.getElementById('taskStatusText'),
   taskStatusDetail: document.getElementById('taskStatusDetail'),
   cancelTaskBtn: document.getElementById('cancelTaskBtn'),
@@ -239,6 +256,7 @@ function updateTaskPanel(title, detail, active) {
  */
 function restoreWorkspaceControls() {
   elements.openArchiveBtn.disabled = false;
+  elements.settingsBtn.disabled = false;
   elements.projectList.style.pointerEvents = '';
   elements.fileTree.style.pointerEvents = '';
   elements.searchResults.style.pointerEvents = '';
@@ -264,6 +282,7 @@ function restoreWorkspaceControls() {
  */
 function lockWorkspaceControls() {
   elements.openArchiveBtn.disabled = true;
+  elements.settingsBtn.disabled = true;
   elements.projectList.style.pointerEvents = 'none';
   elements.fileTree.style.pointerEvents = 'none';
   elements.searchResults.style.pointerEvents = 'none';
@@ -420,6 +439,127 @@ async function cancelCurrentTask() {
     state.currentTaskCancelRequested = false;
     updateTaskPanel(`${getTaskLabel(task.taskType)} · ${MESSAGE_TASK_PANEL_RUNNING}`, `${MESSAGE_TASK_CANCEL_FAILED}：${error.message}`, true);
     notify(`${MESSAGE_TASK_CANCEL_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
+}
+
+/**
+ * 打开 JDK 配置弹窗。
+ */
+async function openSettingsDialog() {
+  elements.settingsDialog.classList.add('open');
+  elements.settingsDialog.setAttribute('aria-hidden', 'false');
+  renderJdkSettings(null, MESSAGE_SETTINGS_LOADING);
+  try {
+    const settings = await api('/api/settings/jdk');
+    state.jdkSettings = settings;
+    renderJdkSettings(settings, MESSAGE_SETTINGS_SUMMARY);
+  } catch (error) {
+    renderJdkSettings(null, MESSAGE_SETTINGS_LOADING);
+    notify(`${MESSAGE_SETTINGS_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
+}
+
+/**
+ * 关闭 JDK 配置弹窗。
+ */
+function closeSettingsDialog() {
+  elements.settingsDialog.classList.remove('open');
+  elements.settingsDialog.setAttribute('aria-hidden', 'true');
+}
+
+/**
+ * 渲染 JDK 配置状态。
+ *
+ * @param settings JDK 配置视图
+ * @param summary  弹窗说明文案
+ */
+function renderJdkSettings(settings, summary) {
+  const view = settings || {
+    configuredJavaHome: '',
+    configuredJavacPath: '',
+    configuredValid: false,
+    effectiveJavaHome: '',
+    effectiveJavacPath: '',
+    effectiveValid: false,
+    message: MESSAGE_SETTINGS_LOADING
+  };
+  elements.settingsDialogSummary.textContent = summary || MESSAGE_SETTINGS_SUMMARY;
+  elements.jdkHomeInput.value = view.configuredJavaHome || '';
+  elements.jdkSettingsTip.textContent = MESSAGE_SETTINGS_TIP;
+  elements.jdkSettingsStatus.innerHTML = `
+    <div class="settings-status-item">
+      <div class="settings-status-label">已保存路径</div>
+      <div class="settings-status-value">${escapeHtml(view.configuredJavaHome || '未保存')}</div>
+    </div>
+    <div class="settings-status-item">
+      <div class="settings-status-label">已保存 javac</div>
+      <div class="settings-status-value">${escapeHtml(view.configuredJavacPath || '未校验')}</div>
+    </div>
+    <div class="settings-status-item">
+      <div class="settings-status-label">生效路径</div>
+      <div class="settings-status-value">${escapeHtml(view.effectiveJavaHome || '未检测到')}</div>
+    </div>
+    <div class="settings-status-item">
+      <div class="settings-status-label">生效 javac</div>
+      <div class="settings-status-value">${escapeHtml(view.effectiveJavacPath || '未检测到')}</div>
+    </div>
+    <div class="settings-status-item">
+      <div class="settings-status-label">状态说明</div>
+      <div class="settings-status-value">${escapeHtml(view.message || MESSAGE_SETTINGS_SUMMARY)}</div>
+    </div>
+  `;
+}
+
+/**
+ * 设置 JDK 配置弹窗中的按钮状态。
+ *
+ * @param busy 是否忙碌
+ */
+function setSettingsDialogBusy(busy) {
+  elements.jdkHomeInput.disabled = busy;
+  elements.browseJdkBtn.disabled = busy;
+  elements.saveJdkSettingsBtn.disabled = busy;
+  elements.closeSettingsBtn.disabled = busy;
+}
+
+/**
+ * 浏览并填充 JDK 安装目录。
+ */
+async function pickJdkHomeDirectory() {
+  const initialPath = elements.jdkHomeInput.value.trim()
+    || (state.jdkSettings && state.jdkSettings.configuredJavaHome)
+    || (state.jdkSettings && state.jdkSettings.effectiveJavaHome)
+    || '';
+  const selectedPath = await window.jarPatch.pickDirectory(initialPath);
+  if (!selectedPath) {
+    return;
+  }
+  elements.jdkHomeInput.value = selectedPath;
+}
+
+/**
+ * 保存 JDK 配置。
+ */
+async function saveJdkSettings() {
+  const javaHome = elements.jdkHomeInput.value.trim();
+  if (!javaHome) {
+    notify('请输入 JDK 安装目录', NOTICE_TYPE_INFO);
+    return;
+  }
+  setSettingsDialogBusy(true);
+  try {
+    const settings = await api('/api/settings/jdk', {
+      method: 'PUT',
+      body: JSON.stringify({ javaHome })
+    });
+    state.jdkSettings = settings;
+    renderJdkSettings(settings, MESSAGE_SETTINGS_SUMMARY);
+    notify(MESSAGE_SETTINGS_SAVE_SUCCESS, NOTICE_TYPE_SUCCESS);
+    closeSettingsDialog();
+  } catch (error) {
+    notify(`${MESSAGE_SETTINGS_SAVE_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  } finally {
+    setSettingsDialogBusy(false);
   }
 }
 
@@ -1033,14 +1173,23 @@ elements.saveBtn.addEventListener('click', saveCurrentFile);
 elements.analyzeBtn.addEventListener('click', analyzeProject);
 elements.compileBtn.addEventListener('click', compileProject);
 elements.exportBtn.addEventListener('click', exportProject);
+elements.settingsBtn.addEventListener('click', openSettingsDialog);
 elements.searchBtn.addEventListener('click', searchProject);
 elements.cancelTaskBtn.addEventListener('click', cancelCurrentTask);
+elements.browseJdkBtn.addEventListener('click', pickJdkHomeDirectory);
+elements.closeSettingsBtn.addEventListener('click', closeSettingsDialog);
+elements.saveJdkSettingsBtn.addEventListener('click', saveJdkSettings);
 elements.treeResizeHandle.addEventListener('pointerdown', beginTreeResize);
 elements.analysisToggleBtn.addEventListener('click', () => setAnalysisPanelOpen(!state.analysisOpen));
 elements.analysisCloseBtn.addEventListener('click', () => setAnalysisPanelOpen(false));
 elements.selectRecommendedBtn.addEventListener('click', selectRecommendedCandidates);
 elements.selectAllJarsBtn.addEventListener('click', () => setAllCandidatesSelected(true));
 elements.clearJarSelectionBtn.addEventListener('click', () => setAllCandidatesSelected(false));
+elements.settingsDialog.addEventListener('click', (event) => {
+  if (event.target === elements.settingsDialog) {
+    closeSettingsDialog();
+  }
+});
 elements.searchInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     searchProject();
