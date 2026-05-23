@@ -13,7 +13,8 @@ public enum TaskStatus {
 
     RUNNING("RUNNING", "执行中"),
     SUCCESS("SUCCESS", "执行成功"),
-    FAILED("FAILED", "执行失败");
+    FAILED("FAILED", "执行失败"),
+    CANCELED("CANCELED", "已取消");
 
     private final String code;
     private final String label;

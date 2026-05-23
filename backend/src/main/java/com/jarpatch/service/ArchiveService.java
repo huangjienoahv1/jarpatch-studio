@@ -16,6 +16,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -41,16 +42,29 @@ public class ArchiveService {
      * @throws IOException 解压失败时抛出
      */
     public void unzip(Path archiveFile, Path targetDir) throws IOException {
+        unzip(archiveFile, targetDir, () -> false);
+    }
+
+    /**
+     * 解压 Jar 或 War 到目标目录，并支持任务取消检查。
+     *
+     * @param archiveFile    原始压缩包
+     * @param targetDir      解压目标目录
+     * @param cancelRequested 取消检查回调
+     * @throws IOException 解压失败时抛出
+     */
+    public void unzip(Path archiveFile, Path targetDir, BooleanSupplier cancelRequested) throws IOException {
         Files.createDirectories(targetDir);
         try (ZipInputStream zipInputStream = new ZipInputStream(new BufferedInputStream(Files.newInputStream(archiveFile)))) {
             ZipEntry entry;
             while ((entry = zipInputStream.getNextEntry()) != null) {
+                ensureNotCancelled(cancelRequested);
                 Path target = safeResolve(targetDir, entry.getName());
                 if (entry.isDirectory()) {
                     Files.createDirectories(target);
                 } else {
                     Files.createDirectories(target.getParent());
-                    copy(zipInputStream, target);
+                    copy(zipInputStream, target, cancelRequested);
                 }
                 zipInputStream.closeEntry();
             }
@@ -66,19 +80,34 @@ public class ArchiveService {
      * @throws IOException 打包失败时抛出
      */
     public void zipDirectory(Path sourceDir, Path outputFile, boolean springBootLayout) throws IOException {
+        zipDirectory(sourceDir, outputFile, springBootLayout, () -> false);
+    }
+
+    /**
+     * 把目录重新打包为 Jar 或 War，并支持任务取消检查。
+     *
+     * @param sourceDir        待打包目录
+     * @param outputFile       输出文件
+     * @param springBootLayout 是否按 Spring Boot 可执行 Jar 规则处理嵌套 Jar
+     * @param cancelRequested  取消检查回调
+     * @throws IOException 打包失败时抛出
+     */
+    public void zipDirectory(Path sourceDir, Path outputFile, boolean springBootLayout, BooleanSupplier cancelRequested) throws IOException {
         Files.createDirectories(outputFile.getParent());
         try (ZipOutputStream zipOutputStream = new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(outputFile)))) {
             List<Path> paths = collectPaths(sourceDir);
 
             // Spring Boot 启动器会把 BOOT-INF/classes/ 作为 classpath 根，必须先保留目录条目。
             for (Path directory : paths) {
+                ensureNotCancelled(cancelRequested);
                 if (Files.isDirectory(directory) && !sourceDir.equals(directory)) {
-                    addDirectory(sourceDir, directory, zipOutputStream);
+                    addDirectory(sourceDir, directory, zipOutputStream, cancelRequested);
                 }
             }
             for (Path file : paths) {
+                ensureNotCancelled(cancelRequested);
                 if (Files.isRegularFile(file)) {
-                    addFile(sourceDir, file, zipOutputStream, springBootLayout);
+                    addFile(sourceDir, file, zipOutputStream, springBootLayout, cancelRequested);
                 }
             }
         }
@@ -96,14 +125,34 @@ public class ArchiveService {
      * @throws IOException 读取或写入 Jar 失败时抛出
      */
     public void replaceClassesInJar(Path jarFile, Path compiledDir) throws IOException {
+        replaceClassesInJar(jarFile, compiledDir, () -> false);
+    }
+
+    /**
+     * 将编译后的 class 文件替换回指定嵌套 Jar，并支持任务取消检查。
+     *
+     * @param jarFile         extracted 目录内的嵌套 Jar
+     * @param compiledDir     当前嵌套 Jar 对应的编译输出目录
+     * @param cancelRequested  取消检查回调
+     * @throws IOException 读取或写入 Jar 失败时抛出
+     */
+    public void replaceClassesInJar(Path jarFile, Path compiledDir, BooleanSupplier cancelRequested) throws IOException {
         Path tempFile = Files.createTempFile(jarFile.getParent(), jarFile.getFileName().toString(), ".tmp");
         Set<String> replacementEntries = collectClassEntries(compiledDir);
+        boolean completed = false;
         try (ZipInputStream zipInputStream = new ZipInputStream(new BufferedInputStream(Files.newInputStream(jarFile)));
              ZipOutputStream zipOutputStream = new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(tempFile)))) {
-            copyOriginalEntries(zipInputStream, zipOutputStream, replacementEntries);
-            addReplacementClasses(compiledDir, zipOutputStream);
+            copyOriginalEntries(zipInputStream, zipOutputStream, replacementEntries, cancelRequested);
+            addReplacementClasses(compiledDir, zipOutputStream, cancelRequested);
+            completed = true;
+        } finally {
+            if (!completed) {
+                Files.deleteIfExists(tempFile);
+            }
         }
-        Files.move(tempFile, jarFile, StandardCopyOption.REPLACE_EXISTING);
+        if (completed) {
+            Files.move(tempFile, jarFile, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     /**
@@ -145,18 +194,21 @@ public class ArchiveService {
      * @param zipInputStream     原 Jar 输入流
      * @param zipOutputStream    新 Jar 输出流
      * @param replacementEntries 需要被新 class 覆盖的条目名称
+     * @param cancelRequested    取消检查回调
      * @throws IOException 复制失败时抛出
      */
     private void copyOriginalEntries(ZipInputStream zipInputStream,
                                      ZipOutputStream zipOutputStream,
-                                     Set<String> replacementEntries) throws IOException {
+                                     Set<String> replacementEntries,
+                                     BooleanSupplier cancelRequested) throws IOException {
         ZipEntry entry;
         while ((entry = zipInputStream.getNextEntry()) != null) {
+            ensureNotCancelled(cancelRequested);
             if (!replacementEntries.contains(entry.getName())) {
                 ZipEntry newEntry = new ZipEntry(entry.getName());
                 zipOutputStream.putNextEntry(newEntry);
                 if (!entry.isDirectory()) {
-                    copy(zipInputStream, zipOutputStream);
+                    copy(zipInputStream, zipOutputStream, cancelRequested);
                 }
                 zipOutputStream.closeEntry();
             }
@@ -169,16 +221,18 @@ public class ArchiveService {
      *
      * @param compiledDir     编译输出目录
      * @param zipOutputStream 新 Jar 输出流
+     * @param cancelRequested  取消检查回调
      * @throws IOException 写入失败时抛出
      */
-    private void addReplacementClasses(Path compiledDir, ZipOutputStream zipOutputStream) throws IOException {
+    private void addReplacementClasses(Path compiledDir, ZipOutputStream zipOutputStream, BooleanSupplier cancelRequested) throws IOException {
         try (var stream = Files.walk(compiledDir)) {
             List<Path> classFiles = stream.filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().endsWith("." + JarPatchConstants.CLASS_EXTENSION))
                     .sorted(Comparator.comparing(Path::toString))
                     .toList();
             for (Path classFile : classFiles) {
-                addReplacementClass(compiledDir, classFile, zipOutputStream);
+                ensureNotCancelled(cancelRequested);
+                addReplacementClass(compiledDir, classFile, zipOutputStream, cancelRequested);
             }
         }
     }
@@ -189,12 +243,16 @@ public class ArchiveService {
      * @param compiledDir     编译输出目录
      * @param classFile       class 文件路径
      * @param zipOutputStream 新 Jar 输出流
+     * @param cancelRequested  取消检查回调
      * @throws IOException 写入失败时抛出
      */
-    private void addReplacementClass(Path compiledDir, Path classFile, ZipOutputStream zipOutputStream) throws IOException {
+    private void addReplacementClass(Path compiledDir, Path classFile, ZipOutputStream zipOutputStream, BooleanSupplier cancelRequested) throws IOException {
+        ensureNotCancelled(cancelRequested);
         String entryName = compiledDir.relativize(classFile).toString().replace('\\', '/');
         zipOutputStream.putNextEntry(new ZipEntry(entryName));
-        Files.copy(classFile, zipOutputStream);
+        try (InputStream inputStream = Files.newInputStream(classFile)) {
+            copy(inputStream, zipOutputStream, cancelRequested);
+        }
         zipOutputStream.closeEntry();
     }
 
@@ -219,13 +277,27 @@ public class ArchiveService {
      *
      * @param inputStream Zip 输入流
      * @param target      目标文件路径
+     * @param cancelRequested 取消检查回调
      * @throws IOException 文件写入失败时抛出
      */
     private void copy(InputStream inputStream, Path target) throws IOException {
+        copy(inputStream, target, () -> false);
+    }
+
+    /**
+     * 从 Zip 输入流复制单个文件，并支持任务取消检查。
+     *
+     * @param inputStream    Zip 输入流
+     * @param target         目标文件路径
+     * @param cancelRequested 取消检查回调
+     * @throws IOException 文件写入失败时抛出
+     */
+    private void copy(InputStream inputStream, Path target, BooleanSupplier cancelRequested) throws IOException {
         try (OutputStream outputStream = new BufferedOutputStream(Files.newOutputStream(target))) {
             byte[] buffer = new byte[JarPatchConstants.BUFFER_SIZE];
             int length;
             while ((length = inputStream.read(buffer)) >= 0) {
+                ensureNotCancelled(cancelRequested);
                 outputStream.write(buffer, 0, length);
             }
         }
@@ -236,12 +308,26 @@ public class ArchiveService {
      *
      * @param inputStream  输入流
      * @param outputStream 输出流
+     * @param cancelRequested 取消检查回调
      * @throws IOException 复制失败时抛出
      */
     private void copy(InputStream inputStream, OutputStream outputStream) throws IOException {
+        copy(inputStream, outputStream, () -> false);
+    }
+
+    /**
+     * 从一个流复制内容到另一个流，并支持任务取消检查。
+     *
+     * @param inputStream    输入流
+     * @param outputStream   输出流
+     * @param cancelRequested 取消检查回调
+     * @throws IOException 复制失败时抛出
+     */
+    private void copy(InputStream inputStream, OutputStream outputStream, BooleanSupplier cancelRequested) throws IOException {
         byte[] buffer = new byte[JarPatchConstants.BUFFER_SIZE];
         int length;
         while ((length = inputStream.read(buffer)) >= 0) {
+            ensureNotCancelled(cancelRequested);
             outputStream.write(buffer, 0, length);
         }
     }
@@ -255,6 +341,20 @@ public class ArchiveService {
      * @param springBootLayout 是否按 Spring Boot 规则处理
      */
     private void addFile(Path sourceDir, Path file, ZipOutputStream zipOutputStream, boolean springBootLayout) {
+        addFile(sourceDir, file, zipOutputStream, springBootLayout, () -> false);
+    }
+
+    /**
+     * 将目录中的单个文件写入 Zip 输出流，并支持任务取消检查。
+     *
+     * @param sourceDir        源目录
+     * @param file             当前文件
+     * @param zipOutputStream  Zip 输出流
+     * @param springBootLayout 是否按 Spring Boot 规则处理
+     * @param cancelRequested   取消检查回调
+     */
+    private void addFile(Path sourceDir, Path file, ZipOutputStream zipOutputStream, boolean springBootLayout, BooleanSupplier cancelRequested) {
+        ensureNotCancelled(cancelRequested);
         String entryName = sourceDir.relativize(file).toString().replace('\\', '/');
         try {
             ZipEntry entry = new ZipEntry(entryName);
@@ -262,7 +362,9 @@ public class ArchiveService {
                 configureStoredEntry(file, entry);
             }
             zipOutputStream.putNextEntry(entry);
-            Files.copy(file, zipOutputStream);
+            try (InputStream inputStream = Files.newInputStream(file)) {
+                copy(inputStream, zipOutputStream, cancelRequested);
+            }
             zipOutputStream.closeEntry();
         } catch (IOException e) {
             throw new IllegalStateException("写入压缩条目失败: " + entryName, e);
@@ -277,6 +379,19 @@ public class ArchiveService {
      * @param zipOutputStream Zip 输出流
      */
     private void addDirectory(Path sourceDir, Path directory, ZipOutputStream zipOutputStream) {
+        addDirectory(sourceDir, directory, zipOutputStream, () -> false);
+    }
+
+    /**
+     * 将目录条目写入 Zip 输出流，并支持任务取消检查。
+     *
+     * @param sourceDir       源目录
+     * @param directory       当前目录
+     * @param zipOutputStream Zip 输出流
+     * @param cancelRequested  取消检查回调
+     */
+    private void addDirectory(Path sourceDir, Path directory, ZipOutputStream zipOutputStream, BooleanSupplier cancelRequested) {
+        ensureNotCancelled(cancelRequested);
         String entryName = sourceDir.relativize(directory).toString().replace('\\', '/') + JarPatchConstants.ZIP_SEPARATOR;
         try {
             zipOutputStream.putNextEntry(new ZipEntry(entryName));
@@ -312,5 +427,16 @@ public class ArchiveService {
         entry.setSize(bytes.length);
         entry.setCompressedSize(bytes.length);
         entry.setCrc(crc32.getValue());
+    }
+
+    /**
+     * 检查任务是否已取消。
+     *
+     * @param cancelRequested 取消检查回调
+     */
+    private void ensureNotCancelled(BooleanSupplier cancelRequested) {
+        if (cancelRequested != null && cancelRequested.getAsBoolean()) {
+            throw new IllegalStateException(JarPatchConstants.MESSAGE_TASK_CANCELLED);
+        }
     }
 }

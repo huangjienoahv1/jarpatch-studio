@@ -16,6 +16,7 @@ public class ImportProjectRequest {
 
     private String filePath;
     private List<String> selectedNestedJars = new ArrayList<>();
+    private String taskId;
 
     public String getFilePath() {
         return filePath;
@@ -31,5 +32,13 @@ public class ImportProjectRequest {
 
     public void setSelectedNestedJars(List<String> selectedNestedJars) {
         this.selectedNestedJars = selectedNestedJars == null ? new ArrayList<>() : selectedNestedJars;
+    }
+
+    public String getTaskId() {
+        return taskId;
+    }
+
+    public void setTaskId(String taskId) {
+        this.taskId = taskId;
     }
 }

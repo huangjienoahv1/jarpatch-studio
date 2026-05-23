@@ -21,6 +21,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 
 /**
@@ -92,7 +94,24 @@ public class CompileService {
      * @throws InterruptedException javac 被中断时抛出
      */
     public OperationResult compile(ProjectRecord project) throws IOException, InterruptedException {
-        TaskRecord task = taskService.create(project.getId(), TASK_TYPE_COMPILE, "开始编译修改过的 Java 文件");
+        return compile(project, null);
+    }
+
+    /**
+     * 编译已修改 Java 文件并替换 class。
+     * <p>
+     * 前端先创建任务并连接 WebSocket 后，把 taskId 传入这里；编译仍由本机 javac 执行，
+     * 但进度日志会实时推送，取消请求也能在任务执行过程中生效。
+     * </p>
+     *
+     * @param project 项目记录
+     * @param taskId  预创建任务 ID，可为空
+     * @return 编译结果
+     * @throws IOException          文件读写失败时抛出
+     * @throws InterruptedException javac 被中断时抛出
+     */
+    public OperationResult compile(ProjectRecord project, String taskId) throws IOException, InterruptedException {
+        TaskRecord task = taskService.prepare(taskId, project.getId(), TASK_TYPE_COMPILE, "开始编译修改过的 Java 文件");
         try {
             List<String> javaPaths = fileChangeRepository.findJavaPaths(project.getId());
             if (javaPaths.isEmpty()) {
@@ -100,6 +119,7 @@ public class CompileService {
             }
 
             taskService.running(task, 20, "定位本机 javac");
+            taskService.ensureNotCancelled(task.getId());
             Path javac = jdkService.findJavac();
             Path compiledDir = workspaceService.compiledDir(project);
             Files.createDirectories(compiledDir);
@@ -108,12 +128,13 @@ public class CompileService {
             StringBuilder output = new StringBuilder();
             Map<String, List<String>> javaPathsByTarget = groupJavaPathsByTarget(javaPaths);
             for (Map.Entry<String, List<String>> entry : javaPathsByTarget.entrySet()) {
+                taskService.ensureNotCancelled(task.getId());
                 Path targetCompiledDir = compiledDir.resolve(safeCompileTargetName(entry.getKey()));
                 resetCompiledDir(targetCompiledDir);
                 normalizeDecompiledSources(project, entry.getValue());
                 List<String> command = buildCommand(project, javac, targetCompiledDir, entry.getValue());
-                output.append(runProcess(command, workspaceService.sourceDir(project)));
-                writeCompiledClasses(project, entry.getKey(), targetCompiledDir);
+                output.append(runProcess(command, workspaceService.sourceDir(project), () -> taskService.isCancelled(task.getId())));
+                writeCompiledClasses(project, entry.getKey(), targetCompiledDir, () -> taskService.isCancelled(task.getId()));
             }
 
             OperationResult result = new OperationResult();
@@ -122,6 +143,12 @@ public class CompileService {
             result.setMessage(output.isEmpty() ? "编译完成" : output.toString());
             taskService.success(task, "编译完成，class 文件已写入 extracted 目录");
             return result;
+        } catch (IllegalStateException e) {
+            if (JarPatchConstants.MESSAGE_TASK_CANCELLED.equals(e.getMessage())) {
+                throw e;
+            }
+            taskService.failed(task, "编译失败: " + e.getMessage());
+            throw e;
         } catch (RuntimeException | IOException | InterruptedException e) {
             taskService.failed(task, "编译失败: " + e.getMessage());
             throw e;
@@ -691,20 +718,33 @@ public class CompileService {
      *
      * @param command 命令参数
      * @param workDir 工作目录
+     * @param cancelRequested 取消检查回调
      * @return javac 输出
      * @throws IOException          进程启动失败时抛出
      * @throws InterruptedException 进程等待被中断时抛出
      */
-    private String runProcess(List<String> command, Path workDir) throws IOException, InterruptedException {
+    private String runProcess(List<String> command, Path workDir, BooleanSupplier cancelRequested) throws IOException, InterruptedException {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.directory(workDir.toFile());
         processBuilder.redirectErrorStream(true);
         Process process = processBuilder.start();
         StringBuilder output = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append(System.lineSeparator());
+        Thread readerThread = new Thread(() -> readProcessOutput(process, output), "jarpatch-javac-output");
+        readerThread.setDaemon(true);
+        readerThread.start();
+        try {
+            while (process.isAlive()) {
+                if (cancelRequested.getAsBoolean()) {
+                    process.destroyForcibly();
+                    readerThread.join();
+                    throw new IllegalStateException(JarPatchConstants.MESSAGE_TASK_CANCELLED);
+                }
+                process.waitFor(200, TimeUnit.MILLISECONDS);
+            }
+            readerThread.join();
+        } finally {
+            if (process.isAlive()) {
+                process.destroyForcibly();
             }
         }
         int exitCode = process.waitFor();
@@ -712,6 +752,23 @@ public class CompileService {
             throw new IllegalStateException(output.toString());
         }
         return output.toString();
+    }
+
+    /**
+     * 读取 javac 进程输出。
+     *
+     * @param process 外部进程
+     * @param output  输出缓冲
+     */
+    private void readProcessOutput(Process process, StringBuilder output) {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line).append(System.lineSeparator());
+            }
+        } catch (IOException ignored) {
+            // 进程被取消时输入流会关闭，读取线程直接退出即可。
+        }
     }
 
     /**
@@ -724,15 +781,16 @@ public class CompileService {
      * @param project     项目记录
      * @param compileTarget 主 classes 标识或嵌套 Jar 相对路径
      * @param compiledDir 编译输出目录
+     * @param cancelRequested 取消检查回调
      * @throws IOException 复制失败时抛出
      */
-    private void writeCompiledClasses(ProjectRecord project, String compileTarget, Path compiledDir) throws IOException {
+    private void writeCompiledClasses(ProjectRecord project, String compileTarget, Path compiledDir, BooleanSupplier cancelRequested) throws IOException {
         if (MAIN_CLASS_COMPILE_TARGET.equals(compileTarget)) {
-            copyCompiledClassesToDirectory(compiledDir, classRoot(project));
+            copyCompiledClassesToDirectory(compiledDir, classRoot(project), cancelRequested);
             return;
         }
         Path nestedJar = workspaceService.resolveExtracted(project, compileTarget);
-        archiveService.replaceClassesInJar(nestedJar, compiledDir);
+        archiveService.replaceClassesInJar(nestedJar, compiledDir, cancelRequested);
     }
 
     /**
@@ -740,13 +798,19 @@ public class CompileService {
      *
      * @param compiledDir 编译输出目录
      * @param targetRoot  class 目标根目录
+     * @param cancelRequested 取消检查回调
      * @throws IOException 复制失败时抛出
      */
-    private void copyCompiledClassesToDirectory(Path compiledDir, Path targetRoot) throws IOException {
+    private void copyCompiledClassesToDirectory(Path compiledDir, Path targetRoot, BooleanSupplier cancelRequested) throws IOException {
         try (Stream<Path> stream = Files.walk(compiledDir)) {
             stream.filter(path -> Files.isRegularFile(path))
                     .filter(path -> path.getFileName().toString().endsWith("." + JarPatchConstants.CLASS_EXTENSION))
-                    .forEach(path -> copyCompiledClass(compiledDir, targetRoot, path));
+                    .forEach(path -> {
+                        if (cancelRequested.getAsBoolean()) {
+                            throw new IllegalStateException(JarPatchConstants.MESSAGE_TASK_CANCELLED);
+                        }
+                        copyCompiledClass(compiledDir, targetRoot, path);
+                    });
         }
     }
 

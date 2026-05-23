@@ -11,6 +11,7 @@ package com.jarpatch.model;
 public class ExportProjectRequest {
 
     private String outputPath;
+    private String taskId;
 
     public String getOutputPath() {
         return outputPath;
@@ -18,5 +19,13 @@ public class ExportProjectRequest {
 
     public void setOutputPath(String outputPath) {
         this.outputPath = outputPath;
+    }
+
+    public String getTaskId() {
+        return taskId;
+    }
+
+    public void setTaskId(String taskId) {
+        this.taskId = taskId;
     }
 }

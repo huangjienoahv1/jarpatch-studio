@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -109,7 +110,7 @@ public class ProjectController {
      */
     @PostMapping("/import")
     public ApiResponse<ProjectRecord> importProject(@RequestBody ImportProjectRequest request) throws IOException {
-        return ApiResponse.success(projectService.importProject(request.getFilePath(), request.getSelectedNestedJars()));
+        return ApiResponse.success(projectService.importProject(request.getFilePath(), request.getSelectedNestedJars(), request.getTaskId()));
     }
 
     /**
@@ -203,9 +204,10 @@ public class ProjectController {
      * @throws IOException 分析失败时抛出
      */
     @PostMapping("/{projectId}/analyze")
-    public ApiResponse<AnalysisReport> analyze(@PathVariable("projectId") String projectId) throws IOException {
+    public ApiResponse<AnalysisReport> analyze(@PathVariable("projectId") String projectId,
+                                               @RequestHeader(value = "X-Task-Id", required = false) String taskId) throws IOException {
         ProjectRecord project = requireProject(projectId);
-        return ApiResponse.success(analysisService.analyze(project));
+        return ApiResponse.success(analysisService.analyze(project, taskId));
     }
 
     /**
@@ -217,9 +219,10 @@ public class ProjectController {
      * @throws InterruptedException javac 执行被中断时抛出
      */
     @PostMapping("/{projectId}/compile")
-    public ApiResponse<OperationResult> compile(@PathVariable("projectId") String projectId) throws IOException, InterruptedException {
+    public ApiResponse<OperationResult> compile(@PathVariable("projectId") String projectId,
+                                                @RequestHeader(value = "X-Task-Id", required = false) String taskId) throws IOException, InterruptedException {
         ProjectRecord project = requireProject(projectId);
-        return ApiResponse.success(compileService.compile(project));
+        return ApiResponse.success(compileService.compile(project, taskId));
     }
 
     /**
@@ -231,10 +234,12 @@ public class ProjectController {
      * @throws IOException 导出失败时抛出
      */
     @PostMapping("/{projectId}/export")
-    public ApiResponse<OperationResult> export(@PathVariable("projectId") String projectId, @RequestBody(required = false) ExportProjectRequest request) throws IOException {
+    public ApiResponse<OperationResult> export(@PathVariable("projectId") String projectId,
+                                               @RequestBody(required = false) ExportProjectRequest request) throws IOException {
         ProjectRecord project = requireProject(projectId);
         String outputPath = request == null ? null : request.getOutputPath();
-        return ApiResponse.success(exportService.export(project, outputPath));
+        String taskId = request == null ? null : request.getTaskId();
+        return ApiResponse.success(exportService.export(project, outputPath, taskId));
     }
 
     /**

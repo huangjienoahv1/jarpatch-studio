@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -54,13 +55,27 @@ public class DecompilerService {
      * @throws IOException 目录创建或反编译失败时抛出
      */
     public void decompile(Path extractedDir, Path sourceDir, String packageType, Set<String> selectedNestedJars) throws IOException {
+        decompile(extractedDir, sourceDir, packageType, selectedNestedJars, () -> false);
+    }
+
+    /**
+     * 根据包类型选择主 class 根目录，并继续反编译用户选中的嵌套 Jar，同时支持任务取消检查。
+     *
+     * @param extractedDir       解压目录
+     * @param sourceDir          源码输出目录
+     * @param packageType        包类型编码
+     * @param selectedNestedJars 用户选择需要反编译的嵌套 Jar 相对路径
+     * @param cancelRequested    取消检查回调
+     * @throws IOException 目录创建或反编译失败时抛出
+     */
+    public void decompile(Path extractedDir, Path sourceDir, String packageType, Set<String> selectedNestedJars, BooleanSupplier cancelRequested) throws IOException {
         Files.createDirectories(sourceDir);
         Path classesRoot = resolveClassesRoot(extractedDir, packageType);
         if (Files.exists(classesRoot)) {
-            decompileClassesRoot(classesRoot, sourceDir);
+            decompileClassesRoot(classesRoot, sourceDir, cancelRequested);
         }
 
-        decompileNestedJars(extractedDir, selectedNestedJars, sourceDir);
+        decompileNestedJars(extractedDir, selectedNestedJars, sourceDir, cancelRequested);
     }
 
     /**
@@ -68,10 +83,12 @@ public class DecompilerService {
      *
      * @param classesRoot class 根目录
      * @param sourceDir   源码输出目录
+     * @param cancelRequested 取消检查回调
      * @throws IOException 读取 class 文件失败时抛出
      */
-    private void decompileClassesRoot(Path classesRoot, Path sourceDir) throws IOException {
+    private void decompileClassesRoot(Path classesRoot, Path sourceDir, BooleanSupplier cancelRequested) throws IOException {
         for (Path classFile : findClassFiles(classesRoot)) {
+            ensureNotCancelled(cancelRequested);
             decompileClassFile(classFile, sourceDir);
         }
     }
@@ -86,17 +103,19 @@ public class DecompilerService {
      * @param extractedDir       解压目录
      * @param selectedNestedJars 用户选择需要反编译的嵌套 Jar 相对路径
      * @param sourceDir          源码输出目录
+     * @param cancelRequested    取消检查回调
      * @throws IOException 查找嵌套 Jar 失败时抛出
      */
-    private void decompileNestedJars(Path extractedDir, Set<String> selectedNestedJars, Path sourceDir) throws IOException {
+    private void decompileNestedJars(Path extractedDir, Set<String> selectedNestedJars, Path sourceDir, BooleanSupplier cancelRequested) throws IOException {
         if (selectedNestedJars == null || selectedNestedJars.isEmpty()) {
             return;
         }
         for (Path nestedJar : findSelectedNestedJars(extractedDir, selectedNestedJars)) {
+            ensureNotCancelled(cancelRequested);
             Path nestedSourceDir = sourceDir.resolve(JarPatchConstants.SOURCE_NESTED_JAR_DIR)
                     .resolve(extractedDir.relativize(nestedJar).toString());
             Files.createDirectories(nestedSourceDir);
-            decompileArchive(nestedJar, nestedSourceDir);
+            decompileArchive(nestedJar, nestedSourceDir, cancelRequested);
         }
     }
 
@@ -197,14 +216,15 @@ public class DecompilerService {
      *
      * @param archiveFile 嵌套 Jar 文件
      * @param sourceDir   当前嵌套 Jar 的源码输出目录
+     * @param cancelRequested 取消检查回调
      * @throws IOException 解压或读取嵌套 Jar 失败时抛出
      */
-    private void decompileArchive(Path archiveFile, Path sourceDir) throws IOException {
+    private void decompileArchive(Path archiveFile, Path sourceDir, BooleanSupplier cancelRequested) throws IOException {
         Path tempDir = Files.createTempDirectory(NESTED_JAR_TEMP_PREFIX);
         try {
-            archiveService.unzip(archiveFile, tempDir);
+            archiveService.unzip(archiveFile, tempDir, cancelRequested);
             // 嵌套 Jar 先展开再逐个 class 反编译，确保 module-info.class 不进入 CFR 普通类处理链路。
-            decompileClassesRoot(tempDir, sourceDir);
+            decompileClassesRoot(tempDir, sourceDir, cancelRequested);
         } finally {
             deleteDirectoryQuietly(tempDir);
         }
@@ -234,6 +254,17 @@ public class DecompilerService {
             Files.deleteIfExists(path);
         } catch (IOException e) {
             throw new IllegalStateException("删除反编译临时文件失败: " + path, e);
+        }
+    }
+
+    /**
+     * 检查任务是否已取消。
+     *
+     * @param cancelRequested 取消检查回调
+     */
+    private void ensureNotCancelled(BooleanSupplier cancelRequested) {
+        if (cancelRequested != null && cancelRequested.getAsBoolean()) {
+            throw new IllegalStateException(JarPatchConstants.MESSAGE_TASK_CANCELLED);
         }
     }
 }

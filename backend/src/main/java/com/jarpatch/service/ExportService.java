@@ -68,16 +68,34 @@ public class ExportService {
      * @throws IOException 打包失败时抛出
      */
     public OperationResult export(ProjectRecord project, String outputPath) throws IOException {
-        TaskRecord task = taskService.create(project.getId(), TASK_TYPE_EXPORT, "开始导出修改后的包");
+        return export(project, outputPath, null);
+    }
+
+    /**
+     * 导出修改后的 Jar 或 War。
+     * <p>
+     * 前端先创建任务并连接 WebSocket 后，把 taskId 传入这里；导出仍然在本机同步执行，
+     * 但进度日志和取消状态会实时反馈给前端。
+     * </p>
+     *
+     * @param project    项目记录
+     * @param outputPath 用户指定输出路径，可为空
+     * @param taskId     预创建任务 ID，可为空
+     * @return 导出结果
+     * @throws IOException 打包失败时抛出
+     */
+    public OperationResult export(ProjectRecord project, String outputPath, String taskId) throws IOException {
+        TaskRecord task = taskService.prepare(taskId, project.getId(), TASK_TYPE_EXPORT, "开始导出修改后的包");
         try {
             List<String> changedFiles = fileChangeRepository.findPaths(project.getId());
             Path outputFile = resolveOutputPath(project, outputPath);
 
             taskService.running(task, 30, "准备导出文件: " + outputFile);
+            taskService.ensureNotCancelled(task.getId());
             boolean springBootLayout = "SPRING_BOOT_JAR".equals(project.getPackageType());
 
             taskService.running(task, 70, "重新打包 extracted 目录");
-            archiveService.zipDirectory(workspaceService.extractedDir(project), outputFile, springBootLayout);
+            archiveService.zipDirectory(workspaceService.extractedDir(project), outputFile, springBootLayout, () -> taskService.isCancelled(task.getId()));
 
             exportRecordRepository.insert(project.getId(), outputFile.toString(), clockService.now());
             OperationResult result = new OperationResult();
@@ -87,6 +105,12 @@ public class ExportService {
             result.setMessage("导出完成");
             taskService.success(task, "导出完成，结果已写入: " + outputFile);
             return result;
+        } catch (IllegalStateException e) {
+            if (JarPatchConstants.MESSAGE_TASK_CANCELLED.equals(e.getMessage())) {
+                throw e;
+            }
+            taskService.failed(task, "导出失败: " + e.getMessage());
+            throw e;
         } catch (RuntimeException | IOException e) {
             taskService.failed(task, "导出失败: " + e.getMessage());
             throw e;

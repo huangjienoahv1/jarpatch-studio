@@ -1,4 +1,5 @@
 const API_BASE = 'http://127.0.0.1:18765';
+const WS_BASE = API_BASE.replace(/^http/, 'ws');
 const TOAST_AUTO_CLOSE_MS = 3200;
 const NOTICE_TYPE_SUCCESS = 'success';
 const NOTICE_TYPE_ERROR = 'error';
@@ -11,6 +12,8 @@ const MESSAGE_IMPORTING = '正在导入文件';
 const MESSAGE_IMPORT_SUCCESS = '导入完成';
 const MESSAGE_IMPORT_FAILED = '导入失败';
 const MESSAGE_FILE_OPEN_FAILED = '打开文件失败';
+const MESSAGE_FILE_BINARY_READONLY = '二进制文件只支持查看，不支持编辑';
+const MESSAGE_FILE_SIGNATURE_READONLY = '签名文件只支持查看，不支持编辑';
 const MESSAGE_SEARCH_KEYWORD_EMPTY = '请输入搜索关键词';
 const MESSAGE_SEARCH_SUCCESS = '搜索完成';
 const MESSAGE_SEARCH_FAILED = '搜索失败';
@@ -39,6 +42,33 @@ const MESSAGE_ANALYSIS_NOT_RUN = '未分析';
 const MESSAGE_ANALYSIS_NO_RISK = '无风险';
 const MESSAGE_ANALYSIS_RISK_COUNT_SUFFIX = '项风险';
 const MESSAGE_FILE_TREE_LOADING = '正在加载文件树';
+const MESSAGE_TASK_IDLE = '未启动任务';
+const MESSAGE_TASK_IDLE_DETAIL = '先创建任务再连接实时日志';
+const MESSAGE_TASK_CONNECTING = '正在连接任务日志';
+const MESSAGE_TASK_CONNECTED = '任务日志已连接';
+const MESSAGE_TASK_CANCELING = '正在取消任务';
+const MESSAGE_TASK_CANCELED = '任务已取消';
+const MESSAGE_TASK_COMPLETED = '任务已完成';
+const MESSAGE_TASK_FAILED = '任务已失败';
+const MESSAGE_TASK_CANCEL_FAILED = '取消任务失败';
+const MESSAGE_TASK_START_FAILED = '任务启动失败';
+const MESSAGE_TASK_LOG_UNAVAILABLE = '任务日志连接失败';
+const MESSAGE_TASK_LABEL_IMPORT = '导入';
+const MESSAGE_TASK_LABEL_ANALYZE = '分析';
+const MESSAGE_TASK_LABEL_COMPILE = '编译';
+const MESSAGE_TASK_LABEL_EXPORT = '导出';
+const TASK_TYPE_IMPORT = 'IMPORT';
+const TASK_TYPE_ANALYZE = 'ANALYZE';
+const TASK_TYPE_COMPILE = 'COMPILE';
+const TASK_TYPE_EXPORT = 'EXPORT';
+const MESSAGE_TASK_CANCEL_BUTTON = '取消任务';
+const MESSAGE_TASK_PANEL_LABEL = '任务状态';
+const MESSAGE_TASK_PANEL_READY = '等待开始';
+const MESSAGE_TASK_PANEL_RUNNING = '执行中';
+const MESSAGE_TASK_PANEL_DONE = '执行完成';
+const MESSAGE_TASK_PANEL_FAILED = '执行失败';
+const MESSAGE_TASK_PANEL_CANCELED = '已取消';
+const MESSAGE_TASK_PROGRESS_PATTERN = /^\[(\d+)%\]\s*(.*)$/;
 const BUTTON_TEXT_ANALYZE = '分析';
 const BUTTON_TEXT_COMPILE = '编译';
 const BUTTON_TEXT_EXPORT = '导出';
@@ -78,6 +108,12 @@ const LOG_TIME_FORMAT_OPTIONS = {
 const MESSAGE_DECOMPILE_SELECTED_SUFFIX = '个 Jar 将被反编译';
 const MESSAGE_DECOMPILE_NO_CANDIDATE = '未发现可选择的嵌套 Jar，将只反编译主 classes';
 const MESSAGE_POM_MODULE_EMPTY = 'pom.xml 未声明 modules，已按包名前缀给出推荐项';
+const TASK_LABEL_MAP = {
+  IMPORT: MESSAGE_TASK_LABEL_IMPORT,
+  ANALYZE: MESSAGE_TASK_LABEL_ANALYZE,
+  COMPILE: MESSAGE_TASK_LABEL_COMPILE,
+  EXPORT: MESSAGE_TASK_LABEL_EXPORT
+};
 
 const state = {
   currentProject: null,
@@ -86,6 +122,10 @@ const state = {
   analysisReport: null,
   currentInspection: null,
   currentTree: null,
+  currentTask: null,
+  currentTaskSocket: null,
+  currentTaskAbortController: null,
+  currentTaskCancelRequested: false,
   treePanelWidth: TREE_PANEL_DEFAULT_WIDTH,
   expandedPaths: new Set(['', 'sources', 'extracted'])
 };
@@ -98,6 +138,9 @@ const elements = {
   analyzeBtn: document.getElementById('analyzeBtn'),
   compileBtn: document.getElementById('compileBtn'),
   exportBtn: document.getElementById('exportBtn'),
+  taskStatusText: document.getElementById('taskStatusText'),
+  taskStatusDetail: document.getElementById('taskStatusDetail'),
+  cancelTaskBtn: document.getElementById('cancelTaskBtn'),
   contentGrid: document.getElementById('contentGrid'),
   treeResizeHandle: document.getElementById('treeResizeHandle'),
   fileTree: document.getElementById('fileTree'),
@@ -139,6 +182,245 @@ async function api(path, options = {}) {
     throw new Error(body.message || '操作失败');
   }
   return body.data;
+}
+
+/**
+ * 获取任务展示名称。
+ *
+ * @param taskType 任务类型码
+ * @return 中文任务名称
+ */
+function getTaskLabel(taskType) {
+  return TASK_LABEL_MAP[taskType] || taskType || MESSAGE_TASK_PANEL_LABEL;
+}
+
+/**
+ * 判断是否为任务取消类错误。
+ *
+ * @param error 异常对象
+ * @return 是取消错误时返回 true
+ */
+function isTaskCanceledError(error) {
+  return Boolean(error) && (error.name === 'AbortError' || error.message === MESSAGE_TASK_CANCELED);
+}
+
+/**
+ * 解析任务日志中的进度信息。
+ *
+ * @param message 任务日志文本
+ * @return 进度和正文
+ */
+function parseTaskProgress(message) {
+  const match = MESSAGE_TASK_PROGRESS_PATTERN.exec(message);
+  if (!match) {
+    return { progress: null, detail: message };
+  }
+  return {
+    progress: Number.parseInt(match[1], NUMBER_PARSE_RADIX),
+    detail: match[2] || message
+  };
+}
+
+/**
+ * 更新任务状态栏。
+ *
+ * @param title  标题文案
+ * @param detail 详情文案
+ * @param active 是否处于执行中
+ */
+function updateTaskPanel(title, detail, active) {
+  elements.taskStatusText.textContent = title;
+  elements.taskStatusDetail.textContent = detail;
+  elements.cancelTaskBtn.disabled = !active || state.currentTaskCancelRequested;
+}
+
+/**
+ * 恢复工作台可操作状态。
+ */
+function restoreWorkspaceControls() {
+  elements.openArchiveBtn.disabled = false;
+  elements.projectList.style.pointerEvents = '';
+  elements.fileTree.style.pointerEvents = '';
+  elements.searchResults.style.pointerEvents = '';
+  elements.analysisToggleBtn.disabled = false;
+  elements.analysisCloseBtn.disabled = false;
+  elements.searchInput.disabled = !state.currentProject;
+  elements.searchBtn.disabled = !state.currentProject;
+  elements.saveBtn.disabled = !state.currentProject || !state.currentFilePath;
+  elements.editor.disabled = !state.currentProject || !state.currentFilePath;
+  elements.analyzeBtn.disabled = !state.currentProject;
+  elements.compileBtn.disabled = !state.currentProject;
+  elements.exportBtn.disabled = !state.currentProject;
+  elements.compileBtn.classList.remove('busy');
+  elements.exportBtn.classList.remove('busy');
+  elements.compileBtn.textContent = BUTTON_TEXT_COMPILE;
+  elements.exportBtn.textContent = BUTTON_TEXT_EXPORT;
+  elements.analyzeBtn.textContent = BUTTON_TEXT_ANALYZE;
+  elements.cancelTaskBtn.disabled = true;
+}
+
+/**
+ * 锁定工作台控件，避免任务执行期间并发修改。
+ */
+function lockWorkspaceControls() {
+  elements.openArchiveBtn.disabled = true;
+  elements.projectList.style.pointerEvents = 'none';
+  elements.fileTree.style.pointerEvents = 'none';
+  elements.searchResults.style.pointerEvents = 'none';
+  elements.analysisToggleBtn.disabled = true;
+  elements.analysisCloseBtn.disabled = true;
+  elements.searchInput.disabled = true;
+  elements.searchBtn.disabled = true;
+  elements.saveBtn.disabled = true;
+  elements.editor.disabled = true;
+  elements.analyzeBtn.disabled = true;
+  elements.compileBtn.disabled = true;
+  elements.exportBtn.disabled = true;
+}
+
+/**
+ * 关闭当前任务 WebSocket。
+ */
+function closeTaskSocket() {
+  if (state.currentTaskSocket) {
+    state.currentTaskSocket.onopen = null;
+    state.currentTaskSocket.onmessage = null;
+    state.currentTaskSocket.onerror = null;
+    state.currentTaskSocket.onclose = null;
+    state.currentTaskSocket.close();
+    state.currentTaskSocket = null;
+  }
+}
+
+/**
+ * 打开当前任务的实时日志 WebSocket。
+ *
+ * @param taskId 任务 ID
+ * @return 连接完成后的 Promise
+ */
+function openTaskSocket(taskId) {
+  closeTaskSocket();
+  const socket = new WebSocket(`${WS_BASE}/ws/tasks/${taskId}`);
+  state.currentTaskSocket = socket;
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (value) => {
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    };
+    const taskLabel = state.currentTask ? getTaskLabel(state.currentTask.taskType) : MESSAGE_TASK_PANEL_LABEL;
+    socket.onopen = () => {
+      updateTaskPanel(`${taskLabel} · 0%`, MESSAGE_TASK_CONNECTED, true);
+      settle(socket);
+    };
+    socket.onmessage = (event) => {
+      const message = String(event.data || '');
+      appendLog(message);
+      const parsed = parseTaskProgress(message);
+      if (parsed.progress == null) {
+        elements.taskStatusDetail.textContent = parsed.detail;
+        return;
+      }
+      elements.taskStatusText.textContent = `${taskLabel} · ${parsed.progress}%`;
+      elements.taskStatusDetail.textContent = parsed.detail;
+    };
+    socket.onerror = () => {
+      appendLog(MESSAGE_TASK_LOG_UNAVAILABLE);
+      settle(null);
+    };
+    socket.onclose = () => settle(null);
+    setTimeout(() => settle(null), 1500);
+  });
+}
+
+/**
+ * 开始一条可实时追踪的任务会话。
+ *
+ * @param task 任务记录
+ */
+function beginTaskSession(task) {
+  state.currentTask = task;
+  state.currentTaskAbortController = new AbortController();
+  state.currentTaskCancelRequested = false;
+  lockWorkspaceControls();
+  updateTaskPanel(`${getTaskLabel(task.taskType)} · 0%`, task.message || MESSAGE_TASK_PANEL_READY, true);
+}
+
+/**
+ * 结束当前任务会话。
+ *
+ * @param task    任务记录
+ * @param status  最终状态文案
+ * @param detail  最终详情文案
+ */
+function endTaskSession(task, status, detail) {
+  const label = getTaskLabel(task.taskType);
+  updateTaskPanel(`${label} · ${status}`, detail, false);
+  closeTaskSocket();
+  state.currentTaskAbortController = null;
+  state.currentTaskCancelRequested = false;
+  state.currentTask = null;
+  restoreWorkspaceControls();
+}
+
+/**
+ * 创建任务、连接实时日志并执行后续请求。
+ *
+ * @param taskType     任务类型
+ * @param projectId    项目 ID，可为空
+ * @param message      初始消息
+ * @param requestRunner 具体业务请求
+ * @return 业务请求结果
+ */
+async function executeTaskOperation(taskType, projectId, message, requestRunner) {
+  const task = await api('/api/tasks', {
+    method: 'POST',
+    body: JSON.stringify({
+      taskType,
+      projectId,
+      message
+    })
+  });
+  beginTaskSession(task);
+  await openTaskSocket(task.id);
+  try {
+    const result = await requestRunner(task, state.currentTaskAbortController.signal);
+    endTaskSession(task, MESSAGE_TASK_PANEL_DONE, result && result.message ? result.message : MESSAGE_TASK_COMPLETED);
+    return result;
+  } catch (error) {
+    if (isTaskCanceledError(error)) {
+      endTaskSession(task, MESSAGE_TASK_PANEL_CANCELED, MESSAGE_TASK_CANCELED);
+      notify(MESSAGE_TASK_CANCELED, NOTICE_TYPE_INFO);
+      return null;
+    }
+    endTaskSession(task, MESSAGE_TASK_PANEL_FAILED, error.message || MESSAGE_TASK_FAILED);
+    throw error;
+  }
+}
+
+/**
+ * 取消当前执行中的任务。
+ */
+async function cancelCurrentTask() {
+  if (!state.currentTask) {
+    return;
+  }
+  const task = state.currentTask;
+  state.currentTaskCancelRequested = true;
+  updateTaskPanel(`${getTaskLabel(task.taskType)} · ${MESSAGE_TASK_PANEL_CANCELED}`, MESSAGE_TASK_CANCELING, true);
+  elements.cancelTaskBtn.disabled = true;
+  if (state.currentTaskAbortController) {
+    state.currentTaskAbortController.abort();
+  }
+  try {
+    await api(`/api/tasks/${task.id}/cancel`, { method: 'POST' });
+  } catch (error) {
+    state.currentTaskCancelRequested = false;
+    updateTaskPanel(`${getTaskLabel(task.taskType)} · ${MESSAGE_TASK_PANEL_RUNNING}`, `${MESSAGE_TASK_CANCEL_FAILED}：${error.message}`, true);
+    notify(`${MESSAGE_TASK_CANCEL_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
 }
 
 async function loadProjects() {
@@ -185,7 +467,8 @@ async function selectProject(project) {
   state.currentTree = null;
   elements.currentProjectName.textContent = project.name;
   elements.currentProjectMeta.textContent = `${project.packageType} · ${project.workspacePath}`;
-  restoreProjectActionButtons();
+  restoreWorkspaceControls();
+  elements.searchInput.disabled = false;
   elements.searchBtn.disabled = false;
   elements.saveBtn.disabled = true;
   elements.editor.value = '';
@@ -220,7 +503,7 @@ function resetCurrentProject() {
   state.currentTree = null;
   elements.currentProjectName.textContent = MESSAGE_PROJECT_NOT_OPENED;
   elements.currentProjectMeta.textContent = MESSAGE_PROJECT_OPEN_TIP;
-  restoreProjectActionButtons();
+  restoreWorkspaceControls();
   elements.searchBtn.disabled = true;
   elements.saveBtn.disabled = true;
   elements.searchInput.value = '';
@@ -295,7 +578,17 @@ function handleTreeClick(node) {
   }
   if (node.editable) {
     openFile(node);
+    return;
   }
+  if (node.kind === 'SIGNATURE') {
+    notify(MESSAGE_FILE_SIGNATURE_READONLY, NOTICE_TYPE_INFO);
+    return;
+  }
+  if (node.kind === 'BINARY') {
+    notify(MESSAGE_FILE_BINARY_READONLY, NOTICE_TYPE_INFO);
+    return;
+  }
+  notify(MESSAGE_FILE_OPEN_FAILED, NOTICE_TYPE_INFO);
 }
 
 async function openFile(node) {
@@ -418,13 +711,15 @@ async function importArchive() {
       notify(MESSAGE_IMPORT_SELECTION_CANCELED, NOTICE_TYPE_INFO);
       return;
     }
-    notify(`${MESSAGE_IMPORTING}：${filePath}`, NOTICE_TYPE_INFO);
-    const project = await api('/api/projects/import', {
+    const project = await executeTaskOperation(TASK_TYPE_IMPORT, null, `${MESSAGE_IMPORTING}：${filePath}`, async (task, signal) => api('/api/projects/import', {
       method: 'POST',
-      body: JSON.stringify({ filePath, selectedNestedJars })
-    });
-    notify(`${MESSAGE_IMPORT_SUCCESS}：${project.name}`, NOTICE_TYPE_SUCCESS);
-    await selectProject(project);
+      signal,
+      body: JSON.stringify({ filePath, selectedNestedJars, taskId: task.id })
+    }));
+    if (project) {
+      notify(`${MESSAGE_IMPORT_SUCCESS}：${project.name}`, NOTICE_TYPE_SUCCESS);
+      await selectProject(project);
+    }
   } catch (error) {
     notify(`${MESSAGE_IMPORT_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
   }
@@ -535,10 +830,18 @@ async function analyzeProject() {
     return;
   }
   try {
-    const report = await api(`/api/projects/${state.currentProject.id}/analyze`, { method: 'POST' });
-    renderAnalysis(report);
-    setAnalysisPanelOpen(true);
-    notify(MESSAGE_ANALYZE_SUCCESS, NOTICE_TYPE_SUCCESS);
+    const report = await executeTaskOperation(TASK_TYPE_ANALYZE, state.currentProject.id, '开始分析包结构', (task, signal) => api(`/api/projects/${state.currentProject.id}/analyze`, {
+      method: 'POST',
+      signal,
+      headers: {
+        'X-Task-Id': task.id
+      }
+    }));
+    if (report) {
+      renderAnalysis(report);
+      setAnalysisPanelOpen(true);
+      notify(MESSAGE_ANALYZE_SUCCESS, NOTICE_TYPE_SUCCESS);
+    }
   } catch (error) {
     notify(`${MESSAGE_ANALYZE_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
   }
@@ -589,12 +892,18 @@ async function compileProject() {
   }
   setActionButtonRunning(elements.compileBtn, BUTTON_TEXT_COMPILE_RUNNING);
   try {
-    const result = await api(`/api/projects/${state.currentProject.id}/compile`, { method: 'POST' });
-    notify(`${MESSAGE_COMPILE_SUCCESS}：${result.changedFiles.length} 个文件`, NOTICE_TYPE_SUCCESS);
+    const result = await executeTaskOperation(TASK_TYPE_COMPILE, state.currentProject.id, '开始编译修改过的 Java 文件', (task, signal) => api(`/api/projects/${state.currentProject.id}/compile`, {
+      method: 'POST',
+      signal,
+      headers: {
+        'X-Task-Id': task.id
+      }
+    }));
+    if (result) {
+      notify(`${MESSAGE_COMPILE_SUCCESS}：${result.changedFiles.length} 个文件`, NOTICE_TYPE_SUCCESS);
+    }
   } catch (error) {
     notify(`${MESSAGE_COMPILE_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
-  } finally {
-    restoreProjectActionButtons();
   }
 }
 
@@ -609,15 +918,16 @@ async function exportProject() {
   }
   setActionButtonRunning(elements.exportBtn, BUTTON_TEXT_EXPORT_RUNNING);
   try {
-    const result = await api(`/api/projects/${state.currentProject.id}/export`, {
+    const result = await executeTaskOperation(TASK_TYPE_EXPORT, state.currentProject.id, `开始导出修改后的包: ${outputPath}`, (task, signal) => api(`/api/projects/${state.currentProject.id}/export`, {
       method: 'POST',
-      body: JSON.stringify({ outputPath })
-    });
-    notify(`${MESSAGE_EXPORT_SUCCESS}：${result.outputPath}`, NOTICE_TYPE_SUCCESS);
+      signal,
+      body: JSON.stringify({ outputPath, taskId: task.id })
+    }));
+    if (result) {
+      notify(`${MESSAGE_EXPORT_SUCCESS}：${result.outputPath}`, NOTICE_TYPE_SUCCESS);
+    }
   } catch (error) {
     notify(`${MESSAGE_EXPORT_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
-  } finally {
-    restoreProjectActionButtons();
   }
 }
 
@@ -630,15 +940,7 @@ function setActionButtonRunning(button, runningText) {
 }
 
 function restoreProjectActionButtons() {
-  const projectOpened = Boolean(state.currentProject);
-  elements.analyzeBtn.textContent = BUTTON_TEXT_ANALYZE;
-  elements.compileBtn.textContent = BUTTON_TEXT_COMPILE;
-  elements.exportBtn.textContent = BUTTON_TEXT_EXPORT;
-  elements.analyzeBtn.disabled = !projectOpened;
-  elements.compileBtn.disabled = !projectOpened;
-  elements.exportBtn.disabled = !projectOpened;
-  elements.compileBtn.classList.remove('busy');
-  elements.exportBtn.classList.remove('busy');
+  restoreWorkspaceControls();
 }
 
 function initializeTreePanelWidth() {
@@ -732,6 +1034,7 @@ elements.analyzeBtn.addEventListener('click', analyzeProject);
 elements.compileBtn.addEventListener('click', compileProject);
 elements.exportBtn.addEventListener('click', exportProject);
 elements.searchBtn.addEventListener('click', searchProject);
+elements.cancelTaskBtn.addEventListener('click', cancelCurrentTask);
 elements.treeResizeHandle.addEventListener('pointerdown', beginTreeResize);
 elements.analysisToggleBtn.addEventListener('click', () => setAnalysisPanelOpen(!state.analysisOpen));
 elements.analysisCloseBtn.addEventListener('click', () => setAnalysisPanelOpen(false));
@@ -745,4 +1048,5 @@ elements.searchInput.addEventListener('keydown', (event) => {
 });
 
 initializeTreePanelWidth();
+restoreWorkspaceControls();
 loadProjects();

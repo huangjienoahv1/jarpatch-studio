@@ -47,7 +47,12 @@ public final class JarPatchConstants {
     public static final String MESSAGE_SUCCESS = "操作成功";
     public static final String MESSAGE_FAILED = "操作失败";
     public static final String MESSAGE_PROJECT_NOT_FOUND = "项目不存在";
+    public static final String MESSAGE_TASK_NOT_FOUND = "任务不存在";
+    public static final String MESSAGE_TASK_CANCELLED = "任务已取消";
+    public static final String MESSAGE_TASK_TYPE_EMPTY = "任务类型不能为空";
     public static final String MESSAGE_FILE_NOT_EDITABLE = "该文件不允许编辑";
+    public static final String MESSAGE_FILE_BINARY_READONLY = "二进制文件只支持查看，不支持编辑";
+    public static final String MESSAGE_FILE_SIGNATURE_READONLY = "签名文件只支持查看，不支持编辑";
     public static final String MESSAGE_FILE_OUT_OF_WORKSPACE = "文件路径不在项目工作区内";
     public static final String MESSAGE_UNSUPPORTED_PACKAGE = "仅支持 jar 和 war 文件";
     public static final String MESSAGE_JDK_NOT_FOUND = "未检测到可用 JDK，请在系统环境变量配置 JAVA_HOME";

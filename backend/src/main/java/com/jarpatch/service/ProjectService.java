@@ -80,10 +80,27 @@ public class ProjectService {
      * @throws IOException 导入失败时抛出
      */
     public ProjectRecord importProject(String filePath, List<String> selectedNestedJars) throws IOException {
+        return importProject(filePath, selectedNestedJars, null);
+    }
+
+    /**
+     * 导入 Jar 或 War 项目。
+     * <p>
+     * 当前版本支持前端先创建任务再传入 taskId，这样导入阶段、反编译阶段和后续取消
+     * 操作都能围绕同一条任务记录和 WebSocket 连接执行。
+     * </p>
+     *
+     * @param filePath           原始包路径
+     * @param selectedNestedJars 用户选择需要反编译的嵌套 Jar 相对路径
+     * @param taskId             预创建任务 ID，可为空
+     * @return 项目记录
+     * @throws IOException 导入失败时抛出
+     */
+    public ProjectRecord importProject(String filePath, List<String> selectedNestedJars, String taskId) throws IOException {
         Path archiveFile = Paths.get(filePath).toAbsolutePath().normalize();
         validateArchive(archiveFile);
 
-        TaskRecord task = taskService.create(null, TASK_TYPE_IMPORT, "开始导入包: " + archiveFile.getFileName());
+        TaskRecord task = taskService.prepare(taskId, null, TASK_TYPE_IMPORT, "开始导入包: " + archiveFile.getFileName());
         String projectId = UUID.randomUUID().toString();
         try {
             taskService.running(task, 10, "创建项目工作区");
@@ -96,7 +113,7 @@ public class ProjectService {
 
             taskService.running(task, 40, "解压 Jar/War 到工作区");
             Path extractedDir = projectRoot.resolve(JarPatchConstants.WORKSPACE_EXTRACTED_DIR);
-            archiveService.unzip(originalFile, extractedDir);
+            archiveService.unzip(originalFile, extractedDir, () -> taskService.isCancelled(task.getId()));
 
             taskService.running(task, 60, "识别包结构");
             PackageType packageType = packageDetectService.detect(originalFile, extractedDir);
@@ -106,10 +123,16 @@ public class ProjectService {
 
             taskService.running(task, 75, "执行 CFR 反编译");
             decompilerService.decompile(extractedDir, projectRoot.resolve(JarPatchConstants.WORKSPACE_SOURCE_DIR),
-                    packageType.getCode(), normalizeSelectedNestedJars(selectedNestedJars));
+                    packageType.getCode(), normalizeSelectedNestedJars(selectedNestedJars), () -> taskService.isCancelled(task.getId()));
 
             taskService.success(task, "导入完成，项目记录已写入 SQLite");
             return record;
+        } catch (IllegalStateException e) {
+            if (JarPatchConstants.MESSAGE_TASK_CANCELLED.equals(e.getMessage())) {
+                throw e;
+            }
+            taskService.failed(task, "导入失败: " + e.getMessage());
+            throw e;
         } catch (RuntimeException | IOException e) {
             taskService.failed(task, "导入失败: " + e.getMessage());
             throw e;

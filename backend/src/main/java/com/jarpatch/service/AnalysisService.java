@@ -63,7 +63,23 @@ public class AnalysisService {
      * @throws IOException 读取工作区失败时抛出
      */
     public AnalysisReport analyze(ProjectRecord project) throws IOException {
-        TaskRecord task = taskService.create(project.getId(), TASK_TYPE_ANALYZE, "开始分析包结构");
+        return analyze(project, null);
+    }
+
+    /**
+     * 执行项目结构分析。
+     * <p>
+     * 前端先创建任务并通过 taskId 连接 WebSocket 后，把 taskId 传入这里；分析过程仍在
+     * 当前请求内同步执行，但日志会实时广播到前端任务面板。
+     * </p>
+     *
+     * @param project 项目记录
+     * @param taskId  预创建任务 ID，可为空
+     * @return 分析报告
+     * @throws IOException 读取工作区失败时抛出
+     */
+    public AnalysisReport analyze(ProjectRecord project, String taskId) throws IOException {
+        TaskRecord task = taskService.prepare(taskId, project.getId(), TASK_TYPE_ANALYZE, "开始分析包结构");
         try {
             Path extractedDir = workspaceService.extractedDir(project);
             AnalysisReport report = new AnalysisReport();
@@ -71,9 +87,11 @@ public class AnalysisService {
             report.setPackageType(project.getPackageType());
 
             taskService.running(task, 20, "读取 Manifest 和入口类");
+            taskService.ensureNotCancelled(task.getId());
             readManifest(extractedDir, report);
 
             taskService.running(task, 40, "统计 class 和依赖");
+            taskService.ensureNotCancelled(task.getId());
             report.setSpringBootLayout(Files.exists(extractedDir.resolve(JarPatchConstants.SPRING_BOOT_CLASSES_DIR)));
             report.setWarLayout(Files.exists(extractedDir.resolve(JarPatchConstants.WAR_CLASSES_DIR)));
             report.setClassCount(countByExtension(extractedDir, JarPatchConstants.CLASS_EXTENSION));
@@ -82,10 +100,17 @@ public class AnalysisService {
             report.setModifiedFiles(fileChangeRepository.findPaths(project.getId()));
 
             taskService.running(task, 70, "识别导出风险");
+            taskService.ensureNotCancelled(task.getId());
             addRisks(extractedDir, report);
 
             taskService.success(task, "分析完成，报告已返回前端");
             return report;
+        } catch (IllegalStateException e) {
+            if (JarPatchConstants.MESSAGE_TASK_CANCELLED.equals(e.getMessage())) {
+                throw e;
+            }
+            taskService.failed(task, "分析失败: " + e.getMessage());
+            throw e;
         } catch (RuntimeException | IOException e) {
             taskService.failed(task, "分析失败: " + e.getMessage());
             throw e;
