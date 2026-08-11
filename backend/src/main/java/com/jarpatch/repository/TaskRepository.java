@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Optional;
+import java.util.List;
 
 /**
  * 任务记录仓储。
@@ -51,9 +52,34 @@ public class TaskRepository {
      *
      * @param record 任务记录
      */
-    public void update(TaskRecord record) {
-        jdbcTemplate.update("UPDATE tasks SET status = ?, progress = ?, message = ?, updated_at = ? WHERE id = ?",
-                record.getStatus(), record.getProgress(), record.getMessage(), record.getUpdatedAt(), record.getId());
+    public int updateIfRunning(TaskRecord record) {
+        return jdbcTemplate.update("UPDATE tasks SET status = ?, progress = ?, message = ?, updated_at = ? " +
+                        "WHERE id = ? AND status = ?",
+                record.getStatus(), record.getProgress(), record.getMessage(), record.getUpdatedAt(), record.getId(),
+                com.jarpatch.common.TaskStatus.RUNNING.getCode());
+    }
+
+    /**
+     * 查询指定状态的全部任务，用于启动时恢复中断任务。
+     *
+     * @param status 任务状态
+     * @return 匹配的任务记录
+     */
+    public List<TaskRecord> findByStatus(String status) {
+        return jdbcTemplate.query("SELECT * FROM tasks WHERE status = ? ORDER BY created_at", rowMapper, status);
+    }
+
+    /**
+     * 统计项目仍在运行的任务数。
+     *
+     * @param projectId 项目 ID
+     * @return 运行中任务数
+     */
+    public int countRunningByProject(String projectId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tasks WHERE project_id = ? AND status = ?", Integer.class,
+                projectId, com.jarpatch.common.TaskStatus.RUNNING.getCode());
+        return count == null ? 0 : count;
     }
 
     /**

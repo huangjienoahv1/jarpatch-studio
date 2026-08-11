@@ -3,9 +3,13 @@ package com.jarpatch.service;
 import com.jarpatch.common.JarPatchConstants;
 import com.jarpatch.common.TaskStatus;
 import com.jarpatch.model.TaskRecord;
+import com.jarpatch.model.TaskLogRecord;
+import com.jarpatch.repository.TaskLogRepository;
 import com.jarpatch.repository.TaskRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,9 +23,11 @@ import java.util.UUID;
  * @author 黄杰
  */
 @Service
+@Transactional
 public class TaskService {
 
     private final TaskRepository taskRepository;
+    private final TaskLogRepository taskLogRepository;
     private final ClockService clockService;
     private final TaskLogBroadcaster broadcaster;
 
@@ -29,11 +35,16 @@ public class TaskService {
      * 创建任务服务。
      *
      * @param taskRepository 任务仓储
-     * @param clockService   时间服务
-     * @param broadcaster    WebSocket 日志广播服务
+     * @param taskLogRepository 任务日志仓储
+     * @param clockService      时间服务
+     * @param broadcaster       WebSocket 日志广播服务
      */
-    public TaskService(TaskRepository taskRepository, ClockService clockService, TaskLogBroadcaster broadcaster) {
+    public TaskService(TaskRepository taskRepository,
+                       TaskLogRepository taskLogRepository,
+                       ClockService clockService,
+                       TaskLogBroadcaster broadcaster) {
         this.taskRepository = taskRepository;
+        this.taskLogRepository = taskLogRepository;
         this.clockService = clockService;
         this.broadcaster = broadcaster;
     }
@@ -53,11 +64,12 @@ public class TaskService {
         record.setProjectId(projectId);
         record.setTaskType(taskType);
         record.setStatus(TaskStatus.RUNNING.getCode());
-        record.setProgress(0);
+        record.setProgress(JarPatchConstants.EMPTY_SIZE);
         record.setMessage(message);
         record.setCreatedAt(now);
         record.setUpdatedAt(now);
         taskRepository.insert(record);
+        appendLog(record, message);
         broadcaster.broadcast(record.getId(), message);
         return record;
     }
@@ -101,7 +113,7 @@ public class TaskService {
      * @param message 成功消息
      */
     public void success(TaskRecord record, String message) {
-        update(record, TaskStatus.SUCCESS, 100, message);
+        update(record, TaskStatus.SUCCESS, JarPatchConstants.ONE_HUNDRED_PERCENT, message);
     }
 
     /**
@@ -147,6 +159,39 @@ public class TaskService {
     }
 
     /**
+     * 查询任务的持久化日志。
+     *
+     * @param taskId 任务 ID
+     * @return 按产生顺序排列的日志
+     */
+    public List<TaskLogRecord> findLogs(String taskId) {
+        require(taskId);
+        return taskLogRepository.findByTaskId(taskId);
+    }
+
+    /**
+     * 后端启动时把上次进程遗留的运行中任务原子更新为失败，并补写持久化日志。
+     * <p>
+     * 入口在应用就绪事件，实际状态更新发生在带 RUNNING 条件的 SQL，结果写入 tasks 和 task_logs。
+     * </p>
+     *
+     * @return 实际恢复的任务数量
+     */
+    public int recoverInterruptedTasks() {
+        int recoveredCount = 0;
+        for (TaskRecord record : taskRepository.findByStatus(TaskStatus.RUNNING.getCode())) {
+            record.setStatus(TaskStatus.FAILED.getCode());
+            record.setMessage(JarPatchConstants.MESSAGE_TASK_INTERRUPTED);
+            record.setUpdatedAt(clockService.now());
+            if (taskRepository.updateIfRunning(record) > 0) {
+                appendLog(record, record.getMessage());
+                recoveredCount++;
+            }
+        }
+        return recoveredCount;
+    }
+
+    /**
      * 判断任务是否已取消。
      *
      * @param taskId 任务 ID
@@ -189,21 +234,50 @@ public class TaskService {
      * @param message  当前消息
      */
     private void update(TaskRecord record, TaskStatus status, int progress, String message) {
-        TaskRecord latest = require(record.getId());
-        if (!TaskStatus.RUNNING.getCode().equals(latest.getStatus())) {
+        record.setStatus(status.getCode());
+        record.setProgress(progress);
+        record.setMessage(message);
+        record.setUpdatedAt(clockService.now());
+        if (taskRepository.updateIfRunning(record) == 0) {
+            TaskRecord latest = require(record.getId());
+            copyState(record, latest);
             if (TaskStatus.CANCELED.getCode().equals(latest.getStatus()) && status != TaskStatus.CANCELED) {
                 throw new IllegalStateException(JarPatchConstants.MESSAGE_TASK_CANCELLED);
             }
             return;
         }
-        if (status != TaskStatus.CANCELED) {
-            ensureNotCancelled(record.getId());
-        }
-        record.setStatus(status.getCode());
-        record.setProgress(progress);
-        record.setMessage(message);
-        record.setUpdatedAt(clockService.now());
-        taskRepository.update(record);
-        broadcaster.broadcast(record.getId(), "[" + progress + "%] " + message);
+        appendLog(record, message);
+        broadcaster.broadcast(record.getId(), String.format(JarPatchConstants.TASK_LOG_PROGRESS_FORMAT,
+                progress, message));
+    }
+
+    /**
+     * 追加与任务状态同事务提交的日志。
+     *
+     * @param record 当前任务状态
+     * @param message 日志消息
+     */
+    private void appendLog(TaskRecord record, String message) {
+        TaskLogRecord log = new TaskLogRecord();
+        log.setId(UUID.randomUUID().toString());
+        log.setTaskId(record.getId());
+        log.setProgress(record.getProgress());
+        log.setStatus(record.getStatus());
+        log.setMessage(message == null ? JarPatchConstants.EMPTY_TEXT : message);
+        log.setCreatedAt(clockService.now());
+        taskLogRepository.insert(log);
+    }
+
+    /**
+     * 当条件更新未命中时，把调用方持有的任务对象同步为数据库最新状态。
+     *
+     * @param target 调用方任务对象
+     * @param source 数据库最新任务对象
+     */
+    private void copyState(TaskRecord target, TaskRecord source) {
+        target.setStatus(source.getStatus());
+        target.setProgress(source.getProgress());
+        target.setMessage(source.getMessage());
+        target.setUpdatedAt(source.getUpdatedAt());
     }
 }

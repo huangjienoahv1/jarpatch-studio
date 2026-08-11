@@ -54,7 +54,19 @@ public class ProjectInspectionService {
     private static final String REASON_POM_MATCH = "pom.xml 模块匹配";
     private static final String REASON_PACKAGE_MATCH = "应用包名前缀匹配";
     private static final String REASON_MANUAL = "等待手动选择";
+    private static final String MESSAGE_POM_PARSE_FAILED = "解析 pom.xml 失败";
     private static final int APPLICATION_PACKAGE_PREFIX_DEPTH = 3;
+
+    private final ArchiveService archiveService;
+
+    /**
+     * 创建导入前包结构预解析服务。
+     *
+     * @param archiveService 共享压缩包安全校验服务
+     */
+    public ProjectInspectionService(ArchiveService archiveService) {
+        this.archiveService = archiveService;
+    }
 
     /**
      * 预解析 Jar 或 War 文件。
@@ -70,6 +82,7 @@ public class ProjectInspectionService {
     public ProjectImportInspection inspect(String filePath) throws IOException {
         Path archiveFile = Paths.get(filePath).toAbsolutePath().normalize();
         validateArchive(archiveFile);
+        archiveService.validateArchive(archiveFile);
         try (ZipFile zipFile = new ZipFile(archiveFile.toFile())) {
             PackageType packageType = detectPackageType(archiveFile, zipFile);
             Set<String> pomModules = readPomModules(zipFile);
@@ -168,7 +181,7 @@ public class ProjectInspectionService {
                 collectDirectModuleValues(modulesNodes.item(modulesIndex), values);
             }
         } catch (Exception e) {
-            throw new IllegalStateException("解析 pom.xml 失败", e);
+            throw new IllegalStateException(MESSAGE_POM_PARSE_FAILED, e);
         }
         return values;
     }
@@ -184,7 +197,8 @@ public class ProjectInspectionService {
         for (int index = 0; index < children.getLength(); index++) {
             Node child = children.item(index);
             if (MODULE_TAG_NAME.equals(child.getNodeName())) {
-                String value = child.getTextContent() == null ? "" : child.getTextContent().trim();
+                String value = child.getTextContent() == null ? JarPatchConstants.EMPTY_TEXT
+                        : child.getTextContent().trim();
                 if (!value.isEmpty()) {
                     values.add(value);
                 }
@@ -227,7 +241,7 @@ public class ProjectInspectionService {
         if (PackageType.WAR == packageType) {
             return WAR_CLASSES_PREFIX;
         }
-        return "";
+        return JarPatchConstants.EMPTY_TEXT;
     }
 
     /**
@@ -249,7 +263,7 @@ public class ProjectInspectionService {
     private String resolvePackagePrefix(String classEntryName) {
         String[] parts = classEntryName.split(JarPatchConstants.ZIP_SEPARATOR);
         if (parts.length <= 1) {
-            return "";
+            return JarPatchConstants.EMPTY_TEXT;
         }
         int depth = Math.min(APPLICATION_PACKAGE_PREFIX_DEPTH, parts.length - 1);
         return String.join(JarPatchConstants.ZIP_SEPARATOR, List.of(parts).subList(0, depth))
@@ -298,7 +312,7 @@ public class ProjectInspectionService {
         if (PackageType.WAR == packageType) {
             return WAR_LIB_PREFIX;
         }
-        return "";
+        return JarPatchConstants.EMPTY_TEXT;
     }
 
     /**

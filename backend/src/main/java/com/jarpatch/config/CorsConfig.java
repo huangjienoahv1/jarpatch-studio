@@ -16,16 +16,30 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class CorsConfig implements WebMvcConfigurer {
 
+    private static final String LOCAL_HTTP_ORIGIN = "http://127.0.0.1:18765";
+
+    private final LocalAccessProperties localAccessProperties;
+
     /**
-     * 开放本地开发和 Electron 页面所需的跨域接口。
+     * 创建仅允许桌面页面来源的跨域配置。
+     *
+     * @param localAccessProperties 本地实例访问配置
+     */
+    public CorsConfig(LocalAccessProperties localAccessProperties) {
+        this.localAccessProperties = localAccessProperties;
+    }
+
+    /**
+     * 仅开放 Electron 本地文件页面和后端自身来源所需的跨域接口。
      *
      * @param registry 跨域配置注册器
      */
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**")
-                .allowedOriginPatterns("*")
+                .allowedOrigins(localAccessProperties.getAllowedOrigin(), LOCAL_HTTP_ORIGIN)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-                .allowedHeaders("*");
+                .allowedHeaders("Content-Type", LocalAccessProperties.TOKEN_HEADER)
+                .maxAge(3600L);
     }
 }

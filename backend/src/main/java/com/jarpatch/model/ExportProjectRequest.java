@@ -12,6 +12,7 @@ public class ExportProjectRequest {
 
     private String outputPath;
     private String taskId;
+    private String signaturePolicy;
 
     public String getOutputPath() {
         return outputPath;
@@ -27,5 +28,23 @@ public class ExportProjectRequest {
 
     public void setTaskId(String taskId) {
         this.taskId = taskId;
+    }
+
+    /**
+     * 获取用户明确选择的签名处理策略。
+     *
+     * @return 签名策略码
+     */
+    public String getSignaturePolicy() {
+        return signaturePolicy;
+    }
+
+    /**
+     * 设置用户明确选择的签名处理策略。
+     *
+     * @param signaturePolicy 签名策略码
+     */
+    public void setSignaturePolicy(String signaturePolicy) {
+        this.signaturePolicy = signaturePolicy;
     }
 }

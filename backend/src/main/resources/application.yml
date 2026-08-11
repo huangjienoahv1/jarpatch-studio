@@ -1,4 +1,5 @@
 server:
+  address: 127.0.0.1
   port: 18765
   servlet:
     encoding:
@@ -12,6 +13,20 @@ spring:
   datasource:
     driver-class-name: org.sqlite.JDBC
     url: jdbc:sqlite:${user.home}/.jarpatch-studio/jarpatch-studio.db
+    hikari:
+      maximum-pool-size: 1
+      connection-init-sql: PRAGMA foreign_keys=ON
 
 jarpatch:
   workspace-root: ${user.home}/.jarpatch-studio/projects
+  local-access:
+    token: ${JARPATCH_AUTH_TOKEN:}
+    instance-id: ${JARPATCH_INSTANCE_ID:}
+    allowed-origin: ${JARPATCH_ALLOWED_ORIGIN:null}
+  archive-limits:
+    max-archive-bytes: 1073741824
+    max-entry-count: 200000
+    max-uncompressed-bytes: 4294967296
+    max-entry-bytes: 536870912
+    max-compression-ratio: 1000
+    max-path-depth: 64

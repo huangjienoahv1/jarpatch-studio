@@ -1,10 +1,14 @@
 package com.jarpatch.service;
 
 import com.jarpatch.common.JarPatchConstants;
+import com.jarpatch.common.PackageType;
+import com.jarpatch.model.JavaVersionInfo;
+import com.jarpatch.model.JdkCompilerInfo;
 import com.jarpatch.model.OperationResult;
 import com.jarpatch.model.ProjectRecord;
 import com.jarpatch.model.TaskRecord;
 import com.jarpatch.repository.FileChangeRepository;
+import com.jarpatch.repository.CompiledArtifactRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -12,24 +16,28 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
-import java.util.stream.Stream;
 
 /**
- * Java 修改文件编译服务。
+ * Java 修改文件严格编译与提交服务。
  * <p>
- * 编译入口来自 /api/projects/{id}/compile，实际执行点是本机 javac，编译结果先写入
- * compiled 目录，再复制到 extracted 的 class 根目录，导出服务随后基于 extracted 打包。
+ * 编译入口来自 /api/projects/{id}/compile。服务先按主 classes 或嵌套 Jar 分组，从每个
+ * 修改源码对应的原始 class 读取目标 Java 版本，再使用已验证 javac 和 --release 把所有
+ * 产物写入本次 staging 目录；全部目标编译成功后才备份并统一写回 extracted，任一失败或
+ * 取消都会恢复本次提交前文件。
  * </p>
  *
  * @author 黄杰
@@ -40,53 +48,77 @@ public class CompileService {
     private static final String TASK_TYPE_COMPILE = "COMPILE";
     private static final String JAVAC_ARGUMENT_FILE_NAME = "javac-arguments.txt";
     private static final String JAVAC_ARGUMENT_FILE_PREFIX = "@";
-    private static final String MAIN_CLASS_COMPILE_TARGET = "main-classes";
-    private static final String NESTED_JAR_SOURCE_PREFIX = JarPatchConstants.SOURCE_NESTED_JAR_DIR + JarPatchConstants.ZIP_SEPARATOR;
-    private static final String NESTED_JAR_SOURCE_MARKER = "." + JarPatchConstants.JAR_EXTENSION + JarPatchConstants.ZIP_SEPARATOR;
-    private static final String COMMON_RESULT_SUCCESS_CALL = "CommonResult.success(";
-    private static final String OBJECT_CAST_TOKEN = "(Object)";
+    private static final String JAVAC_RELEASE_ARGUMENT = "--release";
+    private static final String NESTED_JAR_SOURCE_PREFIX = JarPatchConstants.SOURCE_NESTED_JAR_DIR
+            + JarPatchConstants.ZIP_SEPARATOR;
+    private static final String NESTED_JAR_SOURCE_MARKER = "." + JarPatchConstants.JAR_EXTENSION
+            + JarPatchConstants.ZIP_SEPARATOR;
+    private static final String COMPILE_STAGING_PREFIX = ".staging-";
+    private static final String OUTPUT_DIR = "outputs";
+    private static final String BACKUP_DIR = "backup";
+    private static final String BACKUP_MAIN_DIR = "main";
+    private static final String BACKUP_NESTED_DIR = "nested";
+    private static final int MINIMUM_RELEASE_COMPILER_VERSION = 9;
+    private static final long PROCESS_POLL_INTERVAL_MILLIS = 200L;
     private static final char WINDOWS_PATH_SEPARATOR = '\\';
     private static final char JAVAC_ARGUMENT_PATH_SEPARATOR = '/';
     private static final String JAVAC_ARGUMENT_QUOTE = "\"";
     private static final String JAVAC_ARGUMENT_ESCAPED_QUOTE = "\\\"";
-    private static final char JAVA_ANNOTATION_PREFIX = '@';
-    private static final char JAVA_DOT = '.';
-    private static final char JAVA_OPEN_PARENTHESIS = '(';
-    private static final char JAVA_CLOSE_PARENTHESIS = ')';
-    private static final char JAVA_DOUBLE_QUOTE = '"';
-    private static final char JAVA_SINGLE_QUOTE = '\'';
-    private static final char JAVA_ESCAPE_CHARACTER = '\\';
-    private static final char JAVA_SLASH = '/';
-    private static final char JAVA_ASTERISK = '*';
+    private static final String MESSAGE_COMPILE_START = "开始编译修改过的 Java 文件";
+    private static final String MESSAGE_COMPILE_LOCATE_JAVAC = "定位并执行 javac -version";
+    private static final String MESSAGE_JAVAC_RELEASE_REQUIRED = "当前 javac 不支持 --release，请配置 Java 9 或更高版本的完整 JDK";
+    private static final String MESSAGE_COMPILE_ALL_TARGETS = "按原始 class 版本编译全部目标";
+    private static final String MESSAGE_COMPILE_PREPARE_COMMIT = "全部目标编译成功，准备统一提交";
+    private static final String MESSAGE_COMPILE_COMPLETE = "编译完成";
+    private static final String MESSAGE_COMPILE_SUCCESS = "编译完成，全部 class 已统一写入 extracted";
+    private static final String MESSAGE_COMPILE_FAILED = "编译失败";
+    private static final String MESSAGE_JAVAC_PREFIX = "javac ";
+    private static final String MESSAGE_TARGET_JAVA_PREFIX = "，目标 Java ";
+    private static final int PROGRESS_LOCATE_JAVAC = 15;
+    private static final int PROGRESS_COMPILE_TARGETS = 30;
+    private static final int PROGRESS_PREPARE_COMMIT = 75;
+
     private final WorkspaceService workspaceService;
     private final ArchiveService archiveService;
     private final FileChangeRepository fileChangeRepository;
     private final TaskService taskService;
     private final JdkService jdkService;
+    private final JavaVersionService javaVersionService;
+    private final CompiledArtifactRepository compiledArtifactRepository;
+    private final ClockService clockService;
 
     /**
-     * 创建编译服务。
+     * 创建严格编译服务。
      *
      * @param workspaceService     工作区服务
      * @param archiveService       压缩包服务
      * @param fileChangeRepository 修改记录仓储
      * @param taskService          任务服务
-     * @param jdkService           JDK 工具定位服务
+     * @param jdkService           JDK 工具服务
+     * @param javaVersionService   原 class 版本识别服务
+     * @param compiledArtifactRepository 已提交编译产物仓储
+     * @param clockService         时间服务
      */
     public CompileService(WorkspaceService workspaceService,
                           ArchiveService archiveService,
                           FileChangeRepository fileChangeRepository,
                           TaskService taskService,
-                          JdkService jdkService) {
+                          JdkService jdkService,
+                          JavaVersionService javaVersionService,
+                          CompiledArtifactRepository compiledArtifactRepository,
+                          ClockService clockService) {
         this.workspaceService = workspaceService;
         this.archiveService = archiveService;
         this.fileChangeRepository = fileChangeRepository;
         this.taskService = taskService;
         this.jdkService = jdkService;
+        this.javaVersionService = javaVersionService;
+        this.compiledArtifactRepository = compiledArtifactRepository;
+        this.clockService = clockService;
     }
 
     /**
-     * 编译已修改 Java 文件并替换 class。
+     * 编译已修改 Java 文件并提交 class。
      *
      * @param project 项目记录
      * @return 编译结果
@@ -98,11 +130,7 @@ public class CompileService {
     }
 
     /**
-     * 编译已修改 Java 文件并替换 class。
-     * <p>
-     * 前端先创建任务并连接 WebSocket 后，把 taskId 传入这里；编译仍由本机 javac 执行，
-     * 但进度日志会实时推送，取消请求也能在任务执行过程中生效。
-     * </p>
+     * 编译已修改 Java 文件并以可回滚提交阶段统一写回。
      *
      * @param project 项目记录
      * @param taskId  预创建任务 ID，可为空
@@ -111,90 +139,152 @@ public class CompileService {
      * @throws InterruptedException javac 被中断时抛出
      */
     public OperationResult compile(ProjectRecord project, String taskId) throws IOException, InterruptedException {
-        TaskRecord task = taskService.prepare(taskId, project.getId(), TASK_TYPE_COMPILE, "开始编译修改过的 Java 文件");
+        TaskRecord task = taskService.prepare(taskId, project.getId(), TASK_TYPE_COMPILE, MESSAGE_COMPILE_START);
+        Path compileRunDir = null;
+        CompileCommit compileCommit = null;
+        boolean completed = false;
+        boolean artifactRecordsUpdated = false;
+        List<String> previousArtifacts = compiledArtifactRepository.findPaths(project.getId());
         try {
             List<String> javaPaths = fileChangeRepository.findJavaPaths(project.getId());
             if (javaPaths.isEmpty()) {
                 throw new IllegalStateException(JarPatchConstants.MESSAGE_NO_MODIFIED_JAVA);
             }
 
-            taskService.running(task, 20, "定位本机 javac");
-            taskService.ensureNotCancelled(task.getId());
-            Path javac = jdkService.findJavac();
-            Path compiledDir = workspaceService.compiledDir(project);
-            Files.createDirectories(compiledDir);
-
-            taskService.running(task, 40, "执行 javac 编译");
-            StringBuilder output = new StringBuilder();
-            Map<String, List<String>> javaPathsByTarget = groupJavaPathsByTarget(javaPaths);
-            for (Map.Entry<String, List<String>> entry : javaPathsByTarget.entrySet()) {
-                taskService.ensureNotCancelled(task.getId());
-                Path targetCompiledDir = compiledDir.resolve(safeCompileTargetName(entry.getKey()));
-                resetCompiledDir(targetCompiledDir);
-                normalizeDecompiledSources(project, entry.getValue());
-                List<String> command = buildCommand(project, javac, targetCompiledDir, entry.getValue());
-                output.append(runProcess(command, workspaceService.sourceDir(project), () -> taskService.isCancelled(task.getId())));
-                writeCompiledClasses(project, entry.getKey(), targetCompiledDir, () -> taskService.isCancelled(task.getId()));
+            taskService.running(task, PROGRESS_LOCATE_JAVAC, MESSAGE_COMPILE_LOCATE_JAVAC);
+            JdkCompilerInfo compilerInfo = jdkService.findCompiler();
+            if (compilerInfo.getFeatureVersion() < MINIMUM_RELEASE_COMPILER_VERSION) {
+                throw new IllegalArgumentException(MESSAGE_JAVAC_RELEASE_REQUIRED);
             }
+
+            compileRunDir = createCompileRunDirectory(project);
+            Map<String, List<String>> pathsByTarget = groupJavaPathsByTarget(javaPaths);
+            Map<String, Path> compiledOutputs = new LinkedHashMap<>();
+            StringBuilder processOutput = new StringBuilder();
+
+            taskService.running(task, PROGRESS_COMPILE_TARGETS, MESSAGE_COMPILE_ALL_TARGETS);
+            for (Map.Entry<String, List<String>> entry : pathsByTarget.entrySet()) {
+                taskService.ensureNotCancelled(task.getId());
+                JavaVersionInfo targetVersion = javaVersionService.detectCompileTargetVersion(
+                        project, entry.getKey(), entry.getValue());
+                validateCompilerVersion(compilerInfo, targetVersion);
+                Path targetOutput = compileRunDir.resolve(OUTPUT_DIR).resolve(safeCompileTargetName(entry.getKey()));
+                Files.createDirectories(targetOutput);
+                List<String> command = buildCommand(project, compilerInfo.getJavacPath(), targetOutput,
+                        entry.getValue(), targetVersion.getFeatureVersion());
+                processOutput.append(runProcess(command, workspaceService.sourceDir(project),
+                        () -> taskService.isCancelled(task.getId())));
+                compiledOutputs.put(entry.getKey(), targetOutput);
+            }
+
+            taskService.running(task, PROGRESS_PREPARE_COMMIT, MESSAGE_COMPILE_PREPARE_COMMIT);
+            taskService.ensureNotCancelled(task.getId());
+            compileCommit = prepareCompileCommit(project, compiledOutputs, compileRunDir.resolve(BACKUP_DIR));
+
+            // 实际写回只发生在全部 javac 成功之后；提交异常或任务取消由 finally 恢复备份。
+            applyCompiledOutputs(project, compiledOutputs, () -> taskService.isCancelled(task.getId()));
+            List<String> compiledArtifacts = collectArtifactPaths(project, compiledOutputs);
+            compiledArtifactRepository.replaceProjectArtifacts(project.getId(), compiledArtifacts, clockService.now());
+            artifactRecordsUpdated = true;
 
             OperationResult result = new OperationResult();
             result.setTaskId(task.getId());
             result.setChangedFiles(javaPaths);
-            result.setMessage(output.isEmpty() ? "编译完成" : output.toString());
-            taskService.success(task, "编译完成，class 文件已写入 extracted 目录");
+            result.setMessage(processOutput.isEmpty() ? MESSAGE_COMPILE_COMPLETE : processOutput.toString());
+            taskService.success(task, MESSAGE_COMPILE_SUCCESS);
+            completed = true;
             return result;
-        } catch (IllegalStateException e) {
-            if (JarPatchConstants.MESSAGE_TASK_CANCELLED.equals(e.getMessage())) {
-                throw e;
+        } catch (IllegalStateException exception) {
+            if (JarPatchConstants.MESSAGE_TASK_CANCELLED.equals(exception.getMessage())) {
+                throw exception;
             }
-            taskService.failed(task, "编译失败: " + e.getMessage());
-            throw e;
-        } catch (RuntimeException | IOException | InterruptedException e) {
-            taskService.failed(task, "编译失败: " + e.getMessage());
-            throw e;
+            taskService.failed(task, MESSAGE_COMPILE_FAILED + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR
+                    + exception.getMessage());
+            throw exception;
+        } catch (RuntimeException | IOException | InterruptedException exception) {
+            taskService.failed(task, MESSAGE_COMPILE_FAILED + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR
+                    + exception.getMessage());
+            throw exception;
+        } finally {
+            if (!completed && compileCommit != null) {
+                restoreCompileCommit(compileCommit);
+            }
+            if (!completed && artifactRecordsUpdated) {
+                compiledArtifactRepository.replaceProjectArtifacts(project.getId(), previousArtifacts, clockService.now());
+            }
+            if (compileRunDir != null) {
+                deleteTree(compileRunDir);
+            }
         }
     }
 
     /**
-     * 构建 javac 命令。
-     * <p>
-     * Windows 直接把大量依赖 Jar 拼进命令行时会触发 CreateProcess error=206。
-     * 这里把 classpath、输出目录和源码文件写入 javac 参数文件，进程启动阶段只传入
-     * @参数文件路径，实际编译参数仍由 javac 按标准机制读取。
-     * </p>
+     * 校验 javac 能覆盖原 class 的目标 Java 版本。
      *
-     * @param project     项目记录
-     * @param javac       javac 路径
-     * @param compiledDir 编译输出目录
-     * @param javaPaths   已修改 Java 文件路径
-     * @return javac 命令参数
-     * @throws IOException 读取依赖失败时抛出
+     * @param compilerInfo 已验证编译器
+     * @param targetVersion 原 class 目标版本
      */
-    private List<String> buildCommand(ProjectRecord project, Path javac, Path compiledDir, List<String> javaPaths) throws IOException {
-        Path argumentFile = compiledDir.resolve(JAVAC_ARGUMENT_FILE_NAME);
-        writeArgumentFile(project, compiledDir, javaPaths, argumentFile);
-
-        List<String> command = new ArrayList<>();
-        command.add(javac.toString());
-        command.add(JAVAC_ARGUMENT_FILE_PREFIX + argumentFile.toString());
-        return command;
+    private void validateCompilerVersion(JdkCompilerInfo compilerInfo, JavaVersionInfo targetVersion) {
+        if (compilerInfo.getFeatureVersion() < targetVersion.getFeatureVersion()) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_JDK_VERSION_TOO_LOW
+                    + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + MESSAGE_JAVAC_PREFIX
+                    + compilerInfo.getFeatureVersion()
+                    + MESSAGE_TARGET_JAVA_PREFIX + targetVersion.getFeatureVersion());
+        }
     }
 
     /**
-     * 写入 javac 参数文件。
-     * <p>
-     * 参数文件是编译入口到实际 javac 执行点之间的长参数承载文件，内容只影响本次编译；
-     * javac 读取后把 class 输出到 compiled 目录，后续复制流程再写回 extracted。
-     * </p>
+     * 创建本次编译独立 staging 目录。
      *
-     * @param project      项目记录
-     * @param compiledDir  编译输出目录
-     * @param javaPaths    已修改 Java 文件路径
-     * @param argumentFile javac 参数文件
-     * @throws IOException 写入参数文件失败时抛出
+     * @param project 项目记录
+     * @return 编译 staging 目录
+     * @throws IOException 创建失败时抛出
      */
-    private void writeArgumentFile(ProjectRecord project, Path compiledDir, List<String> javaPaths, Path argumentFile) throws IOException {
+    private Path createCompileRunDirectory(ProjectRecord project) throws IOException {
+        Path runDir = workspaceService.compiledDir(project).resolve(COMPILE_STAGING_PREFIX + UUID.randomUUID()).normalize();
+        Files.createDirectories(runDir.resolve(OUTPUT_DIR));
+        return runDir;
+    }
+
+    /**
+     * 构建使用 javac 参数文件的严格编译命令。
+     *
+     * @param project        项目记录
+     * @param javac          javac 路径
+     * @param compiledDir    本目标 staging 输出目录
+     * @param javaPaths      修改源码路径
+     * @param releaseVersion --release 版本
+     * @return 外部进程命令
+     * @throws IOException 参数文件写入失败时抛出
+     */
+    private List<String> buildCommand(ProjectRecord project,
+                                      Path javac,
+                                      Path compiledDir,
+                                      List<String> javaPaths,
+                                      int releaseVersion) throws IOException {
+        Path argumentFile = compiledDir.resolve(JAVAC_ARGUMENT_FILE_NAME);
+        writeArgumentFile(project, compiledDir, javaPaths, releaseVersion, argumentFile);
+        return List.of(javac.toString(), JAVAC_ARGUMENT_FILE_PREFIX + argumentFile);
+    }
+
+    /**
+     * 写入包含 --release、classpath、输出目录和明确源码清单的 javac 参数文件。
+     *
+     * @param project        项目记录
+     * @param compiledDir    编译输出目录
+     * @param javaPaths      修改源码路径
+     * @param releaseVersion --release 版本
+     * @param argumentFile   参数文件
+     * @throws IOException 写入失败时抛出
+     */
+    private void writeArgumentFile(ProjectRecord project,
+                                   Path compiledDir,
+                                   List<String> javaPaths,
+                                   int releaseVersion,
+                                   Path argumentFile) throws IOException {
         List<String> arguments = new ArrayList<>();
+        arguments.add(JAVAC_RELEASE_ARGUMENT);
+        arguments.add(String.valueOf(releaseVersion));
         arguments.add("-encoding");
         arguments.add(JarPatchConstants.UTF_8);
         arguments.add("-classpath");
@@ -202,419 +292,20 @@ public class CompileService {
         arguments.add("-d");
         arguments.add(formatArgumentFileValue(compiledDir.toString()));
         for (String javaPath : javaPaths) {
-            if (javaPath.startsWith(JarPatchConstants.TREE_SOURCE_PREFIX)) {
-                // 只把 sources 下被修改过的 Java 文件写入参数文件，避免误编译用户未改动的反编译源码。
-                arguments.add(formatArgumentFileValue(workspaceService.resolveSource(project, javaPath.substring(JarPatchConstants.TREE_SOURCE_PREFIX.length())).toString()));
+            if (!javaPath.startsWith(JarPatchConstants.TREE_SOURCE_PREFIX)) {
+                throw new IllegalArgumentException(JarPatchConstants.MESSAGE_FILE_OUT_OF_WORKSPACE);
             }
+            String relativePath = javaPath.substring(JarPatchConstants.TREE_SOURCE_PREFIX.length());
+            arguments.add(formatArgumentFileValue(workspaceService.resolveSource(project, relativePath).toString()));
         }
         Files.write(argumentFile, arguments, StandardCharsets.UTF_8);
     }
 
     /**
-     * 编译前整理反编译源码中的确定性兼容问题。
-     * <p>
-     * 入口来自编译接口，实际执行点在生成 javac 参数文件之前；结果写回 sources 下被修改的
-     * Java 文件。这里只处理不改变业务语义的反编译冗余形态，避免 javac 在真正业务代码
-     * 编译前就因为重复注解或泛型强转失败。
-     * </p>
-     *
-     * @param project   项目记录
-     * @param javaPaths 本次编译目标中的 Java 文件树路径
-     * @throws IOException 读取或写回源码失败时抛出
-     */
-    private void normalizeDecompiledSources(ProjectRecord project, List<String> javaPaths) throws IOException {
-        for (String javaPath : javaPaths) {
-            if (javaPath.startsWith(JarPatchConstants.TREE_SOURCE_PREFIX)) {
-                Path sourceFile = workspaceService.resolveSource(project, javaPath.substring(JarPatchConstants.TREE_SOURCE_PREFIX.length()));
-                normalizeDecompiledSource(sourceFile);
-            }
-        }
-    }
-
-    /**
-     * 整理单个 Java 文件的反编译冗余源码。
-     *
-     * @param sourceFile Java 源码文件
-     * @throws IOException 读取或写回源码失败时抛出
-     */
-    private void normalizeDecompiledSource(Path sourceFile) throws IOException {
-        String source = Files.readString(sourceFile, StandardCharsets.UTF_8);
-        String normalizedSource = removeCommonResultObjectCasts(removeDuplicateAnnotationSequence(source));
-        if (!source.equals(normalizedSource)) {
-            Files.writeString(sourceFile, normalizedSource, StandardCharsets.UTF_8);
-        }
-    }
-
-    /**
-     * 删除同一个连续注解序列中的完全重复注解。
-     * <p>
-     * CFR 在参数同时存在声明注解和类型注解时，可能还原成
-     * {@code @Valid @NotNull(...) @Valid @NotNull(...)}。Java 不允许非可重复注解重复出现；
-     * 该方法只删除文本完全一致的重复注解，保留第一次出现的位置和后续类型声明。
-     * </p>
-     *
-     * @param source 原始 Java 源码
-     * @return 去重后的 Java 源码
-     */
-    private String removeDuplicateAnnotationSequence(String source) {
-        StringBuilder result = new StringBuilder(source.length());
-        int index = 0;
-        while (index < source.length()) {
-            if (isLineCommentStart(source, index)) {
-                index = appendUntilLineEnd(source, index, result);
-            } else if (isBlockCommentStart(source, index)) {
-                index = appendUntilBlockCommentEnd(source, index, result);
-            } else if (isStringOrCharStart(source, index)) {
-                index = appendUntilStringOrCharEnd(source, index, result);
-            } else if (isAnnotationStart(source, index)) {
-                index = appendAnnotationSequence(source, index, result);
-            } else {
-                result.append(source.charAt(index));
-                index++;
-            }
-        }
-        return result.toString();
-    }
-
-    /**
-     * 追加一个连续注解序列，并删除其中完全重复的注解。
-     *
-     * @param source 原始 Java 源码
-     * @param start  注解序列开始下标
-     * @param result 输出缓冲区
-     * @return 注解序列结束后的下标
-     */
-    private int appendAnnotationSequence(String source, int start, StringBuilder result) {
-        Set<String> annotations = new HashSet<>();
-        String pendingWhitespace = "";
-        int index = start;
-        boolean appended = false;
-        while (isAnnotationStart(source, index)) {
-            int annotationEnd = findAnnotationEnd(source, index);
-            if (annotationEnd <= index) {
-                result.append(source.charAt(index));
-                return index + 1;
-            }
-            String annotation = source.substring(index, annotationEnd);
-            if (annotations.add(annotation)) {
-                if (appended) {
-                    result.append(pendingWhitespace);
-                }
-                result.append(annotation);
-                appended = true;
-            }
-            int next = skipWhitespace(source, annotationEnd);
-            pendingWhitespace = source.substring(annotationEnd, next);
-            if (!isAnnotationStart(source, next)) {
-                result.append(pendingWhitespace);
-                return next;
-            }
-            index = next;
-        }
-        return index;
-    }
-
-    /**
-     * 查找单个注解的结束下标。
-     *
-     * @param source 原始 Java 源码
-     * @param start  注解开始下标
-     * @return 注解结束下标
-     */
-    private int findAnnotationEnd(String source, int start) {
-        int index = start + 1;
-        while (index < source.length()) {
-            char value = source.charAt(index);
-            if (Character.isJavaIdentifierPart(value) || value == JAVA_DOT) {
-                index++;
-                continue;
-            }
-            break;
-        }
-        int next = skipWhitespace(source, index);
-        if (next < source.length() && source.charAt(next) == JAVA_OPEN_PARENTHESIS) {
-            int close = findMatchingParenthesis(source, next);
-            return close < 0 ? index : close + 1;
-        }
-        return index;
-    }
-
-    /**
-     * 删除 {@code CommonResult.success(...)} 入参外层多余的 {@code (Object)} 强转。
-     * <p>
-     * 该强转来自反编译结果，会让 {@code CommonResult<T>} 的泛型返回值被推断成
-     * {@code Object}，从而和控制器方法签名冲突。方法只处理 CommonResult.success 的
-     * 最外层入参，不影响日志里的 {@code new Object[]{...}} 或其他业务表达式。
-     * </p>
-     *
-     * @param source 原始 Java 源码
-     * @return 删除冗余强转后的 Java 源码
-     */
-    private String removeCommonResultObjectCasts(String source) {
-        StringBuilder result = new StringBuilder(source.length());
-        int index = 0;
-        while (index < source.length()) {
-            int callIndex = source.indexOf(COMMON_RESULT_SUCCESS_CALL, index);
-            if (callIndex < 0) {
-                result.append(source.substring(index));
-                break;
-            }
-            result.append(source, index, callIndex);
-            int argumentStart = callIndex + COMMON_RESULT_SUCCESS_CALL.length();
-            int close = findMatchingParenthesis(source, argumentStart - 1);
-            if (close < 0) {
-                result.append(source.substring(callIndex));
-                break;
-            }
-            String argument = source.substring(argumentStart, close);
-            result.append(COMMON_RESULT_SUCCESS_CALL)
-                    .append(removeLeadingObjectCasts(argument))
-                    .append(JAVA_CLOSE_PARENTHESIS);
-            index = close + 1;
-        }
-        return result.toString();
-    }
-
-    /**
-     * 删除表达式最外层连续的 {@code (Object)} 强转和仅用于包裹强转的括号。
-     *
-     * @param argument CommonResult.success 的入参表达式
-     * @return 去掉外层 Object 强转后的表达式
-     */
-    private String removeLeadingObjectCasts(String argument) {
-        String expression = argument;
-        boolean changed = true;
-        while (changed) {
-            changed = false;
-            int leadingWhitespaceEnd = skipWhitespace(expression, 0);
-            String prefix = expression.substring(0, leadingWhitespaceEnd);
-            String body = expression.substring(leadingWhitespaceEnd);
-            if (body.startsWith(OBJECT_CAST_TOKEN)) {
-                expression = prefix + body.substring(OBJECT_CAST_TOKEN.length());
-                changed = true;
-                continue;
-            }
-            int close = body.startsWith(String.valueOf(JAVA_OPEN_PARENTHESIS)) ? findMatchingParenthesis(body, 0) : -1;
-            if (close > 0 && skipWhitespace(body, close + 1) == body.length()) {
-                expression = prefix + body.substring(1, close);
-                changed = true;
-            }
-        }
-        return expression;
-    }
-
-    /**
-     * 判断当前位置是否是 Java 注解开始。
-     *
-     * @param source 原始 Java 源码
-     * @param index  当前下标
-     * @return 是注解开始时返回 true
-     */
-    private boolean isAnnotationStart(String source, int index) {
-        return index >= 0
-                && index + 1 < source.length()
-                && source.charAt(index) == JAVA_ANNOTATION_PREFIX
-                && Character.isJavaIdentifierStart(source.charAt(index + 1));
-    }
-
-    /**
-     * 跳过连续空白字符。
-     *
-     * @param source 原始文本
-     * @param start  开始下标
-     * @return 第一个非空白字符下标
-     */
-    private int skipWhitespace(String source, int start) {
-        int index = start;
-        while (index < source.length() && Character.isWhitespace(source.charAt(index))) {
-            index++;
-        }
-        return index;
-    }
-
-    /**
-     * 查找与指定左括号匹配的右括号。
-     *
-     * @param source    原始 Java 源码或表达式
-     * @param openIndex 左括号下标
-     * @return 匹配右括号下标，未找到时返回 -1
-     */
-    private int findMatchingParenthesis(String source, int openIndex) {
-        int depth = 1;
-        int index = openIndex + 1;
-        while (index < source.length()) {
-            if (isLineCommentStart(source, index)) {
-                index = skipUntilLineEnd(source, index);
-            } else if (isBlockCommentStart(source, index)) {
-                index = skipUntilBlockCommentEnd(source, index);
-            } else if (isStringOrCharStart(source, index)) {
-                index = skipUntilStringOrCharEnd(source, index);
-            } else {
-                char value = source.charAt(index);
-                if (value == JAVA_OPEN_PARENTHESIS) {
-                    depth++;
-                } else if (value == JAVA_CLOSE_PARENTHESIS) {
-                    depth--;
-                    if (depth == 0) {
-                        return index;
-                    }
-                }
-                index++;
-            }
-        }
-        return -1;
-    }
-
-    /**
-     * 判断当前位置是否是行注释开始。
-     *
-     * @param source 原始 Java 源码
-     * @param index  当前下标
-     * @return 是行注释开始时返回 true
-     */
-    private boolean isLineCommentStart(String source, int index) {
-        return index + 1 < source.length()
-                && source.charAt(index) == JAVA_SLASH
-                && source.charAt(index + 1) == JAVA_SLASH;
-    }
-
-    /**
-     * 判断当前位置是否是块注释开始。
-     *
-     * @param source 原始 Java 源码
-     * @param index  当前下标
-     * @return 是块注释开始时返回 true
-     */
-    private boolean isBlockCommentStart(String source, int index) {
-        return index + 1 < source.length()
-                && source.charAt(index) == JAVA_SLASH
-                && source.charAt(index + 1) == JAVA_ASTERISK;
-    }
-
-    /**
-     * 判断当前位置是否是字符串或字符字面量开始。
-     *
-     * @param source 原始 Java 源码
-     * @param index  当前下标
-     * @return 是字符串或字符字面量开始时返回 true
-     */
-    private boolean isStringOrCharStart(String source, int index) {
-        char value = source.charAt(index);
-        return value == JAVA_DOUBLE_QUOTE || value == JAVA_SINGLE_QUOTE;
-    }
-
-    /**
-     * 复制行注释直到行尾。
-     *
-     * @param source 原始 Java 源码
-     * @param start  注释开始下标
-     * @param result 输出缓冲区
-     * @return 行注释结束后的下标
-     */
-    private int appendUntilLineEnd(String source, int start, StringBuilder result) {
-        int end = skipUntilLineEnd(source, start);
-        result.append(source, start, end);
-        return end;
-    }
-
-    /**
-     * 复制块注释直到注释结束。
-     *
-     * @param source 原始 Java 源码
-     * @param start  注释开始下标
-     * @param result 输出缓冲区
-     * @return 块注释结束后的下标
-     */
-    private int appendUntilBlockCommentEnd(String source, int start, StringBuilder result) {
-        int end = skipUntilBlockCommentEnd(source, start);
-        result.append(source, start, end);
-        return end;
-    }
-
-    /**
-     * 复制字符串或字符字面量直到字面量结束。
-     *
-     * @param source 原始 Java 源码
-     * @param start  字面量开始下标
-     * @param result 输出缓冲区
-     * @return 字面量结束后的下标
-     */
-    private int appendUntilStringOrCharEnd(String source, int start, StringBuilder result) {
-        int end = skipUntilStringOrCharEnd(source, start);
-        result.append(source, start, end);
-        return end;
-    }
-
-    /**
-     * 跳过行注释直到行尾。
-     *
-     * @param source 原始 Java 源码
-     * @param start  注释开始下标
-     * @return 行注释结束后的下标
-     */
-    private int skipUntilLineEnd(String source, int start) {
-        int index = start;
-        while (index < source.length()) {
-            char value = source.charAt(index);
-            if (value == '\n' || value == '\r') {
-                return index;
-            }
-            index++;
-        }
-        return index;
-    }
-
-    /**
-     * 跳过块注释直到注释结束。
-     *
-     * @param source 原始 Java 源码
-     * @param start  注释开始下标
-     * @return 块注释结束后的下标
-     */
-    private int skipUntilBlockCommentEnd(String source, int start) {
-        int index = start + 2;
-        while (index + 1 < source.length()) {
-            if (source.charAt(index) == JAVA_ASTERISK && source.charAt(index + 1) == JAVA_SLASH) {
-                return index + 2;
-            }
-            index++;
-        }
-        return source.length();
-    }
-
-    /**
-     * 跳过字符串或字符字面量直到字面量结束。
-     *
-     * @param source 原始 Java 源码
-     * @param start  字面量开始下标
-     * @return 字面量结束后的下标
-     */
-    private int skipUntilStringOrCharEnd(String source, int start) {
-        char quote = source.charAt(start);
-        int index = start + 1;
-        while (index < source.length()) {
-            char value = source.charAt(index);
-            if (value == JAVA_ESCAPE_CHARACTER) {
-                index += 2;
-                continue;
-            }
-            index++;
-            if (value == quote) {
-                return index;
-            }
-        }
-        return index;
-    }
-
-    /**
-     * 格式化 javac 参数文件中的参数值。
-     * <p>
-     * javac 参数文件内的反斜杠会参与转义解析，因此 Windows 路径统一转成 javac 可识别的
-     * 正斜杠路径，再用引号包裹，保证 JDK 安装目录、工作区或 Jar 文件名包含空格时仍可解析。
-     * </p>
+     * 把路径值转为 javac 参数文件要求的带引号格式。
      *
      * @param value 原始参数值
-     * @return 参数文件可读取的安全参数值
+     * @return 参数文件值
      */
     private String formatArgumentFileValue(String value) {
         return JAVAC_ARGUMENT_QUOTE
@@ -624,57 +315,54 @@ public class CompileService {
     }
 
     /**
-     * 构建编译 classpath。
+     * 构建原包 classes 和全部嵌套 Jar 组成的编译 classpath。
      *
      * @param project 项目记录
      * @return classpath 字符串
-     * @throws IOException 读取依赖失败时抛出
+     * @throws IOException 遍历依赖失败时抛出
      */
     private String buildClasspath(ProjectRecord project) throws IOException {
         List<String> entries = new ArrayList<>();
         Path extractedDir = workspaceService.extractedDir(project);
         entries.add(extractedDir.toString());
         entries.add(classRoot(project).toString());
-        try (Stream<Path> stream = Files.walk(extractedDir)) {
-            stream.filter(path -> Files.isRegularFile(path))
-                    .filter(path -> path.getFileName().toString().toLowerCase().endsWith("." + JarPatchConstants.JAR_EXTENSION))
+        try (var stream = Files.walk(extractedDir)) {
+            stream.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().toLowerCase()
+                            .endsWith("." + JarPatchConstants.JAR_EXTENSION))
+                    .sorted(Comparator.comparing(Path::toString))
                     .forEach(path -> entries.add(path.toString()));
         }
         return String.join(File.pathSeparator, entries);
     }
 
     /**
-     * 按 class 写回目标拆分 Java 修改文件。
-     * <p>
-     * 普通源码写回主 classes 根目录；sources/nested-jars 下的源码按照原嵌套 Jar 相对路径分组，
-     * 编译完成后写回对应 Jar，避免多模块 Spring Boot 包的业务模块被误写到 BOOT-INF/classes。
-     * </p>
+     * 按主 classes 或嵌套 Jar 写回目标分组修改源码。
      *
-     * @param javaPaths 修改过的 Java 文件路径
-     * @return 按写回目标分组后的 Java 文件路径
+     * @param javaPaths 修改源码路径
+     * @return 保持原顺序的目标分组
      */
     private Map<String, List<String>> groupJavaPathsByTarget(List<String> javaPaths) {
         Map<String, List<String>> groupedPaths = new LinkedHashMap<>();
         for (String javaPath : javaPaths) {
-            String target = resolveCompileTarget(javaPath);
-            groupedPaths.computeIfAbsent(target, key -> new ArrayList<>()).add(javaPath);
+            groupedPaths.computeIfAbsent(resolveCompileTarget(javaPath), key -> new ArrayList<>()).add(javaPath);
         }
         return groupedPaths;
     }
 
     /**
-     * 解析单个 Java 文件的 class 写回目标。
+     * 解析源码对应的主 classes 或嵌套 Jar 目标。
      *
-     * @param javaPath 修改记录中的 Java 文件树路径
-     * @return 主 classes 标识或嵌套 Jar 相对路径
+     * @param javaPath 修改源码路径
+     * @return 编译目标标识
      */
     private String resolveCompileTarget(String javaPath) {
         if (javaPath == null || !javaPath.startsWith(JarPatchConstants.TREE_SOURCE_PREFIX)) {
-            return MAIN_CLASS_COMPILE_TARGET;
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_FILE_OUT_OF_WORKSPACE);
         }
         String sourceRelativePath = javaPath.substring(JarPatchConstants.TREE_SOURCE_PREFIX.length());
         if (!sourceRelativePath.startsWith(NESTED_JAR_SOURCE_PREFIX)) {
-            return MAIN_CLASS_COMPILE_TARGET;
+            return JarPatchConstants.COMPILE_TARGET_MAIN;
         }
         String nestedRelativePath = sourceRelativePath.substring(NESTED_JAR_SOURCE_PREFIX.length());
         int markerIndex = nestedRelativePath.indexOf(NESTED_JAR_SOURCE_MARKER);
@@ -685,45 +373,225 @@ public class CompileService {
     }
 
     /**
-     * 清空当前目标的编译输出目录，避免历史 class 干扰本次写回。
+     * 在写回前备份所有可能被替换的 class 和嵌套 Jar。
      *
-     * @param targetCompiledDir 当前目标编译输出目录
-     * @throws IOException 删除或创建目录失败时抛出
+     * @param project         项目记录
+     * @param compiledOutputs 各目标编译输出
+     * @param backupRoot      本次备份根目录
+     * @return 可用于失败恢复的提交信息
+     * @throws IOException 备份失败时抛出
      */
-    private void resetCompiledDir(Path targetCompiledDir) throws IOException {
-        if (Files.exists(targetCompiledDir)) {
-            try (Stream<Path> stream = Files.walk(targetCompiledDir)) {
-                stream.sorted((left, right) -> right.compareTo(left))
-                        .forEach(path -> deleteCompiledPath(path));
+    private CompileCommit prepareCompileCommit(ProjectRecord project,
+                                               Map<String, Path> compiledOutputs,
+                                               Path backupRoot) throws IOException {
+        CompileCommit commit = new CompileCommit();
+        Files.createDirectories(backupRoot);
+        for (Map.Entry<String, Path> entry : compiledOutputs.entrySet()) {
+            if (JarPatchConstants.COMPILE_TARGET_MAIN.equals(entry.getKey())) {
+                backupMainClasses(project, entry.getValue(), backupRoot.resolve(BACKUP_MAIN_DIR), commit);
+            } else {
+                backupNestedJar(project, entry.getKey(), backupRoot.resolve(BACKUP_NESTED_DIR), commit);
             }
         }
-        Files.createDirectories(targetCompiledDir);
+        return commit;
     }
 
     /**
-     * 删除编译输出目录中的单个路径。
+     * 备份主 classes 目录中本次会被覆盖的文件，并记录原先不存在的新增文件。
      *
-     * @param path 待删除路径
+     * @param project      项目记录
+     * @param compiledDir  主目标编译输出
+     * @param backupRoot   主 class 备份目录
+     * @param commit       提交恢复信息
+     * @throws IOException 备份失败时抛出
      */
-    private void deleteCompiledPath(Path path) {
-        try {
-            Files.deleteIfExists(path);
-        } catch (IOException e) {
-            throw new IllegalStateException("清理编译输出失败: " + path, e);
+    private void backupMainClasses(ProjectRecord project,
+                                   Path compiledDir,
+                                   Path backupRoot,
+                                   CompileCommit commit) throws IOException {
+        Path targetRoot = classRoot(project);
+        for (Path classFile : collectClassFiles(compiledDir)) {
+            Path relativePath = compiledDir.relativize(classFile);
+            Path target = targetRoot.resolve(relativePath).normalize();
+            if (Files.exists(target)) {
+                Path backup = backupRoot.resolve(relativePath).normalize();
+                Files.createDirectories(backup.getParent());
+                Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
+                commit.originalFiles.put(target, backup);
+            } else {
+                commit.newFiles.add(target);
+            }
         }
     }
 
     /**
-     * 执行外部 javac 进程。
+     * 完整备份本次会重建的嵌套 Jar。
      *
-     * @param command 命令参数
-     * @param workDir 工作目录
+     * @param project       项目记录
+     * @param compileTarget 嵌套 Jar 相对路径
+     * @param backupRoot    嵌套 Jar 备份目录
+     * @param commit        提交恢复信息
+     * @throws IOException 备份失败时抛出
+     */
+    private void backupNestedJar(ProjectRecord project,
+                                 String compileTarget,
+                                 Path backupRoot,
+                                 CompileCommit commit) throws IOException {
+        Path target = workspaceService.resolveExtracted(project, compileTarget);
+        if (!Files.isRegularFile(target)) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_INVALID_NESTED_JAR_SOURCE_PATH);
+        }
+        Files.createDirectories(backupRoot);
+        Path backup = backupRoot.resolve(safeCompileTargetName(compileTarget) + ".backup");
+        Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
+        commit.originalFiles.put(target, backup);
+    }
+
+    /**
+     * 按目标应用全部已成功编译的 class。
+     *
+     * @param project         项目记录
+     * @param compiledOutputs 各目标编译输出
+     * @param cancelRequested 取消检查回调
+     * @throws IOException 写回失败时抛出
+     */
+    private void applyCompiledOutputs(ProjectRecord project,
+                                      Map<String, Path> compiledOutputs,
+                                      BooleanSupplier cancelRequested) throws IOException {
+        for (Map.Entry<String, Path> entry : compiledOutputs.entrySet()) {
+            ensureNotCancelled(cancelRequested);
+            if (JarPatchConstants.COMPILE_TARGET_MAIN.equals(entry.getKey())) {
+                copyCompiledClasses(entry.getValue(), classRoot(project), cancelRequested);
+            } else {
+                Path nestedJar = workspaceService.resolveExtracted(project, entry.getKey());
+                archiveService.replaceClassesInJar(nestedJar, entry.getValue(), cancelRequested);
+            }
+        }
+    }
+
+    /**
+     * 把主目标 class 逐文件原子替换到 class 根目录。
+     *
+     * @param compiledDir     编译输出目录
+     * @param targetRoot      class 根目录
+     * @param cancelRequested 取消检查回调
+     * @throws IOException 写回失败时抛出
+     */
+    private void copyCompiledClasses(Path compiledDir,
+                                     Path targetRoot,
+                                     BooleanSupplier cancelRequested) throws IOException {
+        for (Path classFile : collectClassFiles(compiledDir)) {
+            ensureNotCancelled(cancelRequested);
+            Path target = targetRoot.resolve(compiledDir.relativize(classFile)).normalize();
+            atomicReplaceFile(classFile, target);
+        }
+    }
+
+    /**
+     * 恢复提交前所有原文件并删除本次新增 class。
+     *
+     * @param commit 提交恢复信息
+     * @throws IOException 恢复失败时抛出
+     */
+    private void restoreCompileCommit(CompileCommit commit) throws IOException {
+        for (Map.Entry<Path, Path> entry : commit.originalFiles.entrySet()) {
+            atomicReplaceFile(entry.getValue(), entry.getKey());
+        }
+        for (Path newFile : commit.newFiles) {
+            Files.deleteIfExists(newFile);
+        }
+    }
+
+    /**
+     * 使用目标目录内临时文件原子替换单个文件。
+     *
+     * @param source 完整源文件
+     * @param target 最终目标文件
+     * @throws IOException 文件系统不支持原子移动或复制失败时抛出
+     */
+    private void atomicReplaceFile(Path source, Path target) throws IOException {
+        Files.createDirectories(target.getParent());
+        Path temporaryFile = Files.createTempFile(target.getParent(), "." + target.getFileName() + ".", ".tmp");
+        try {
+            Files.copy(source, temporaryFile, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(temporaryFile, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException exception) {
+            throw new IOException(JarPatchConstants.MESSAGE_EXPORT_ATOMIC_MOVE_REQUIRED, exception);
+        } finally {
+            Files.deleteIfExists(temporaryFile);
+        }
+    }
+
+    /**
+     * 收集编译目录内全部 class 文件。
+     *
+     * @param compiledDir 编译输出目录
+     * @return 按路径排序的 class 文件
+     * @throws IOException 遍历失败时抛出
+     */
+    private List<Path> collectClassFiles(Path compiledDir) throws IOException {
+        try (var stream = Files.walk(compiledDir)) {
+            return stream.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().endsWith("." + JarPatchConstants.CLASS_EXTENSION))
+                    .sorted(Comparator.comparing(Path::toString))
+                    .toList();
+        }
+    }
+
+    /**
+     * 把 staging class 文件转换为最终包内可校验的产物路径。
+     *
+     * @param project         项目记录
+     * @param compiledOutputs 各目标编译输出
+     * @return 主包条目或 nested.jar!/entry 格式的产物路径
+     * @throws IOException 遍历编译输出失败时抛出
+     */
+    private List<String> collectArtifactPaths(ProjectRecord project,
+                                              Map<String, Path> compiledOutputs) throws IOException {
+        List<String> artifacts = new ArrayList<>();
+        for (Map.Entry<String, Path> entry : compiledOutputs.entrySet()) {
+            for (Path classFile : collectClassFiles(entry.getValue())) {
+                String classEntry = entry.getValue().relativize(classFile).toString().replace('\\', '/');
+                if (JarPatchConstants.COMPILE_TARGET_MAIN.equals(entry.getKey())) {
+                    artifacts.add(mainArchivePrefix(project) + classEntry);
+                } else {
+                    artifacts.add(entry.getKey() + JarPatchConstants.ARCHIVE_ENTRY_SEPARATOR + classEntry);
+                }
+            }
+        }
+        artifacts.sort(String::compareTo);
+        return artifacts;
+    }
+
+    /**
+     * 获取不同包类型的主 class 包内路径前缀。
+     *
+     * @param project 项目记录
+     * @return 空字符串、BOOT-INF/classes/ 或 WEB-INF/classes/
+     */
+    private String mainArchivePrefix(ProjectRecord project) {
+        if (PackageType.SPRING_BOOT_JAR.getCode().equals(project.getPackageType())) {
+            return JarPatchConstants.SPRING_BOOT_CLASSES_DIR + JarPatchConstants.ZIP_SEPARATOR;
+        }
+        if (PackageType.WAR.getCode().equals(project.getPackageType())) {
+            return JarPatchConstants.WAR_CLASSES_DIR + JarPatchConstants.ZIP_SEPARATOR;
+        }
+        return JarPatchConstants.EMPTY_TEXT;
+    }
+
+    /**
+     * 执行 javac 并在取消时终止子进程。
+     *
+     * @param command         命令参数
+     * @param workDir        工作目录
      * @param cancelRequested 取消检查回调
      * @return javac 输出
      * @throws IOException          进程启动失败时抛出
      * @throws InterruptedException 进程等待被中断时抛出
      */
-    private String runProcess(List<String> command, Path workDir, BooleanSupplier cancelRequested) throws IOException, InterruptedException {
+    private String runProcess(List<String> command,
+                              Path workDir,
+                              BooleanSupplier cancelRequested) throws IOException, InterruptedException {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.directory(workDir.toFile());
         processBuilder.redirectErrorStream(true);
@@ -739,7 +607,7 @@ public class CompileService {
                     readerThread.join();
                     throw new IllegalStateException(JarPatchConstants.MESSAGE_TASK_CANCELLED);
                 }
-                process.waitFor(200, TimeUnit.MILLISECONDS);
+                process.waitFor(PROCESS_POLL_INTERVAL_MILLIS, TimeUnit.MILLISECONDS);
             }
             readerThread.join();
         } finally {
@@ -755,86 +623,55 @@ public class CompileService {
     }
 
     /**
-     * 读取 javac 进程输出。
+     * 持续读取 javac 合并输出流。
      *
-     * @param process 外部进程
+     * @param process javac 进程
      * @param output  输出缓冲
      */
     private void readProcessOutput(Process process, StringBuilder output) {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 output.append(line).append(System.lineSeparator());
             }
         } catch (IOException ignored) {
-            // 进程被取消时输入流会关闭，读取线程直接退出即可。
+            // 取消会关闭进程流，读取线程在此正常结束，主线程负责输出最终任务状态。
         }
     }
 
     /**
-     * 按编译目标把 class 写回 extracted。
-     * <p>
-     * 主工程源码写回 BOOT-INF/classes、WEB-INF/classes 或普通 Jar 根目录；
-     * 嵌套 Jar 源码则重建并覆盖 extracted 中对应的原 Jar 文件。
-     * </p>
+     * 删除本次编译 staging 目录。
      *
-     * @param project     项目记录
-     * @param compileTarget 主 classes 标识或嵌套 Jar 相对路径
-     * @param compiledDir 编译输出目录
-     * @param cancelRequested 取消检查回调
-     * @throws IOException 复制失败时抛出
+     * @param root staging 根目录
+     * @throws IOException 删除失败时抛出
      */
-    private void writeCompiledClasses(ProjectRecord project, String compileTarget, Path compiledDir, BooleanSupplier cancelRequested) throws IOException {
-        if (MAIN_CLASS_COMPILE_TARGET.equals(compileTarget)) {
-            copyCompiledClassesToDirectory(compiledDir, classRoot(project), cancelRequested);
+    private void deleteTree(Path root) throws IOException {
+        if (!Files.exists(root)) {
             return;
         }
-        Path nestedJar = workspaceService.resolveExtracted(project, compileTarget);
-        archiveService.replaceClassesInJar(nestedJar, compiledDir, cancelRequested);
+        try (var stream = Files.walk(root)) {
+            for (Path path : stream.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        }
     }
 
     /**
-     * 把编译输出复制到普通 class 根目录。
+     * 检查任务取消状态。
      *
-     * @param compiledDir 编译输出目录
-     * @param targetRoot  class 目标根目录
      * @param cancelRequested 取消检查回调
-     * @throws IOException 复制失败时抛出
      */
-    private void copyCompiledClassesToDirectory(Path compiledDir, Path targetRoot, BooleanSupplier cancelRequested) throws IOException {
-        try (Stream<Path> stream = Files.walk(compiledDir)) {
-            stream.filter(path -> Files.isRegularFile(path))
-                    .filter(path -> path.getFileName().toString().endsWith("." + JarPatchConstants.CLASS_EXTENSION))
-                    .forEach(path -> {
-                        if (cancelRequested.getAsBoolean()) {
-                            throw new IllegalStateException(JarPatchConstants.MESSAGE_TASK_CANCELLED);
-                        }
-                        copyCompiledClass(compiledDir, targetRoot, path);
-                    });
+    private void ensureNotCancelled(BooleanSupplier cancelRequested) {
+        if (cancelRequested != null && cancelRequested.getAsBoolean()) {
+            throw new IllegalStateException(JarPatchConstants.MESSAGE_TASK_CANCELLED);
         }
     }
 
     /**
-     * 复制单个 class 文件。
+     * 把嵌套 Jar 路径转换为 staging 目录安全名称。
      *
-     * @param compiledDir 编译输出目录
-     * @param targetRoot  class 目标根目录
-     * @param classFile   class 文件
-     */
-    private void copyCompiledClass(Path compiledDir, Path targetRoot, Path classFile) {
-        try {
-            Path target = targetRoot.resolve(compiledDir.relativize(classFile)).normalize();
-            Files.createDirectories(target.getParent());
-            Files.copy(classFile, target, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
-            throw new IllegalStateException("复制 class 文件失败: " + classFile, e);
-        }
-    }
-
-    /**
-     * 把嵌套 Jar 相对路径转换为可作为编译输出目录名的文本。
-     *
-     * @param compileTarget 主 classes 标识或嵌套 Jar 相对路径
+     * @param compileTarget 编译目标
      * @return 安全目录名
      */
     private String safeCompileTargetName(String compileTarget) {
@@ -843,19 +680,28 @@ public class CompileService {
     }
 
     /**
-     * 按包类型解析 class 替换目标目录。
+     * 按包类型解析主 class 根目录。
      *
      * @param project 项目记录
-     * @return class 根目录
+     * @return 主 class 根目录
      */
     private Path classRoot(ProjectRecord project) {
         Path extractedDir = workspaceService.extractedDir(project);
-        if ("SPRING_BOOT_JAR".equals(project.getPackageType())) {
+        if (PackageType.SPRING_BOOT_JAR.getCode().equals(project.getPackageType())) {
             return extractedDir.resolve(JarPatchConstants.SPRING_BOOT_CLASSES_DIR);
         }
-        if ("WAR".equals(project.getPackageType())) {
+        if (PackageType.WAR.getCode().equals(project.getPackageType())) {
             return extractedDir.resolve(JarPatchConstants.WAR_CLASSES_DIR);
         }
         return extractedDir;
+    }
+
+    /**
+     * 单次编译提交恢复信息。
+     */
+    private static final class CompileCommit {
+
+        private final Map<Path, Path> originalFiles = new LinkedHashMap<>();
+        private final Set<Path> newFiles = new LinkedHashSet<>();
     }
 }

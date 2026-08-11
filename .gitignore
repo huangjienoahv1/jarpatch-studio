@@ -6,6 +6,11 @@ dist/
 **/dist/
 out/
 **/out/
+frontend/backend/
+frontend/runtime/
+release/
+samples/acceptance/output/
+samples/acceptance/work/
 .idea/
 .vscode/
 .xcodemap/

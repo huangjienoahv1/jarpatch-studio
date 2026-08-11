@@ -13,6 +13,7 @@ public class SaveContentRequest {
 
     private String path;
     private String content;
+    private String expectedHash;
 
     public String getPath() {
         return path;
@@ -28,5 +29,23 @@ public class SaveContentRequest {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    /**
+     * 获取打开文件时的原始字节哈希。
+     *
+     * @return SHA-256 哈希
+     */
+    public String getExpectedHash() {
+        return expectedHash;
+    }
+
+    /**
+     * 设置打开文件时的原始字节哈希。
+     *
+     * @param expectedHash SHA-256 哈希
+     */
+    public void setExpectedHash(String expectedHash) {
+        this.expectedHash = expectedHash;
     }
 }

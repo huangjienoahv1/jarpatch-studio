@@ -7,6 +7,9 @@ import com.jarpatch.model.SearchResult;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,6 +32,14 @@ public class SearchService {
     private final WorkspaceService workspaceService;
     private final FileKindService fileKindService;
     private final JavaUnicodeEscapeService javaUnicodeEscapeService;
+    private final ProjectSettingsService projectSettingsService;
+    private static final int UTF_8_BOM_FIRST = 0xEF;
+    private static final int UTF_8_BOM_SECOND = 0xBB;
+    private static final int UTF_8_BOM_THIRD = 0xBF;
+    private static final int UTF_16_LE_BOM_FIRST = 0xFF;
+    private static final int UTF_16_LE_BOM_SECOND = 0xFE;
+    private static final int UTF_16_BE_BOM_FIRST = 0xFE;
+    private static final int UTF_16_BE_BOM_SECOND = 0xFF;
 
     /**
      * 创建项目文件搜索服务。
@@ -36,13 +47,16 @@ public class SearchService {
      * @param workspaceService        工作区服务
      * @param fileKindService         文件类型识别服务
      * @param javaUnicodeEscapeService Java 中文 Unicode 转义还原服务
+     * @param projectSettingsService 项目设置服务
      */
     public SearchService(WorkspaceService workspaceService,
                          FileKindService fileKindService,
-                         JavaUnicodeEscapeService javaUnicodeEscapeService) {
+                         JavaUnicodeEscapeService javaUnicodeEscapeService,
+                         ProjectSettingsService projectSettingsService) {
         this.workspaceService = workspaceService;
         this.fileKindService = fileKindService;
         this.javaUnicodeEscapeService = javaUnicodeEscapeService;
+        this.projectSettingsService = projectSettingsService;
     }
 
     /**
@@ -58,8 +72,11 @@ public class SearchService {
             throw new IllegalArgumentException(JarPatchConstants.MESSAGE_SEARCH_KEYWORD_EMPTY);
         }
         List<SearchResult> results = new ArrayList<>();
-        searchRoot(workspaceService.sourceDir(project), JarPatchConstants.TREE_SOURCE_PREFIX, keyword.trim(), results);
-        searchRoot(workspaceService.extractedDir(project), JarPatchConstants.TREE_EXTRACTED_PREFIX, keyword.trim(), results);
+        long maxFileBytes = projectSettingsService.maxEditableFileBytes(project.getId());
+        searchRoot(workspaceService.sourceDir(project), JarPatchConstants.TREE_SOURCE_PREFIX,
+                keyword.trim(), maxFileBytes, results);
+        searchRoot(workspaceService.extractedDir(project), JarPatchConstants.TREE_EXTRACTED_PREFIX,
+                keyword.trim(), maxFileBytes, results);
         return results;
     }
 
@@ -69,16 +86,23 @@ public class SearchService {
      * @param root    根目录
      * @param prefix  文件树路径前缀
      * @param keyword 搜索关键词
+     * @param maxFileBytes 允许搜索内容的最大文件字节数
      * @param results 搜索结果集合
      * @throws IOException 读取目录失败时抛出
      */
-    private void searchRoot(Path root, String prefix, String keyword, List<SearchResult> results) throws IOException {
+    private void searchRoot(Path root,
+                            String prefix,
+                            String keyword,
+                            long maxFileBytes,
+                            List<SearchResult> results) throws IOException {
         if (!Files.exists(root) || results.size() >= JarPatchConstants.SEARCH_MAX_RESULTS) {
             return;
         }
         try (Stream<Path> stream = Files.walk(root)) {
-            stream.filter(Files::isRegularFile)
-                    .forEach(path -> searchFile(root, prefix, path, keyword, results));
+            var iterator = stream.filter(Files::isRegularFile).iterator();
+            while (iterator.hasNext() && results.size() < JarPatchConstants.SEARCH_MAX_RESULTS) {
+                searchFile(root, prefix, iterator.next(), keyword, maxFileBytes, results);
+            }
         }
     }
 
@@ -89,9 +113,15 @@ public class SearchService {
      * @param prefix  文件树路径前缀
      * @param file    文件路径
      * @param keyword 搜索关键词
+     * @param maxFileBytes 允许搜索内容的最大文件字节数
      * @param results 搜索结果集合
      */
-    private void searchFile(Path root, String prefix, Path file, String keyword, List<SearchResult> results) {
+    private void searchFile(Path root,
+                            String prefix,
+                            Path file,
+                            String keyword,
+                            long maxFileBytes,
+                            List<SearchResult> results) throws IOException {
         if (results.size() >= JarPatchConstants.SEARCH_MAX_RESULTS) {
             return;
         }
@@ -102,6 +132,9 @@ public class SearchService {
         String treePath = prefix + root.relativize(file).toString().replace('\\', '/');
         if (file.getFileName().toString().contains(keyword)) {
             results.add(new SearchResult(treePath, 1, file.getFileName().toString()));
+            return;
+        }
+        if (Files.size(file) > maxFileBytes) {
             return;
         }
         searchFileContent(treePath, file, keyword, results);
@@ -115,21 +148,47 @@ public class SearchService {
      * @param keyword  搜索关键词
      * @param results  搜索结果集合
      */
-    private void searchFileContent(String treePath, Path file, String keyword, List<SearchResult> results) {
-        try {
-            List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
-            for (int index = 0; index < lines.size(); index++) {
-                String rawLine = lines.get(index);
+    private void searchFileContent(String treePath,
+                                   Path file,
+                                   String keyword,
+                                   List<SearchResult> results) throws IOException {
+        Charset charset = detectCharset(file);
+        try (BufferedReader reader = Files.newBufferedReader(file, charset)) {
+            String rawLine;
+            int lineNumber = 0;
+            while ((rawLine = reader.readLine()) != null) {
+                lineNumber++;
                 String decodedLine = javaUnicodeEscapeService.decodeChineseEscapes(rawLine);
                 if (rawLine.contains(keyword) || decodedLine.contains(keyword)) {
-                    results.add(new SearchResult(treePath, index + 1, preview(decodedLine)));
+                    results.add(new SearchResult(treePath, lineNumber, preview(decodedLine)));
                     if (results.size() >= JarPatchConstants.SEARCH_MAX_RESULTS) {
                         return;
                     }
                 }
             }
-        } catch (IOException ignored) {
-            // 单个文件读取失败不影响其他文件搜索，失败文件不会出现在结果中。
+        }
+    }
+
+    /**
+     * 根据 BOM 识别搜索文本编码，未带 BOM 时严格按 UTF-8 读取。
+     *
+     * @param file 文本文件
+     * @return 搜索使用的字符集
+     * @throws IOException 读取 BOM 失败时抛出
+     */
+    private Charset detectCharset(Path file) throws IOException {
+        try (InputStream inputStream = Files.newInputStream(file)) {
+            int first = inputStream.read();
+            int second = inputStream.read();
+            int third = inputStream.read();
+            if (first == UTF_8_BOM_FIRST && second == UTF_8_BOM_SECOND && third == UTF_8_BOM_THIRD) {
+                return StandardCharsets.UTF_8;
+            }
+            if ((first == UTF_16_LE_BOM_FIRST && second == UTF_16_LE_BOM_SECOND)
+                    || (first == UTF_16_BE_BOM_FIRST && second == UTF_16_BE_BOM_SECOND)) {
+                return StandardCharsets.UTF_16;
+            }
+            return StandardCharsets.UTF_8;
         }
     }
 

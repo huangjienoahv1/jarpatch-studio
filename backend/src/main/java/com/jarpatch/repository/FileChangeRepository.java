@@ -35,17 +35,36 @@ public class FileChangeRepository {
      * @param projectId    项目 ID
      * @param relativePath 修改文件相对路径
      * @param fileKind     文件类型
+     * @param originalHash 导入基线哈希
+     * @param currentHash  当前文件哈希
      * @param now          当前时间
      */
-    public void upsert(String projectId, String relativePath, String fileKind, String now) {
-        int updated = jdbcTemplate.update("UPDATE file_changes SET file_kind = ?, updated_at = ? " +
+    public void upsert(String projectId,
+                       String relativePath,
+                       String fileKind,
+                       String originalHash,
+                       String currentHash,
+                       String now) {
+        int updated = jdbcTemplate.update("UPDATE file_changes SET file_kind = ?, current_hash = ?, updated_at = ? " +
                         "WHERE project_id = ? AND relative_path = ?",
-                fileKind, now, projectId, relativePath);
+                fileKind, currentHash, now, projectId, relativePath);
         if (updated == 0) {
             jdbcTemplate.update("INSERT INTO file_changes " +
-                            "(id, project_id, relative_path, file_kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    UUID.randomUUID().toString(), projectId, relativePath, fileKind, now, now);
+                            "(id, project_id, relative_path, file_kind, original_hash, current_hash, created_at, updated_at) " +
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    UUID.randomUUID().toString(), projectId, relativePath, fileKind, originalHash, currentHash, now, now);
         }
+    }
+
+    /**
+     * 文件恢复到导入基线后删除修改记录。
+     *
+     * @param projectId    项目 ID
+     * @param relativePath 文件树相对路径
+     */
+    public void delete(String projectId, String relativePath) {
+        jdbcTemplate.update("DELETE FROM file_changes WHERE project_id = ? AND relative_path = ?",
+                projectId, relativePath);
     }
 
     /**

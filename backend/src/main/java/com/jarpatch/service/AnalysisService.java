@@ -7,6 +7,7 @@ import com.jarpatch.model.ProjectRecord;
 import com.jarpatch.model.RiskItem;
 import com.jarpatch.model.TaskRecord;
 import com.jarpatch.repository.FileChangeRepository;
+import com.jarpatch.repository.AnalysisReportRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -35,10 +36,25 @@ public class AnalysisService {
     private static final String RISK_NESTED_JAR_TITLE = "存在嵌套 Jar";
     private static final String RISK_MULTI_RELEASE_TITLE = "存在多版本类目录";
     private static final String RISK_OBFUSCATION_TITLE = "可能存在混淆代码";
+    private static final String MESSAGE_ANALYSIS_START = "开始分析包结构";
+    private static final String MESSAGE_ANALYSIS_MANIFEST = "读取 Manifest 和入口类";
+    private static final String MESSAGE_ANALYSIS_STATISTICS = "统计 class 和依赖";
+    private static final String MESSAGE_ANALYSIS_RISKS = "识别导出风险";
+    private static final String MESSAGE_ANALYSIS_SUCCESS = "分析完成，报告已返回前端";
+    private static final String MESSAGE_ANALYSIS_FAILED = "分析失败";
+    private static final String RISK_SIGNATURE_DETAIL = "修改 class 或资源后，原签名通常会失效，导出包可能无法通过签名校验。";
+    private static final String RISK_NESTED_JAR_DETAIL = "包内存在依赖 Jar，导出时会保留结构；Spring Boot 依赖 Jar 会按未压缩方式写入。";
+    private static final String RISK_MULTI_RELEASE_DETAIL = "检测到 META-INF/versions，多版本类可能需要按目标 Java 版本单独验证。";
+    private static final String RISK_OBFUSCATION_DETAIL = "检测到较多短类名，可能是混淆代码，反编译后的源码不一定能直接重新编译。";
+    private static final int PROGRESS_MANIFEST = 20;
+    private static final int PROGRESS_STATISTICS = 40;
+    private static final int PROGRESS_RISKS = 70;
 
     private final WorkspaceService workspaceService;
     private final FileChangeRepository fileChangeRepository;
     private final TaskService taskService;
+    private final AnalysisReportRepository analysisReportRepository;
+    private final ClockService clockService;
 
     /**
      * 创建分析服务。
@@ -46,13 +62,19 @@ public class AnalysisService {
      * @param workspaceService     工作区服务
      * @param fileChangeRepository 修改记录仓储
      * @param taskService          任务服务
+     * @param analysisReportRepository 分析报告仓储
+     * @param clockService         时间服务
      */
     public AnalysisService(WorkspaceService workspaceService,
                            FileChangeRepository fileChangeRepository,
-                           TaskService taskService) {
+                           TaskService taskService,
+                           AnalysisReportRepository analysisReportRepository,
+                           ClockService clockService) {
         this.workspaceService = workspaceService;
         this.fileChangeRepository = fileChangeRepository;
         this.taskService = taskService;
+        this.analysisReportRepository = analysisReportRepository;
+        this.clockService = clockService;
     }
 
     /**
@@ -79,18 +101,18 @@ public class AnalysisService {
      * @throws IOException 读取工作区失败时抛出
      */
     public AnalysisReport analyze(ProjectRecord project, String taskId) throws IOException {
-        TaskRecord task = taskService.prepare(taskId, project.getId(), TASK_TYPE_ANALYZE, "开始分析包结构");
+        TaskRecord task = taskService.prepare(taskId, project.getId(), TASK_TYPE_ANALYZE, MESSAGE_ANALYSIS_START);
         try {
             Path extractedDir = workspaceService.extractedDir(project);
             AnalysisReport report = new AnalysisReport();
             report.setProjectId(project.getId());
             report.setPackageType(project.getPackageType());
 
-            taskService.running(task, 20, "读取 Manifest 和入口类");
+            taskService.running(task, PROGRESS_MANIFEST, MESSAGE_ANALYSIS_MANIFEST);
             taskService.ensureNotCancelled(task.getId());
             readManifest(extractedDir, report);
 
-            taskService.running(task, 40, "统计 class 和依赖");
+            taskService.running(task, PROGRESS_STATISTICS, MESSAGE_ANALYSIS_STATISTICS);
             taskService.ensureNotCancelled(task.getId());
             report.setSpringBootLayout(Files.exists(extractedDir.resolve(JarPatchConstants.SPRING_BOOT_CLASSES_DIR)));
             report.setWarLayout(Files.exists(extractedDir.resolve(JarPatchConstants.WAR_CLASSES_DIR)));
@@ -99,22 +121,51 @@ public class AnalysisService {
             report.setDependencyCount(report.getDependencies().size());
             report.setModifiedFiles(fileChangeRepository.findPaths(project.getId()));
 
-            taskService.running(task, 70, "识别导出风险");
+            taskService.running(task, PROGRESS_RISKS, MESSAGE_ANALYSIS_RISKS);
             taskService.ensureNotCancelled(task.getId());
             addRisks(extractedDir, report);
 
-            taskService.success(task, "分析完成，报告已返回前端");
+            analysisReportRepository.insert(project.getId(), report, clockService.now());
+            taskService.success(task, MESSAGE_ANALYSIS_SUCCESS);
             return report;
         } catch (IllegalStateException e) {
             if (JarPatchConstants.MESSAGE_TASK_CANCELLED.equals(e.getMessage())) {
                 throw e;
             }
-            taskService.failed(task, "分析失败: " + e.getMessage());
+            taskService.failed(task, MESSAGE_ANALYSIS_FAILED + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + e.getMessage());
             throw e;
         } catch (RuntimeException | IOException e) {
-            taskService.failed(task, "分析失败: " + e.getMessage());
+            taskService.failed(task, MESSAGE_ANALYSIS_FAILED + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + e.getMessage());
             throw e;
         }
+    }
+
+    /**
+     * 在导出任务内部执行完整结构与风险分析，不创建第二条分析任务。
+     * <p>
+     * 导出入口在写临时包前调用本方法，实际读取点仍是 extracted；分析结果用于签名、
+     * 多版本和包布局门禁，随后导出服务才允许进入打包与结构校验。
+     * </p>
+     *
+     * @param project 项目记录
+     * @return 当前工作区结构分析报告
+     * @throws IOException 读取工作区失败时抛出
+     */
+    public AnalysisReport analyzeForExport(ProjectRecord project) throws IOException {
+        Path extractedDir = workspaceService.extractedDir(project);
+        AnalysisReport report = new AnalysisReport();
+        report.setProjectId(project.getId());
+        report.setPackageType(project.getPackageType());
+        readManifest(extractedDir, report);
+        report.setSpringBootLayout(Files.exists(extractedDir.resolve(JarPatchConstants.SPRING_BOOT_CLASSES_DIR)));
+        report.setWarLayout(Files.exists(extractedDir.resolve(JarPatchConstants.WAR_CLASSES_DIR)));
+        report.setClassCount(countByExtension(extractedDir, JarPatchConstants.CLASS_EXTENSION));
+        report.setDependencies(findDependencies(extractedDir));
+        report.setDependencyCount(report.getDependencies().size());
+        report.setModifiedFiles(fileChangeRepository.findPaths(project.getId()));
+        addRisks(extractedDir, report);
+        analysisReportRepository.insert(project.getId(), report, clockService.now());
+        return report;
     }
 
     /**
@@ -186,19 +237,19 @@ public class AnalysisService {
     private void addRisks(Path extractedDir, AnalysisReport report) throws IOException {
         if (hasSignatureFile(extractedDir)) {
             report.getRisks().add(new RiskItem(RiskLevel.HIGH.getCode(), RISK_SIGNATURE_TITLE,
-                    "修改 class 或资源后，原签名通常会失效，导出包可能无法通过签名校验。"));
+                    RISK_SIGNATURE_DETAIL));
         }
         if (!report.getDependencies().isEmpty()) {
             report.getRisks().add(new RiskItem(RiskLevel.INFO.getCode(), RISK_NESTED_JAR_TITLE,
-                    "包内存在依赖 Jar，导出时会保留结构；Spring Boot 依赖 Jar 会按未压缩方式写入。"));
+                    RISK_NESTED_JAR_DETAIL));
         }
         if (Files.exists(extractedDir.resolve("META-INF/versions"))) {
             report.getRisks().add(new RiskItem(RiskLevel.WARN.getCode(), RISK_MULTI_RELEASE_TITLE,
-                    "检测到 META-INF/versions，多版本类可能需要按目标 Java 版本单独验证。"));
+                    RISK_MULTI_RELEASE_DETAIL));
         }
         if (hasShortClassNames(extractedDir)) {
             report.getRisks().add(new RiskItem(RiskLevel.WARN.getCode(), RISK_OBFUSCATION_TITLE,
-                    "检测到较多短类名，可能是混淆代码，反编译后的源码不一定能直接重新编译。"));
+                    RISK_OBFUSCATION_DETAIL));
         }
     }
 
@@ -248,7 +299,7 @@ public class AnalysisService {
     private String extension(String fileName) {
         int index = fileName.lastIndexOf('.');
         if (index < 0 || index == fileName.length() - 1) {
-            return "";
+            return JarPatchConstants.EMPTY_TEXT;
         }
         return fileName.substring(index + 1).toLowerCase();
     }

@@ -17,6 +17,8 @@ public class JdkSettingsView {
     private String effectiveJavaHome;
     private String effectiveJavacPath;
     private boolean effectiveValid;
+    private Integer effectiveFeatureVersion;
+    private String effectiveVersionText;
     private String message;
 
     /**
@@ -125,6 +127,42 @@ public class JdkSettingsView {
      */
     public void setEffectiveValid(boolean effectiveValid) {
         this.effectiveValid = effectiveValid;
+    }
+
+    /**
+     * 获取实际 javac 的 Java 特性版本。
+     *
+     * @return Java 特性版本
+     */
+    public Integer getEffectiveFeatureVersion() {
+        return effectiveFeatureVersion;
+    }
+
+    /**
+     * 设置实际 javac 的 Java 特性版本。
+     *
+     * @param effectiveFeatureVersion Java 特性版本
+     */
+    public void setEffectiveFeatureVersion(Integer effectiveFeatureVersion) {
+        this.effectiveFeatureVersion = effectiveFeatureVersion;
+    }
+
+    /**
+     * 获取 javac 原始版本文本。
+     *
+     * @return 版本文本
+     */
+    public String getEffectiveVersionText() {
+        return effectiveVersionText;
+    }
+
+    /**
+     * 设置 javac 原始版本文本。
+     *
+     * @param effectiveVersionText 版本文本
+     */
+    public void setEffectiveVersionText(String effectiveVersionText) {
+        this.effectiveVersionText = effectiveVersionText;
     }
 
     /**

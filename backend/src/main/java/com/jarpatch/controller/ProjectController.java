@@ -3,22 +3,29 @@ package com.jarpatch.controller;
 import com.jarpatch.common.ApiResponse;
 import com.jarpatch.common.JarPatchConstants;
 import com.jarpatch.model.AnalysisReport;
+import com.jarpatch.model.DiffReport;
 import com.jarpatch.model.ExportProjectRequest;
 import com.jarpatch.model.FileNode;
+import com.jarpatch.model.FileContentView;
 import com.jarpatch.model.ImportProjectRequest;
 import com.jarpatch.model.OperationResult;
 import com.jarpatch.model.ProjectImportInspection;
 import com.jarpatch.model.ProjectRecord;
+import com.jarpatch.model.ProjectSettings;
+import com.jarpatch.model.WorkspaceCleanupPreview;
 import com.jarpatch.model.SaveContentRequest;
 import com.jarpatch.model.SearchResult;
 import com.jarpatch.service.AnalysisService;
 import com.jarpatch.service.CompileService;
 import com.jarpatch.service.ExportService;
+import com.jarpatch.service.DiffService;
 import com.jarpatch.service.FileContentService;
 import com.jarpatch.service.FileTreeService;
 import com.jarpatch.service.ProjectInspectionService;
 import com.jarpatch.service.ProjectService;
 import com.jarpatch.service.SearchService;
+import com.jarpatch.service.ProjectSettingsService;
+import com.jarpatch.service.WorkspaceCleanupService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -54,6 +61,9 @@ public class ProjectController {
     private final ExportService exportService;
     private final SearchService searchService;
     private final ProjectInspectionService projectInspectionService;
+    private final DiffService diffService;
+    private final ProjectSettingsService projectSettingsService;
+    private final WorkspaceCleanupService workspaceCleanupService;
 
     /**
      * 创建项目控制器。
@@ -66,6 +76,9 @@ public class ProjectController {
      * @param exportService      导出服务
      * @param searchService      搜索服务
      * @param projectInspectionService 导入前预解析服务
+     * @param diffService        导出前差异服务
+     * @param projectSettingsService 项目设置服务
+     * @param workspaceCleanupService 工作区清理服务
      */
     public ProjectController(ProjectService projectService,
                              FileTreeService fileTreeService,
@@ -74,7 +87,10 @@ public class ProjectController {
                              CompileService compileService,
                              ExportService exportService,
                              SearchService searchService,
-                             ProjectInspectionService projectInspectionService) {
+                             ProjectInspectionService projectInspectionService,
+                             DiffService diffService,
+                             ProjectSettingsService projectSettingsService,
+                             WorkspaceCleanupService workspaceCleanupService) {
         this.projectService = projectService;
         this.fileTreeService = fileTreeService;
         this.fileContentService = fileContentService;
@@ -83,6 +99,74 @@ public class ProjectController {
         this.exportService = exportService;
         this.searchService = searchService;
         this.projectInspectionService = projectInspectionService;
+        this.diffService = diffService;
+        this.projectSettingsService = projectSettingsService;
+        this.workspaceCleanupService = workspaceCleanupService;
+    }
+
+    /**
+     * 读取项目级设置。
+     *
+     * @param projectId 项目 ID
+     * @return 项目级设置
+     */
+    @GetMapping("/{projectId}/settings")
+    public ApiResponse<ProjectSettings> getProjectSettings(@PathVariable("projectId") String projectId) {
+        return ApiResponse.success(projectSettingsService.get(projectId));
+    }
+
+    /**
+     * 保存项目级设置。
+     *
+     * @param projectId 项目 ID
+     * @param settings  完整项目设置
+     * @return 保存后的项目设置
+     * @throws IOException JSON 设置保存失败时抛出
+     */
+    @PutMapping("/{projectId}/settings")
+    public ApiResponse<ProjectSettings> saveProjectSettings(@PathVariable("projectId") String projectId,
+                                                             @RequestBody ProjectSettings settings) throws IOException {
+        return ApiResponse.success(projectSettingsService.save(projectId, settings));
+    }
+
+    /**
+     * 预览独立工作区清理范围，不删除文件或项目历史。
+     *
+     * @param projectId 项目 ID
+     * @return 路径、文件数、大小、最后使用时间和一次性确认标识
+     * @throws IOException 工作区统计失败时抛出
+     */
+    @GetMapping("/{projectId}/workspace/cleanup-preview")
+    public ApiResponse<WorkspaceCleanupPreview> previewWorkspaceCleanup(
+            @PathVariable("projectId") String projectId) throws IOException {
+        return ApiResponse.success(workspaceCleanupService.preview(projectId));
+    }
+
+    /**
+     * 使用预览返回的一次性确认标识清理工作区，项目历史继续保留。
+     *
+     * @param projectId      项目 ID
+     * @param confirmationId 一次性确认标识
+     * @return 清理结果文案
+     * @throws IOException 删除工作区失败时抛出
+     */
+    @DeleteMapping("/{projectId}/workspace")
+    public ApiResponse<String> cleanWorkspace(@PathVariable("projectId") String projectId,
+                                              @RequestParam("confirmationId") String confirmationId) throws IOException {
+        workspaceCleanupService.clean(projectId, confirmationId);
+        return ApiResponse.success(JarPatchConstants.MESSAGE_WORKSPACE_CLEANED);
+    }
+
+    /**
+     * 读取项目相对导入基线的源码、资源和 class 差异。
+     *
+     * @param projectId 项目 ID
+     * @return 导出前差异报告
+     * @throws IOException 文件比较失败时抛出
+     */
+    @GetMapping("/{projectId}/diff")
+    public ApiResponse<DiffReport> diff(@PathVariable("projectId") String projectId) throws IOException {
+        return ApiResponse.success(diffService.compare(requireProject(projectId)));
     }
 
     /**
@@ -161,7 +245,7 @@ public class ProjectController {
      * @throws IOException 读取失败时抛出
      */
     @GetMapping("/{projectId}/files/content")
-    public ApiResponse<String> readContent(@PathVariable("projectId") String projectId, @RequestParam("path") String path) throws IOException {
+    public ApiResponse<FileContentView> readContent(@PathVariable("projectId") String projectId, @RequestParam("path") String path) throws IOException {
         ProjectRecord project = requireProject(projectId);
         return ApiResponse.success(fileContentService.read(project, path));
     }
@@ -175,10 +259,9 @@ public class ProjectController {
      * @throws IOException 写入失败时抛出
      */
     @PutMapping("/{projectId}/files/content")
-    public ApiResponse<String> saveContent(@PathVariable("projectId") String projectId, @RequestBody SaveContentRequest request) throws IOException {
+    public ApiResponse<FileContentView> saveContent(@PathVariable("projectId") String projectId, @RequestBody SaveContentRequest request) throws IOException {
         ProjectRecord project = requireProject(projectId);
-        fileContentService.save(project, request.getPath(), request.getContent());
-        return ApiResponse.success("保存完成");
+        return ApiResponse.success(fileContentService.save(project, request.getPath(), request.getContent(), request.getExpectedHash()));
     }
 
     /**
@@ -239,7 +322,8 @@ public class ProjectController {
         ProjectRecord project = requireProject(projectId);
         String outputPath = request == null ? null : request.getOutputPath();
         String taskId = request == null ? null : request.getTaskId();
-        return ApiResponse.success(exportService.export(project, outputPath, taskId));
+        String signaturePolicy = request == null ? null : request.getSignaturePolicy();
+        return ApiResponse.success(exportService.export(project, outputPath, taskId, signaturePolicy));
     }
 
     /**
@@ -249,7 +333,11 @@ public class ProjectController {
      * @return 项目记录
      */
     private ProjectRecord requireProject(String projectId) {
-        return projectService.findById(projectId)
+        ProjectRecord project = projectService.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException(JarPatchConstants.MESSAGE_PROJECT_NOT_FOUND));
+        if (project.getWorkspaceCleanedAt() != null) {
+            throw new IllegalStateException(JarPatchConstants.MESSAGE_WORKSPACE_ALREADY_CLEANED);
+        }
+        return project;
     }
 }

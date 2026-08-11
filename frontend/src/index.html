@@ -3,11 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src http://127.0.0.1:18765 ws://127.0.0.1:18765; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
   <title>JarPatch Studio</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div id="notificationArea" class="notification-area" aria-live="polite"></div>
+  <div id="diffDialog" class="modal-backdrop" aria-hidden="true">
+    <section class="modal-panel diff-panel" role="dialog" aria-modal="true" aria-labelledby="diffDialogTitle">
+      <header class="modal-header">
+        <div>
+          <h2 id="diffDialogTitle">导出前差异确认</h2>
+          <p id="diffDialogSummary">比较导入基线、当前文件和已编译 class</p>
+        </div>
+      </header>
+      <div id="diffContent" class="diff-content"></div>
+      <footer class="modal-footer">
+        <button id="closeDiffBtn" class="primary-action modal-primary" type="button">关闭</button>
+      </footer>
+    </section>
+  </div>
   <div id="decompileDialog" class="modal-backdrop" aria-hidden="true">
     <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="decompileDialogTitle">
       <header class="modal-header">
@@ -57,6 +72,54 @@
       </footer>
     </section>
   </div>
+  <div id="projectSettingsDialog" class="modal-backdrop" aria-hidden="true">
+    <section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="projectSettingsDialogTitle">
+      <header class="modal-header">
+        <div>
+          <h2 id="projectSettingsDialogTitle">项目设置</h2>
+          <p>目标 Java 版本由原包 class 决定；其他选项仅作用于当前项目</p>
+        </div>
+      </header>
+      <div class="product-settings-grid">
+        <label class="field-label">目标 Java 版本
+          <input id="projectJavaVersionInput" type="text" readonly>
+        </label>
+        <label class="field-label field-wide">默认导出目录
+          <span class="settings-row">
+            <input id="defaultExportDirectoryInput" type="text" placeholder="不填写时使用项目工作区 exports 目录">
+            <button id="browseExportDirectoryBtn" class="tool-btn" type="button">浏览</button>
+          </span>
+        </label>
+        <label class="field-label">可编辑单文件上限（MB）
+          <input id="maxEditableFileMbInput" type="number" min="1" max="100" step="1">
+        </label>
+        <label class="field-label field-wide">推荐嵌套 Jar（每行一个包内相对路径）
+          <textarea id="selectedNestedJarsInput" rows="4"></textarea>
+        </label>
+        <label class="field-label field-wide">界面偏好（JSON 对象）
+          <textarea id="uiPreferencesInput" rows="4"></textarea>
+        </label>
+      </div>
+      <footer class="modal-footer">
+        <button id="closeProjectSettingsBtn" class="tool-btn" type="button">取消</button>
+        <button id="saveProjectSettingsBtn" class="primary-action modal-primary" type="button">保存项目设置</button>
+      </footer>
+    </section>
+  </div>
+  <div id="errorGuideDialog" class="modal-backdrop" aria-hidden="true">
+    <section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="errorGuideDialogTitle">
+      <header class="modal-header">
+        <div>
+          <h2 id="errorGuideDialogTitle">错误排查向导</h2>
+          <p>按错误现象核对检查项，再执行对应处理动作</p>
+        </div>
+      </header>
+      <div id="errorGuideContent" class="error-guide-content"></div>
+      <footer class="modal-footer">
+        <button id="closeErrorGuideBtn" class="primary-action modal-primary" type="button">关闭</button>
+      </footer>
+    </section>
+  </div>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
@@ -81,9 +144,13 @@
         </div>
         <div class="toolbar-actions">
           <button id="analyzeBtn" class="tool-btn" disabled>分析</button>
+          <button id="diffBtn" class="tool-btn" disabled>差异</button>
           <button id="compileBtn" class="tool-btn" disabled>编译</button>
           <button id="exportBtn" class="tool-btn" disabled>导出</button>
-          <button id="settingsBtn" class="tool-btn" type="button">⚙ 配置</button>
+          <button id="projectSettingsBtn" class="tool-btn" type="button" disabled>项目设置</button>
+          <button id="cleanupWorkspaceBtn" class="tool-btn" type="button" disabled>清理工作区</button>
+          <button id="errorGuideBtn" class="tool-btn" type="button">排错向导</button>
+          <button id="settingsBtn" class="tool-btn" type="button">⚙ JDK</button>
         </div>
       </header>
 
@@ -114,9 +181,13 @@
               <div id="activeFileName" class="active-file">未选择文件</div>
               <div id="activeFileKind" class="file-kind">可编辑 Java 与文本资源</div>
             </div>
-            <button id="saveBtn" class="tool-btn" disabled>保存</button>
+            <div class="editor-actions">
+              <button id="unicodePreviewBtn" class="tool-btn" type="button" aria-pressed="false" disabled>中文预览</button>
+              <button id="saveBtn" class="tool-btn" disabled>保存</button>
+            </div>
           </div>
           <textarea id="editor" spellcheck="false" wrap="off" disabled></textarea>
+          <textarea id="unicodePreview" aria-label="中文 Unicode 转义只读预览" spellcheck="false" wrap="off" readonly hidden></textarea>
         </section>
 
         <button id="analysisToggleBtn" class="analysis-toggle" type="button" aria-expanded="false" aria-controls="analysisPanel">

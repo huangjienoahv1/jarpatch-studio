@@ -1,6 +1,7 @@
 package com.jarpatch.service;
 
 import com.jarpatch.common.FileKind;
+import com.jarpatch.common.JarPatchConstants;
 import com.jarpatch.model.FileNode;
 import com.jarpatch.model.ProjectRecord;
 import org.springframework.stereotype.Service;
@@ -12,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 文件树服务。
@@ -74,11 +76,13 @@ public class FileTreeService {
         node.setKind(kind.getCode());
         node.setEditable(kind.isEditable());
         if (Files.isDirectory(path)) {
-            List<FileNode> children = Files.list(path)
-                    .sorted(Comparator.comparing(candidate -> candidate.getFileName().toString().toLowerCase()))
-                    .map(candidate -> buildChild(root, candidate, prefix))
-                    .collect(Collectors.toList());
-            node.setChildren(children);
+            try (Stream<Path> stream = Files.list(path)) {
+                List<FileNode> children = stream
+                        .sorted(Comparator.comparing(candidate -> candidate.getFileName().toString().toLowerCase()))
+                        .map(candidate -> buildChild(root, candidate, prefix))
+                        .collect(Collectors.toList());
+                node.setChildren(children);
+            }
         }
         return node;
     }
@@ -94,7 +98,7 @@ public class FileTreeService {
         try {
             return buildNode(root, candidate, prefix);
         } catch (IOException e) {
-            throw new IllegalStateException("构建文件树失败: " + candidate, e);
+            throw new IllegalStateException(JarPatchConstants.MESSAGE_FILE_TREE_BUILD_FAILED + candidate, e);
         }
     }
 }

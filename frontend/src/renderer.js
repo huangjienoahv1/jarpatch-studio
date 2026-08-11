@@ -1,5 +1,6 @@
-const API_BASE = 'http://127.0.0.1:18765';
-const WS_BASE = API_BASE.replace(/^http/, 'ws');
+let API_BASE = '';
+let WS_BASE = '';
+let API_TOKEN = '';
 const TOAST_AUTO_CLOSE_MS = 3200;
 const NOTICE_TYPE_SUCCESS = 'success';
 const NOTICE_TYPE_ERROR = 'error';
@@ -18,9 +19,15 @@ const MESSAGE_SEARCH_KEYWORD_EMPTY = '请输入搜索关键词';
 const MESSAGE_SEARCH_SUCCESS = '搜索完成';
 const MESSAGE_SEARCH_FAILED = '搜索失败';
 const MESSAGE_SAVE_SUCCESS = '保存完成';
+const MESSAGE_SAVE_UNCHANGED = '文件内容未变化，未写入磁盘';
 const MESSAGE_SAVE_FAILED = '保存失败';
+const MESSAGE_UNICODE_PREVIEW_EMPTY = '当前文件没有可预览的中文 Unicode 转义';
 const MESSAGE_ANALYZE_SUCCESS = '分析完成';
 const MESSAGE_ANALYZE_FAILED = '分析失败';
+const MESSAGE_DIFF_LOAD_FAILED = '读取差异失败';
+const MESSAGE_DIFF_EMPTY = '当前工作区与导入基线一致，且没有已提交编译产物';
+const MESSAGE_DIFF_EXPORT_CONFIRM = '请确认已查看源码、资源和 class 差异。是否继续选择导出路径？';
+const MESSAGE_SIGNATURE_POLICY_CONFIRM = '是否移除原包中会因修改而失效的签名文件？\n\n选择“确定”：移除失效签名并导出未签名包。\n选择“取消”：保留签名；若包已有修改，后端会阻止导出。';
 const MESSAGE_COMPILE_SUCCESS = '编译完成';
 const MESSAGE_COMPILE_FAILED = '编译失败';
 const MESSAGE_EXPORT_CANCELED = '已取消导出';
@@ -30,6 +37,19 @@ const MESSAGE_SETTINGS_LOADING = '正在读取 JDK 配置';
 const MESSAGE_SETTINGS_LOAD_FAILED = '读取 JDK 配置失败';
 const MESSAGE_SETTINGS_SAVE_FAILED = '保存 JDK 配置失败';
 const MESSAGE_SETTINGS_SAVE_SUCCESS = 'JDK 配置已保存';
+const MESSAGE_PROJECT_SETTINGS_LOAD_FAILED = '读取项目设置失败';
+const MESSAGE_PROJECT_SETTINGS_SAVE_FAILED = '保存项目设置失败';
+const MESSAGE_PROJECT_SETTINGS_SAVE_SUCCESS = '项目设置已保存';
+const MESSAGE_WORKSPACE_CLEANUP_FAILED = '工作区清理失败';
+const MESSAGE_WORKSPACE_CLEANUP_SUCCESS = '工作区已清理，项目历史仍然保留';
+const MESSAGE_WORKSPACE_CLEANUP_CONFIRM = '确认清理以下工作区吗？此操作会删除工作区文件，但保留项目历史。';
+const MESSAGE_ERROR_GUIDE_LOAD_FAILED = '读取错误向导失败';
+const MESSAGE_UNSAVED_CHANGES_CONFIRM = '当前文件有未保存修改，确认放弃这些修改吗？';
+const MESSAGE_UNSAVED_CHANGES = '未保存';
+const MESSAGE_UNSAVED_CHANGES_BLOCK_ACTION = '当前文件有未保存修改，请先保存再执行该操作';
+const MESSAGE_WORKSPACE_CLEANED_MARKER = '工作区已清理';
+const MESSAGE_ERROR_GUIDE_LOADING = '正在读取排错向导...';
+const EMPTY_JSON_OBJECT = '{}';
 const MESSAGE_PROJECT_HISTORY_EMPTY = '暂无项目历史';
 const MESSAGE_PROJECT_HISTORY_DELETE = '删除';
 const MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_PREFIX = '确认从项目历史删除“';
@@ -81,6 +101,8 @@ const BUTTON_TEXT_COMPILE = '编译';
 const BUTTON_TEXT_EXPORT = '导出';
 const BUTTON_TEXT_COMPILE_RUNNING = '编译中...';
 const BUTTON_TEXT_EXPORT_RUNNING = '导出中...';
+const BUTTON_TEXT_UNICODE_PREVIEW = '中文预览';
+const BUTTON_TEXT_UNICODE_SOURCE = '返回原文';
 const STORAGE_KEY_TREE_PANEL_WIDTH = 'jarpatch.treePanelWidth';
 const TREE_PANEL_DEFAULT_WIDTH = 380;
 const TREE_PANEL_MIN_WIDTH = 280;
@@ -91,6 +113,18 @@ const TREE_RESIZER_WIDTH = 8;
 const ANALYSIS_TOGGLE_WIDTH = 56;
 const ANALYSIS_PANEL_WIDTH = 330;
 const NUMBER_PARSE_RADIX = 10;
+const UNICODE_HEX_RADIX = 16;
+const UNICODE_ESCAPE_HEX_LENGTH = 4;
+const BACKSLASH_ESCAPE_PAIR_LENGTH = 2;
+const UNICODE_ESCAPE_HEX_PATTERN = new RegExp(`^[0-9a-fA-F]{${UNICODE_ESCAPE_HEX_LENGTH}}$`);
+const CHINESE_READABLE_RANGES = [
+  [0x3400, 0x4DBF],
+  [0x4E00, 0x9FFF],
+  [0xF900, 0xFAFF],
+  [0x3000, 0x303F],
+  [0xFF00, 0xFFEF]
+];
+const BYTES_PER_MEGABYTE = 1024 * 1024;
 const CHINA_TIME_ZONE = 'Asia/Shanghai';
 const CHINA_LOCALE = 'zh-CN';
 const PROJECT_TIME_SEPARATOR = ' · ';
@@ -125,8 +159,12 @@ const TASK_LABEL_MAP = {
 const state = {
   currentProject: null,
   currentFilePath: null,
+  currentFileHash: null,
+  currentFileOriginalContent: null,
+  unicodePreviewOpen: false,
   analysisOpen: false,
   analysisReport: null,
+  diffReport: null,
   currentInspection: null,
   currentTree: null,
   currentTask: null,
@@ -134,6 +172,7 @@ const state = {
   currentTaskAbortController: null,
   currentTaskCancelRequested: false,
   jdkSettings: null,
+  projectSettings: null,
   treePanelWidth: TREE_PANEL_DEFAULT_WIDTH,
   expandedPaths: new Set(['', 'sources', 'extracted'])
 };
@@ -144,9 +183,13 @@ const elements = {
   currentProjectName: document.getElementById('currentProjectName'),
   currentProjectMeta: document.getElementById('currentProjectMeta'),
   analyzeBtn: document.getElementById('analyzeBtn'),
+  diffBtn: document.getElementById('diffBtn'),
   compileBtn: document.getElementById('compileBtn'),
   exportBtn: document.getElementById('exportBtn'),
   settingsBtn: document.getElementById('settingsBtn'),
+  projectSettingsBtn: document.getElementById('projectSettingsBtn'),
+  cleanupWorkspaceBtn: document.getElementById('cleanupWorkspaceBtn'),
+  errorGuideBtn: document.getElementById('errorGuideBtn'),
   settingsDialog: document.getElementById('settingsDialog'),
   settingsDialogSummary: document.getElementById('settingsDialogSummary'),
   jdkHomeInput: document.getElementById('jdkHomeInput'),
@@ -155,6 +198,18 @@ const elements = {
   jdkSettingsStatus: document.getElementById('jdkSettingsStatus'),
   closeSettingsBtn: document.getElementById('closeSettingsBtn'),
   saveJdkSettingsBtn: document.getElementById('saveJdkSettingsBtn'),
+  projectSettingsDialog: document.getElementById('projectSettingsDialog'),
+  projectJavaVersionInput: document.getElementById('projectJavaVersionInput'),
+  defaultExportDirectoryInput: document.getElementById('defaultExportDirectoryInput'),
+  browseExportDirectoryBtn: document.getElementById('browseExportDirectoryBtn'),
+  maxEditableFileMbInput: document.getElementById('maxEditableFileMbInput'),
+  selectedNestedJarsInput: document.getElementById('selectedNestedJarsInput'),
+  uiPreferencesInput: document.getElementById('uiPreferencesInput'),
+  closeProjectSettingsBtn: document.getElementById('closeProjectSettingsBtn'),
+  saveProjectSettingsBtn: document.getElementById('saveProjectSettingsBtn'),
+  errorGuideDialog: document.getElementById('errorGuideDialog'),
+  errorGuideContent: document.getElementById('errorGuideContent'),
+  closeErrorGuideBtn: document.getElementById('closeErrorGuideBtn'),
   taskStatusText: document.getElementById('taskStatusText'),
   taskStatusDetail: document.getElementById('taskStatusDetail'),
   cancelTaskBtn: document.getElementById('cancelTaskBtn'),
@@ -166,8 +221,10 @@ const elements = {
   searchResults: document.getElementById('searchResults'),
   activeFileName: document.getElementById('activeFileName'),
   activeFileKind: document.getElementById('activeFileKind'),
+  unicodePreviewBtn: document.getElementById('unicodePreviewBtn'),
   saveBtn: document.getElementById('saveBtn'),
   editor: document.getElementById('editor'),
+  unicodePreview: document.getElementById('unicodePreview'),
   analysisToggleBtn: document.getElementById('analysisToggleBtn'),
   analysisCloseBtn: document.getElementById('analysisCloseBtn'),
   analysisBadge: document.getElementById('analysisBadge'),
@@ -176,6 +233,10 @@ const elements = {
   logOutput: document.getElementById('logOutput'),
   notificationArea: document.getElementById('notificationArea'),
   decompileDialog: document.getElementById('decompileDialog'),
+  diffDialog: document.getElementById('diffDialog'),
+  diffDialogSummary: document.getElementById('diffDialogSummary'),
+  diffContent: document.getElementById('diffContent'),
+  closeDiffBtn: document.getElementById('closeDiffBtn'),
   decompileDialogMeta: document.getElementById('decompileDialogMeta'),
   decompileDialogSummary: document.getElementById('decompileDialogSummary'),
   decompileCandidateList: document.getElementById('decompileCandidateList'),
@@ -187,12 +248,17 @@ const elements = {
 };
 
 async function api(path, options = {}) {
+  if (!API_BASE || !API_TOKEN) {
+    throw new Error('后端安全连接尚未就绪');
+  }
+  const { headers = {}, ...requestOptions } = options;
   const response = await fetch(`${API_BASE}${path}`, {
+    ...requestOptions,
     headers: {
       'Content-Type': 'application/json',
-      ...(options.headers || {})
-    },
-    ...options
+      'X-JarPatch-Token': API_TOKEN,
+      ...headers
+    }
   });
   const body = await response.json();
   if (!body.success) {
@@ -219,6 +285,145 @@ function getTaskLabel(taskType) {
  */
 function isTaskCanceledError(error) {
   return Boolean(error) && (error.name === 'AbortError' || error.message === MESSAGE_TASK_CANCELED);
+}
+
+/**
+ * 判断当前编辑器内容是否尚未保存。
+ *
+ * @return 存在未保存内容时返回 true
+ */
+function isEditorDirty() {
+  return Boolean(state.currentFilePath)
+    && state.currentFileOriginalContent !== null
+    && elements.editor.value !== state.currentFileOriginalContent;
+}
+
+/**
+ * 在切换文件、项目或清理工作区前确认是否放弃未保存内容。
+ *
+ * @return 可以继续操作时返回 true
+ */
+function confirmDiscardUnsavedChanges() {
+  return !isEditorDirty() || window.confirm(MESSAGE_UNSAVED_CHANGES_CONFIRM);
+}
+
+/**
+ * 根据编辑器脏状态更新文件提示和保存按钮。
+ */
+function updateDirtyIndicator() {
+  if (!state.currentFilePath) {
+    return;
+  }
+  const dirty = isEditorDirty();
+  const kind = elements.activeFileKind.dataset.kind || '';
+  elements.activeFileKind.textContent = dirty ? `${kind} · ${MESSAGE_UNSAVED_CHANGES}` : kind;
+  elements.saveBtn.classList.toggle('busy', dirty);
+  updateUnicodePreviewButton();
+}
+
+/**
+ * 判断字符是否属于常用中文、中文标点或全角字符范围。
+ *
+ * @param value 待判断字符
+ * @return 可以转换为中文可读内容时返回 true
+ */
+function isChineseReadableCharacter(value) {
+  const codePoint = value.codePointAt(0);
+  return CHINESE_READABLE_RANGES.some(([start, end]) => codePoint >= start && codePoint <= end);
+}
+
+/**
+ * 将文本中符合 Java 反斜杠规则的中文 Unicode 转义转换为只读预览内容。
+ * 连续偶数个反斜杠表示转义后的字面量，不参与转换，避免改变原代码含义。
+ *
+ * @param content 编辑器原始文本
+ * @return 预览内容和实际转换数量
+ */
+function decodeChineseUnicodeEscapes(content) {
+  let index = 0;
+  let convertedCount = 0;
+  const previewParts = [];
+  while (index < content.length) {
+    if (content[index] !== '\\') {
+      previewParts.push(content[index]);
+      index++;
+      continue;
+    }
+
+    let slashEnd = index;
+    while (slashEnd < content.length && content[slashEnd] === '\\') {
+      slashEnd++;
+    }
+    const slashCount = slashEnd - index;
+    if (slashCount % BACKSLASH_ESCAPE_PAIR_LENGTH === 0) {
+      previewParts.push(content.slice(index, slashEnd));
+      index = slashEnd;
+      continue;
+    }
+
+    previewParts.push(content.slice(index, slashEnd - 1));
+    let unicodeEnd = slashEnd;
+    while (unicodeEnd < content.length && content[unicodeEnd] === 'u') {
+      unicodeEnd++;
+    }
+    const hexadecimal = content.slice(unicodeEnd, unicodeEnd + UNICODE_ESCAPE_HEX_LENGTH);
+    if (unicodeEnd > slashEnd && UNICODE_ESCAPE_HEX_PATTERN.test(hexadecimal)) {
+      const decoded = String.fromCharCode(Number.parseInt(hexadecimal, UNICODE_HEX_RADIX));
+      if (isChineseReadableCharacter(decoded)) {
+        previewParts.push(decoded);
+        convertedCount++;
+        index = unicodeEnd + UNICODE_ESCAPE_HEX_LENGTH;
+        continue;
+      }
+    }
+    previewParts.push('\\');
+    index = slashEnd;
+  }
+  return { content: previewParts.join(''), convertedCount };
+}
+
+/**
+ * 根据当前文件内容更新中文预览按钮状态。
+ */
+function updateUnicodePreviewButton() {
+  elements.unicodePreviewBtn.disabled = elements.editor.disabled
+    || !state.currentFilePath
+    || !elements.editor.value.includes('\\u');
+}
+
+/**
+ * 关闭只读预览并恢复原始编辑器；原始文本始终保存在 editor 中，不参与替换。
+ */
+function closeUnicodePreview() {
+  state.unicodePreviewOpen = false;
+  elements.editor.hidden = false;
+  elements.unicodePreview.hidden = true;
+  elements.unicodePreview.value = '';
+  elements.unicodePreviewBtn.textContent = BUTTON_TEXT_UNICODE_PREVIEW;
+  elements.unicodePreviewBtn.setAttribute('aria-pressed', 'false');
+}
+
+/**
+ * 在原始编辑器和中文只读预览之间切换。
+ */
+function toggleUnicodePreview() {
+  if (state.unicodePreviewOpen) {
+    closeUnicodePreview();
+    elements.editor.focus();
+    return;
+  }
+  const decoded = decodeChineseUnicodeEscapes(elements.editor.value);
+  if (!decoded.convertedCount) {
+    notify(MESSAGE_UNICODE_PREVIEW_EMPTY, NOTICE_TYPE_INFO);
+    return;
+  }
+  elements.unicodePreview.value = decoded.content;
+  elements.unicodePreview.scrollTop = elements.editor.scrollTop;
+  elements.editor.hidden = true;
+  elements.unicodePreview.hidden = false;
+  elements.unicodePreviewBtn.textContent = BUTTON_TEXT_UNICODE_SOURCE;
+  elements.unicodePreviewBtn.setAttribute('aria-pressed', 'true');
+  state.unicodePreviewOpen = true;
 }
 
 /**
@@ -257,6 +462,9 @@ function updateTaskPanel(title, detail, active) {
 function restoreWorkspaceControls() {
   elements.openArchiveBtn.disabled = false;
   elements.settingsBtn.disabled = false;
+  elements.errorGuideBtn.disabled = false;
+  elements.projectSettingsBtn.disabled = !state.currentProject;
+  elements.cleanupWorkspaceBtn.disabled = !state.currentProject;
   elements.projectList.style.pointerEvents = '';
   elements.fileTree.style.pointerEvents = '';
   elements.searchResults.style.pointerEvents = '';
@@ -266,7 +474,9 @@ function restoreWorkspaceControls() {
   elements.searchBtn.disabled = !state.currentProject;
   elements.saveBtn.disabled = !state.currentProject || !state.currentFilePath;
   elements.editor.disabled = !state.currentProject || !state.currentFilePath;
+  updateUnicodePreviewButton();
   elements.analyzeBtn.disabled = !state.currentProject;
+  elements.diffBtn.disabled = !state.currentProject;
   elements.compileBtn.disabled = !state.currentProject;
   elements.exportBtn.disabled = !state.currentProject;
   elements.compileBtn.classList.remove('busy');
@@ -283,6 +493,9 @@ function restoreWorkspaceControls() {
 function lockWorkspaceControls() {
   elements.openArchiveBtn.disabled = true;
   elements.settingsBtn.disabled = true;
+  elements.errorGuideBtn.disabled = true;
+  elements.projectSettingsBtn.disabled = true;
+  elements.cleanupWorkspaceBtn.disabled = true;
   elements.projectList.style.pointerEvents = 'none';
   elements.fileTree.style.pointerEvents = 'none';
   elements.searchResults.style.pointerEvents = 'none';
@@ -291,8 +504,10 @@ function lockWorkspaceControls() {
   elements.searchInput.disabled = true;
   elements.searchBtn.disabled = true;
   elements.saveBtn.disabled = true;
+  elements.unicodePreviewBtn.disabled = true;
   elements.editor.disabled = true;
   elements.analyzeBtn.disabled = true;
+  elements.diffBtn.disabled = true;
   elements.compileBtn.disabled = true;
   elements.exportBtn.disabled = true;
 }
@@ -319,7 +534,7 @@ function closeTaskSocket() {
  */
 function openTaskSocket(taskId) {
   closeTaskSocket();
-  const socket = new WebSocket(`${WS_BASE}/ws/tasks/${taskId}`);
+  const socket = new WebSocket(`${WS_BASE}/ws/tasks/${taskId}?token=${encodeURIComponent(API_TOKEN)}`);
   state.currentTaskSocket = socket;
   return new Promise((resolve) => {
     let settled = false;
@@ -530,7 +745,7 @@ async function pickJdkHomeDirectory() {
     || (state.jdkSettings && state.jdkSettings.configuredJavaHome)
     || (state.jdkSettings && state.jdkSettings.effectiveJavaHome)
     || '';
-  const selectedPath = await window.jarPatch.pickDirectory(initialPath);
+  const selectedPath = await window.jarPatch.pickDirectory(initialPath, '选择 JDK 安装目录');
   if (!selectedPath) {
     return;
   }
@@ -563,6 +778,155 @@ async function saveJdkSettings() {
   }
 }
 
+/**
+ * 打开并加载当前项目设置。
+ */
+async function openProjectSettingsDialog() {
+  if (!state.currentProject) {
+    return;
+  }
+  elements.projectSettingsDialog.classList.add('open');
+  elements.projectSettingsDialog.setAttribute('aria-hidden', 'false');
+  try {
+    const settings = await api(`/api/projects/${state.currentProject.id}/settings`);
+    state.projectSettings = settings;
+    elements.projectJavaVersionInput.value = `Java ${settings.targetJavaVersion}`;
+    elements.defaultExportDirectoryInput.value = settings.defaultExportDirectory || '';
+    elements.maxEditableFileMbInput.value = settings.maxEditableFileBytes / BYTES_PER_MEGABYTE;
+    elements.selectedNestedJarsInput.value = (settings.selectedNestedJars || []).join('\n');
+    elements.uiPreferencesInput.value = settings.uiPreferencesJson || EMPTY_JSON_OBJECT;
+  } catch (error) {
+    notify(`${MESSAGE_PROJECT_SETTINGS_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+    closeProjectSettingsDialog();
+  }
+}
+
+/**
+ * 关闭项目设置弹窗。
+ */
+function closeProjectSettingsDialog() {
+  elements.projectSettingsDialog.classList.remove('open');
+  elements.projectSettingsDialog.setAttribute('aria-hidden', 'true');
+}
+
+/**
+ * 选择当前项目的默认导出目录。
+ */
+async function pickExportDirectory() {
+  const selectedPath = await window.jarPatch.pickDirectory(
+    elements.defaultExportDirectoryInput.value.trim(),
+    '选择默认导出目录'
+  );
+  if (selectedPath) {
+    elements.defaultExportDirectoryInput.value = selectedPath;
+  }
+}
+
+/**
+ * 保存当前项目设置。
+ */
+async function saveProjectSettings() {
+  if (!state.currentProject || !state.projectSettings) {
+    return;
+  }
+  const maxEditableFileMb = Number(elements.maxEditableFileMbInput.value);
+  const selectedNestedJars = elements.selectedNestedJarsInput.value
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  try {
+    const settings = await api(`/api/projects/${state.currentProject.id}/settings`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        targetJavaVersion: state.projectSettings.targetJavaVersion,
+        defaultExportDirectory: elements.defaultExportDirectoryInput.value.trim() || null,
+        selectedNestedJars,
+        maxEditableFileBytes: maxEditableFileMb * BYTES_PER_MEGABYTE,
+        uiPreferencesJson: elements.uiPreferencesInput.value.trim()
+      })
+    });
+    state.projectSettings = settings;
+    notify(MESSAGE_PROJECT_SETTINGS_SAVE_SUCCESS, NOTICE_TYPE_SUCCESS);
+    closeProjectSettingsDialog();
+  } catch (error) {
+    notify(`${MESSAGE_PROJECT_SETTINGS_SAVE_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
+}
+
+/**
+ * 预览并确认清理当前项目工作区。
+ */
+async function cleanupCurrentWorkspace() {
+  if (!state.currentProject || !confirmDiscardUnsavedChanges()) {
+    return;
+  }
+  try {
+    const preview = await api(`/api/projects/${state.currentProject.id}/workspace/cleanup-preview`);
+    const details = [
+      MESSAGE_WORKSPACE_CLEANUP_CONFIRM,
+      `项目：${preview.projectName}`,
+      `路径：${preview.workspacePath}`,
+      `文件：${preview.fileCount} 个`,
+      `大小：${formatBytes(preview.totalBytes)}`,
+      `最后使用：${preview.lastUsedAt}`
+    ].join('\n');
+    if (!window.confirm(details)) {
+      return;
+    }
+    await api(`/api/projects/${state.currentProject.id}/workspace?confirmationId=${encodeURIComponent(preview.confirmationId)}`, {
+      method: 'DELETE'
+    });
+    resetCurrentProject();
+    await loadProjects();
+    notify(MESSAGE_WORKSPACE_CLEANUP_SUCCESS, NOTICE_TYPE_SUCCESS);
+  } catch (error) {
+    notify(`${MESSAGE_WORKSPACE_CLEANUP_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
+}
+
+/**
+ * 打开错误排查向导。
+ */
+async function openErrorGuideDialog() {
+  elements.errorGuideDialog.classList.add('open');
+  elements.errorGuideDialog.setAttribute('aria-hidden', 'false');
+  elements.errorGuideContent.innerHTML = `<div class="empty">${MESSAGE_ERROR_GUIDE_LOADING}</div>`;
+  try {
+    const items = await api('/api/system/error-guide');
+    elements.errorGuideContent.innerHTML = items.map((item) => `
+      <section class="error-guide-item">
+        <h3>${escapeHtml(item.title)}</h3>
+        <p><strong>现象：</strong>${escapeHtml(item.symptom)}</p>
+        <p><strong>检查：</strong></p>
+        <ul>${item.checks.map((value) => `<li>${escapeHtml(value)}</li>`).join('')}</ul>
+        <p><strong>处理：</strong></p>
+        <ul>${item.actions.map((value) => `<li>${escapeHtml(value)}</li>`).join('')}</ul>
+      </section>
+    `).join('');
+  } catch (error) {
+    elements.errorGuideContent.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    notify(`${MESSAGE_ERROR_GUIDE_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
+}
+
+/**
+ * 关闭错误排查向导。
+ */
+function closeErrorGuideDialog() {
+  elements.errorGuideDialog.classList.remove('open');
+  elements.errorGuideDialog.setAttribute('aria-hidden', 'true');
+}
+
+/**
+ * 把字节数格式化为便于确认的容量文本。
+ *
+ * @param bytes 字节数
+ * @return 容量文本
+ */
+function formatBytes(bytes) {
+  return `${(bytes / BYTES_PER_MEGABYTE).toFixed(2)} MB`;
+}
+
 async function loadProjects() {
   try {
     const projects = await api('/api/projects');
@@ -584,7 +948,11 @@ function renderProjects(projects) {
 
     const selectButton = document.createElement('button');
     selectButton.className = 'project-main';
-    selectButton.innerHTML = `<strong>${escapeHtml(project.name)}</strong><span>${project.packageType}${PROJECT_TIME_SEPARATOR}${escapeHtml(formatProjectTime(project.updatedAt))}</span>`;
+    const workspaceState = project.workspaceCleanedAt
+      ? `${PROJECT_TIME_SEPARATOR}${MESSAGE_WORKSPACE_CLEANED_MARKER}`
+      : '';
+    selectButton.innerHTML = `<strong>${escapeHtml(project.name)}</strong><span>${project.packageType}${PROJECT_TIME_SEPARATOR}${escapeHtml(formatProjectTime(project.updatedAt))}${workspaceState}</span>`;
+    selectButton.disabled = Boolean(project.workspaceCleanedAt);
     selectButton.addEventListener('click', () => selectProject(project));
 
     const deleteButton = document.createElement('button');
@@ -602,8 +970,15 @@ function renderProjects(projects) {
 }
 
 async function selectProject(project) {
+  if (project.workspaceCleanedAt || !confirmDiscardUnsavedChanges()) {
+    return;
+  }
   state.currentProject = project;
+  state.projectSettings = null;
+  state.diffReport = null;
   state.currentFilePath = null;
+  state.currentFileHash = null;
+  state.currentFileOriginalContent = null;
   state.currentTree = null;
   elements.currentProjectName.textContent = project.name;
   elements.currentProjectMeta.textContent = `${project.packageType} · ${project.workspacePath}`;
@@ -611,6 +986,7 @@ async function selectProject(project) {
   elements.searchInput.disabled = false;
   elements.searchBtn.disabled = false;
   elements.saveBtn.disabled = true;
+  closeUnicodePreview();
   elements.editor.value = '';
   elements.editor.disabled = true;
   elements.activeFileName.textContent = '未选择文件';
@@ -621,6 +997,9 @@ async function selectProject(project) {
 }
 
 async function deleteProjectHistory(project) {
+  if (state.currentProject && state.currentProject.id === project.id && !confirmDiscardUnsavedChanges()) {
+    return;
+  }
   const confirmed = window.confirm(`${MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_PREFIX}${project.name}${MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_SUFFIX}`);
   if (!confirmed) {
     return;
@@ -639,7 +1018,11 @@ async function deleteProjectHistory(project) {
 
 function resetCurrentProject() {
   state.currentProject = null;
+  state.projectSettings = null;
+  state.diffReport = null;
   state.currentFilePath = null;
+  state.currentFileHash = null;
+  state.currentFileOriginalContent = null;
   state.currentTree = null;
   elements.currentProjectName.textContent = MESSAGE_PROJECT_NOT_OPENED;
   elements.currentProjectMeta.textContent = MESSAGE_PROJECT_OPEN_TIP;
@@ -650,10 +1033,13 @@ function resetCurrentProject() {
   elements.searchResults.innerHTML = '';
   elements.fileTree.classList.add('empty');
   elements.fileTree.textContent = MESSAGE_FILE_TREE_EMPTY;
+  closeUnicodePreview();
   elements.editor.value = '';
   elements.editor.disabled = true;
   elements.activeFileName.textContent = MESSAGE_ACTIVE_FILE_EMPTY;
   elements.activeFileKind.textContent = MESSAGE_ACTIVE_FILE_TIP;
+  elements.activeFileKind.dataset.kind = '';
+  elements.saveBtn.classList.remove('busy');
   resetAnalysisPanel();
 }
 
@@ -735,14 +1121,23 @@ async function openFile(node) {
   if (!state.currentProject) {
     return;
   }
+  if (node.path !== state.currentFilePath && !confirmDiscardUnsavedChanges()) {
+    return;
+  }
   try {
-    const content = await api(`/api/projects/${state.currentProject.id}/files/content?path=${encodeURIComponent(node.path)}`);
+    const contentView = await api(`/api/projects/${state.currentProject.id}/files/content?path=${encodeURIComponent(node.path)}`);
+    closeUnicodePreview();
     state.currentFilePath = node.path;
     elements.editor.disabled = false;
-    elements.editor.value = content;
+    elements.editor.value = contentView.content;
+    state.currentFileOriginalContent = elements.editor.value;
+    state.currentFileHash = contentView.contentHash;
+    updateDirtyIndicator();
     elements.saveBtn.disabled = false;
     elements.activeFileName.textContent = node.path;
     elements.activeFileKind.textContent = node.kind;
+    elements.activeFileKind.dataset.kind = node.kind;
+    updateDirtyIndicator();
   } catch (error) {
     notify(`${MESSAGE_FILE_OPEN_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
   }
@@ -820,14 +1215,26 @@ async function saveCurrentFile() {
   if (!state.currentProject || !state.currentFilePath) {
     return;
   }
+  if (elements.editor.value === state.currentFileOriginalContent) {
+    notify(MESSAGE_SAVE_UNCHANGED, NOTICE_TYPE_INFO);
+    return;
+  }
   try {
-    await api(`/api/projects/${state.currentProject.id}/files/content`, {
+    const contentView = await api(`/api/projects/${state.currentProject.id}/files/content`, {
       method: 'PUT',
       body: JSON.stringify({
         path: state.currentFilePath,
-        content: elements.editor.value
+        content: elements.editor.value,
+        expectedHash: state.currentFileHash
       })
     });
+    elements.editor.value = contentView.content;
+    if (state.unicodePreviewOpen) {
+      elements.unicodePreview.value = decodeChineseUnicodeEscapes(elements.editor.value).content;
+    }
+    state.currentFileOriginalContent = elements.editor.value;
+    state.currentFileHash = contentView.contentHash;
+    updateDirtyIndicator();
     notify(`${MESSAGE_SAVE_SUCCESS}：${state.currentFilePath}`, NOTICE_TYPE_SUCCESS);
   } catch (error) {
     notify(`${MESSAGE_SAVE_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
@@ -835,6 +1242,9 @@ async function saveCurrentFile() {
 }
 
 async function importArchive() {
+  if (!confirmDiscardUnsavedChanges()) {
+    return;
+  }
   const filePath = await window.jarPatch.openArchive();
   if (!filePath) {
     notify(MESSAGE_OPEN_CANCELED, NOTICE_TYPE_INFO);
@@ -969,6 +1379,10 @@ async function analyzeProject() {
   if (!state.currentProject) {
     return;
   }
+  if (isEditorDirty()) {
+    notify(MESSAGE_UNSAVED_CHANGES_BLOCK_ACTION, NOTICE_TYPE_INFO);
+    return;
+  }
   try {
     const report = await executeTaskOperation(TASK_TYPE_ANALYZE, state.currentProject.id, '开始分析包结构', (task, signal) => api(`/api/projects/${state.currentProject.id}/analyze`, {
       method: 'POST',
@@ -1030,6 +1444,10 @@ async function compileProject() {
   if (!state.currentProject) {
     return;
   }
+  if (isEditorDirty()) {
+    notify(MESSAGE_UNSAVED_CHANGES_BLOCK_ACTION, NOTICE_TYPE_INFO);
+    return;
+  }
   setActionButtonRunning(elements.compileBtn, BUTTON_TEXT_COMPILE_RUNNING);
   try {
     const result = await executeTaskOperation(TASK_TYPE_COMPILE, state.currentProject.id, '开始编译修改过的 Java 文件', (task, signal) => api(`/api/projects/${state.currentProject.id}/compile`, {
@@ -1047,11 +1465,112 @@ async function compileProject() {
   }
 }
 
+async function loadDiffReport() {
+  if (!state.currentProject) {
+    return null;
+  }
+  const report = await api(`/api/projects/${state.currentProject.id}/diff`);
+  state.diffReport = report;
+  return report;
+}
+
+function renderDiffReport(report) {
+  const sourceDiffs = report.sourceDiffs || [];
+  const resourceDiffs = report.resourceDiffs || [];
+  const artifacts = report.compiledArtifacts || [];
+  elements.diffDialogSummary.textContent = `源码 ${sourceDiffs.length} 项 · 资源 ${resourceDiffs.length} 项 · class ${artifacts.length} 项`;
+  elements.diffContent.replaceChildren();
+
+  const fileDiffs = [...sourceDiffs, ...resourceDiffs];
+  for (const diff of fileDiffs) {
+    const details = document.createElement('details');
+    details.className = 'diff-item';
+    const summary = document.createElement('summary');
+    summary.textContent = `${diff.status} · ${diff.path}`;
+    details.appendChild(summary);
+
+    const columns = document.createElement('div');
+    columns.className = 'diff-columns';
+    const original = document.createElement('pre');
+    original.textContent = `导入基线\n${diff.originalContent == null ? '（不存在）' : diff.originalContent}`;
+    const current = document.createElement('pre');
+    current.textContent = `当前内容\n${diff.currentContent == null ? '（不存在）' : diff.currentContent}`;
+    columns.appendChild(original);
+    columns.appendChild(current);
+    details.appendChild(columns);
+    elements.diffContent.appendChild(details);
+  }
+
+  if (artifacts.length > 0) {
+    const artifactSection = document.createElement('section');
+    artifactSection.className = 'diff-artifacts';
+    const title = document.createElement('strong');
+    title.textContent = '已提交 class 清单';
+    const content = document.createElement('pre');
+    content.textContent = artifacts.join('\n');
+    artifactSection.appendChild(title);
+    artifactSection.appendChild(content);
+    elements.diffContent.appendChild(artifactSection);
+  }
+
+  if (fileDiffs.length === 0 && artifacts.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'diff-empty';
+    empty.textContent = MESSAGE_DIFF_EMPTY;
+    elements.diffContent.appendChild(empty);
+  }
+}
+
+async function openDiffDialog() {
+  try {
+    const report = await loadDiffReport();
+    if (!report) {
+      return;
+    }
+    renderDiffReport(report);
+    elements.diffDialog.classList.add('open');
+    elements.diffDialog.setAttribute('aria-hidden', 'false');
+  } catch (error) {
+    notify(`${MESSAGE_DIFF_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
+}
+
+function closeDiffDialog() {
+  elements.diffDialog.classList.remove('open');
+  elements.diffDialog.setAttribute('aria-hidden', 'true');
+}
+
 async function exportProject() {
   if (!state.currentProject) {
     return;
   }
-  const outputPath = await window.jarPatch.saveArchive(state.currentProject.name.replace(/(\.jar|\.war)$/i, '-patched$1'));
+  if (isEditorDirty()) {
+    notify(MESSAGE_UNSAVED_CHANGES_BLOCK_ACTION, NOTICE_TYPE_INFO);
+    return;
+  }
+  let diffReport;
+  try {
+    diffReport = await loadDiffReport();
+  } catch (error) {
+    notify(`${MESSAGE_DIFF_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+    return;
+  }
+  renderDiffReport(diffReport);
+  elements.diffDialog.classList.add('open');
+  elements.diffDialog.setAttribute('aria-hidden', 'false');
+  if (!window.confirm(MESSAGE_DIFF_EXPORT_CONFIRM)) {
+    closeDiffDialog();
+    return;
+  }
+  closeDiffDialog();
+  const removeSignatures = window.confirm(MESSAGE_SIGNATURE_POLICY_CONFIRM);
+  const settings = state.projectSettings || await api(`/api/projects/${state.currentProject.id}/settings`);
+  state.projectSettings = settings;
+  const defaultName = state.currentProject.name.replace(/(\.jar|\.war)$/i, '-patched$1');
+  const defaultPath = settings.defaultExportDirectory
+    ? `${settings.defaultExportDirectory.replace(/[\\/]$/, '')}/${defaultName}`
+    : defaultName;
+  const outputPath = await window.jarPatch.saveArchive(defaultPath);
   if (!outputPath) {
     notify(MESSAGE_EXPORT_CANCELED, NOTICE_TYPE_INFO);
     return;
@@ -1061,7 +1580,11 @@ async function exportProject() {
     const result = await executeTaskOperation(TASK_TYPE_EXPORT, state.currentProject.id, `开始导出修改后的包: ${outputPath}`, (task, signal) => api(`/api/projects/${state.currentProject.id}/export`, {
       method: 'POST',
       signal,
-      body: JSON.stringify({ outputPath, taskId: task.id })
+      body: JSON.stringify({
+        outputPath,
+        taskId: task.id,
+        signaturePolicy: removeSignatures ? 'REMOVE_INVALID_SIGNATURES' : 'PRESERVE_ONLY_UNMODIFIED'
+      })
     }));
     if (result) {
       notify(`${MESSAGE_EXPORT_SUCCESS}：${result.outputPath}`, NOTICE_TYPE_SUCCESS);
@@ -1169,16 +1692,26 @@ function escapeHtml(value) {
 }
 
 elements.openArchiveBtn.addEventListener('click', importArchive);
+elements.unicodePreviewBtn.addEventListener('click', toggleUnicodePreview);
 elements.saveBtn.addEventListener('click', saveCurrentFile);
 elements.analyzeBtn.addEventListener('click', analyzeProject);
+elements.diffBtn.addEventListener('click', openDiffDialog);
 elements.compileBtn.addEventListener('click', compileProject);
 elements.exportBtn.addEventListener('click', exportProject);
 elements.settingsBtn.addEventListener('click', openSettingsDialog);
+elements.projectSettingsBtn.addEventListener('click', openProjectSettingsDialog);
+elements.cleanupWorkspaceBtn.addEventListener('click', cleanupCurrentWorkspace);
+elements.errorGuideBtn.addEventListener('click', openErrorGuideDialog);
 elements.searchBtn.addEventListener('click', searchProject);
 elements.cancelTaskBtn.addEventListener('click', cancelCurrentTask);
 elements.browseJdkBtn.addEventListener('click', pickJdkHomeDirectory);
 elements.closeSettingsBtn.addEventListener('click', closeSettingsDialog);
 elements.saveJdkSettingsBtn.addEventListener('click', saveJdkSettings);
+elements.browseExportDirectoryBtn.addEventListener('click', pickExportDirectory);
+elements.closeProjectSettingsBtn.addEventListener('click', closeProjectSettingsDialog);
+elements.saveProjectSettingsBtn.addEventListener('click', saveProjectSettings);
+elements.closeErrorGuideBtn.addEventListener('click', closeErrorGuideDialog);
+elements.closeDiffBtn.addEventListener('click', closeDiffDialog);
 elements.treeResizeHandle.addEventListener('pointerdown', beginTreeResize);
 elements.analysisToggleBtn.addEventListener('click', () => setAnalysisPanelOpen(!state.analysisOpen));
 elements.analysisCloseBtn.addEventListener('click', () => setAnalysisPanelOpen(false));
@@ -1196,6 +1729,44 @@ elements.searchInput.addEventListener('keydown', (event) => {
   }
 });
 
-initializeTreePanelWidth();
-restoreWorkspaceControls();
-loadProjects();
+async function initializeApplication() {
+  const connection = await window.jarPatch.getBackendConnection();
+  API_BASE = connection.apiBase;
+  WS_BASE = API_BASE.replace(/^http/, 'ws');
+  API_TOKEN = connection.token;
+  initializeTreePanelWidth();
+  restoreWorkspaceControls();
+  await loadProjects();
+}
+
+initializeApplication().catch((error) => {
+  notify(`连接本地后端失败：${error.message}`, NOTICE_TYPE_ERROR);
+});
+elements.projectSettingsDialog.addEventListener('click', (event) => {
+  if (event.target === elements.projectSettingsDialog) {
+    closeProjectSettingsDialog();
+  }
+});
+elements.errorGuideDialog.addEventListener('click', (event) => {
+  if (event.target === elements.errorGuideDialog) {
+    closeErrorGuideDialog();
+  }
+});
+elements.editor.addEventListener('input', updateDirtyIndicator);
+document.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault();
+    saveCurrentFile();
+  }
+});
+window.addEventListener('beforeunload', (event) => {
+  if (isEditorDirty()) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});
+elements.diffDialog.addEventListener('click', (event) => {
+  if (event.target === elements.diffDialog) {
+    closeDiffDialog();
+  }
+});

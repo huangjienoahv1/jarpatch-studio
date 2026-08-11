@@ -3,6 +3,7 @@ package com.jarpatch.controller;
 import com.jarpatch.common.ApiResponse;
 import com.jarpatch.common.JarPatchConstants;
 import com.jarpatch.model.TaskRecord;
+import com.jarpatch.model.TaskLogRecord;
 import com.jarpatch.service.TaskService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
+import java.util.List;
 
 /**
  * 任务查询控制器。
@@ -24,6 +26,10 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/tasks")
 public class TaskController {
+
+    private static final String REQUEST_TASK_TYPE = "taskType";
+    private static final String REQUEST_PROJECT_ID = "projectId";
+    private static final String REQUEST_MESSAGE = "message";
 
     private final TaskService taskService;
 
@@ -50,6 +56,17 @@ public class TaskController {
     }
 
     /**
+     * 查询任务的持久化进度日志。
+     *
+     * @param taskId 任务 ID
+     * @return 按产生顺序排列的日志
+     */
+    @GetMapping("/{taskId}/logs")
+    public ApiResponse<List<TaskLogRecord>> getTaskLogs(@PathVariable("taskId") String taskId) {
+        return ApiResponse.success(taskService.findLogs(taskId));
+    }
+
+    /**
      * 创建一个新的任务记录。
      * <p>
      * 前端会先调用该接口拿到 taskId，再连接 /ws/tasks/{taskId}，最后把 taskId 传给导入、
@@ -64,13 +81,14 @@ public class TaskController {
         if (request == null) {
             throw new IllegalArgumentException(JarPatchConstants.MESSAGE_TASK_TYPE_EMPTY);
         }
-        String taskType = trimToNull(request.get("taskType"));
+        String taskType = trimToNull(request.get(REQUEST_TASK_TYPE));
         if (taskType == null) {
             throw new IllegalArgumentException(JarPatchConstants.MESSAGE_TASK_TYPE_EMPTY);
         }
-        String projectId = trimToNull(request.get("projectId"));
-        String message = trimToNull(request.get("message"));
-        return ApiResponse.success(taskService.create(projectId, taskType, message == null ? "" : message));
+        String projectId = trimToNull(request.get(REQUEST_PROJECT_ID));
+        String message = trimToNull(request.get(REQUEST_MESSAGE));
+        return ApiResponse.success(taskService.create(projectId, taskType,
+                message == null ? JarPatchConstants.EMPTY_TEXT : message));
     }
 
     /**

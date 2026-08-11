@@ -17,6 +17,7 @@ public class OperationResult {
     private String outputPath;
     private List<String> changedFiles = new ArrayList<>();
     private String message;
+    private ExportValidationResult validation;
 
     public String getTaskId() {
         return taskId;
@@ -48,5 +49,23 @@ public class OperationResult {
 
     public void setMessage(String message) {
         this.message = message;
+    }
+
+    /**
+     * 获取导出结构校验结果。
+     *
+     * @return 校验结果
+     */
+    public ExportValidationResult getValidation() {
+        return validation;
+    }
+
+    /**
+     * 设置导出结构校验结果。
+     *
+     * @param validation 校验结果
+     */
+    public void setValidation(ExportValidationResult validation) {
+        this.validation = validation;
     }
 }

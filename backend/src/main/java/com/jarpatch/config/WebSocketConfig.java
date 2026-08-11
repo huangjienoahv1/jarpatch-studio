@@ -19,15 +19,26 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 @EnableWebSocket
 public class WebSocketConfig implements WebSocketConfigurer {
 
+    private static final String LOCAL_FILE_ORIGIN = "file://";
+    private static final String LOCAL_HTTP_ORIGIN = "http://127.0.0.1:18765";
+
     private final TaskWebSocketHandler taskWebSocketHandler;
+    private final LocalAccessHandshakeInterceptor localAccessHandshakeInterceptor;
+    private final LocalAccessProperties localAccessProperties;
 
     /**
      * 创建 WebSocket 配置。
      *
-     * @param taskWebSocketHandler 任务日志 WebSocket 处理器
+     * @param taskWebSocketHandler           任务日志 WebSocket 处理器
+     * @param localAccessHandshakeInterceptor 本地令牌握手拦截器
+     * @param localAccessProperties           本地实例访问配置
      */
-    public WebSocketConfig(TaskWebSocketHandler taskWebSocketHandler) {
+    public WebSocketConfig(TaskWebSocketHandler taskWebSocketHandler,
+                           LocalAccessHandshakeInterceptor localAccessHandshakeInterceptor,
+                           LocalAccessProperties localAccessProperties) {
         this.taskWebSocketHandler = taskWebSocketHandler;
+        this.localAccessHandshakeInterceptor = localAccessHandshakeInterceptor;
+        this.localAccessProperties = localAccessProperties;
     }
 
     /**
@@ -38,6 +49,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(taskWebSocketHandler, "/ws/tasks/{taskId}")
-                .setAllowedOrigins("*");
+                .addInterceptors(localAccessHandshakeInterceptor)
+                .setAllowedOrigins(localAccessProperties.getAllowedOrigin(), LOCAL_FILE_ORIGIN, LOCAL_HTTP_ORIGIN);
     }
 }

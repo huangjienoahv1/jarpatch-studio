@@ -2,6 +2,8 @@ package com.jarpatch.controller;
 
 import com.jarpatch.common.ApiResponse;
 import com.jarpatch.common.JarPatchConstants;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -16,6 +18,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     /**
      * 处理业务参数异常。
@@ -47,6 +51,8 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public ApiResponse<Void> handleException(Exception exception) {
-        return ApiResponse.failed(JarPatchConstants.MESSAGE_FAILED + ": " + exception.getMessage());
+        LOGGER.error(JarPatchConstants.LOG_UNEXPECTED_EXCEPTION, exception);
+        return ApiResponse.failed(JarPatchConstants.MESSAGE_FAILED + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR
+                + exception.getMessage());
     }
 }

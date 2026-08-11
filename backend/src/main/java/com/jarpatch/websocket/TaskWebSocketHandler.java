@@ -1,13 +1,12 @@
 package com.jarpatch.websocket;
 
+import com.jarpatch.common.JarPatchConstants;
 import com.jarpatch.service.TaskLogBroadcaster;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
-import org.springframework.web.util.UriTemplate;
 
-import java.util.Map;
 
 /**
  * 任务日志 WebSocket 处理器。
@@ -21,7 +20,7 @@ import java.util.Map;
 @Component
 public class TaskWebSocketHandler extends TextWebSocketHandler {
 
-    private static final UriTemplate TASK_URI_TEMPLATE = new UriTemplate("/ws/tasks/{taskId}");
+    private static final String TASK_ID_ATTRIBUTE = "taskId";
 
     private final TaskLogBroadcaster broadcaster;
 
@@ -62,8 +61,10 @@ public class TaskWebSocketHandler extends TextWebSocketHandler {
      * @return 任务 ID
      */
     private String resolveTaskId(WebSocketSession session) {
-        String path = session.getUri() == null ? "" : session.getUri().getPath();
-        Map<String, String> values = TASK_URI_TEMPLATE.match(path);
-        return values.get("taskId");
+        Object taskId = session.getAttributes().get(TASK_ID_ATTRIBUTE);
+        if (taskId == null) {
+            throw new IllegalStateException(JarPatchConstants.MESSAGE_TASK_NOT_FOUND);
+        }
+        return taskId.toString();
     }
 }

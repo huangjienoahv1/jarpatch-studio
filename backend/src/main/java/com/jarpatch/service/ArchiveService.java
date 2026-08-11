@@ -1,6 +1,7 @@
 package com.jarpatch.service;
 
 import com.jarpatch.common.JarPatchConstants;
+import com.jarpatch.config.ArchiveLimitsProperties;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedInputStream;
@@ -10,6 +11,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -21,6 +23,7 @@ import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
+import java.util.zip.ZipFile;
 
 /**
  * Jar/War 压缩包处理服务。
@@ -33,6 +36,20 @@ import java.util.zip.ZipOutputStream;
  */
 @Service
 public class ArchiveService {
+
+    private static final String MESSAGE_WRITE_ARCHIVE_ENTRY_FAILED = "写入压缩条目失败";
+    private static final String MESSAGE_WRITE_DIRECTORY_ENTRY_FAILED = "写入目录条目失败";
+
+    private final ArchiveLimitsProperties archiveLimits;
+
+    /**
+     * 创建压缩包服务。
+     *
+     * @param archiveLimits 压缩包资源限制配置
+     */
+    public ArchiveService(ArchiveLimitsProperties archiveLimits) {
+        this.archiveLimits = archiveLimits;
+    }
 
     /**
      * 解压 Jar 或 War 到目标目录。
@@ -54,21 +71,141 @@ public class ArchiveService {
      * @throws IOException 解压失败时抛出
      */
     public void unzip(Path archiveFile, Path targetDir, BooleanSupplier cancelRequested) throws IOException {
+        validateArchive(archiveFile);
         Files.createDirectories(targetDir);
+        long totalWritten = 0L;
+        Set<String> extractedEntries = new HashSet<>();
         try (ZipInputStream zipInputStream = new ZipInputStream(new BufferedInputStream(Files.newInputStream(archiveFile)))) {
             ZipEntry entry;
             while ((entry = zipInputStream.getNextEntry()) != null) {
                 ensureNotCancelled(cancelRequested);
+                validateEntryName(entry.getName(), extractedEntries);
                 Path target = safeResolve(targetDir, entry.getName());
                 if (entry.isDirectory()) {
                     Files.createDirectories(target);
                 } else {
                     Files.createDirectories(target.getParent());
-                    copy(zipInputStream, target, cancelRequested);
+                    long entryWritten = copyArchiveEntry(zipInputStream, target, cancelRequested, totalWritten);
+                    totalWritten += entryWritten;
                 }
                 zipInputStream.closeEntry();
             }
         }
+    }
+
+    /**
+     * 在预解析和解压前校验压缩包中央目录资源指标。
+     *
+     * @param archiveFile 待校验 Jar 或 War
+     * @throws IOException 压缩包不可读取时抛出
+     */
+    public void validateArchive(Path archiveFile) throws IOException {
+        if (Files.size(archiveFile) > archiveLimits.getMaxArchiveBytes()) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_TOO_LARGE);
+        }
+        int entryCount = 0;
+        long totalSize = 0L;
+        Set<String> entries = new HashSet<>();
+        try (ZipFile zipFile = new ZipFile(archiveFile.toFile())) {
+            var enumeration = zipFile.entries();
+            while (enumeration.hasMoreElements()) {
+                ZipEntry entry = enumeration.nextElement();
+                entryCount++;
+                if (entryCount > archiveLimits.getMaxEntryCount()) {
+                    throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_ENTRY_LIMIT);
+                }
+                validateEntryName(entry.getName(), entries);
+                if (entry.isDirectory()) {
+                    continue;
+                }
+                long size = entry.getSize();
+                long compressedSize = entry.getCompressedSize();
+                if (size > archiveLimits.getMaxEntryBytes()) {
+                    throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_ENTRY_TOO_LARGE
+                            + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + entry.getName());
+                }
+                if (size >= 0L) {
+                    totalSize = safeAdd(totalSize, size);
+                    if (totalSize > archiveLimits.getMaxUncompressedBytes()) {
+                        throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_UNCOMPRESSED_LIMIT);
+                    }
+                }
+                if ((size > 0L && compressedSize == 0L)
+                        || (compressedSize > 0L
+                        && (double) size / compressedSize > archiveLimits.getMaxCompressionRatio())) {
+                    throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_RATIO_LIMIT
+                            + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + entry.getName());
+                }
+            }
+        }
+    }
+
+    /**
+     * 校验条目名称唯一且路径深度受控。
+     *
+     * @param entryName 条目名称
+     * @param entries   当前压缩包已出现条目
+     */
+    private void validateEntryName(String entryName, Set<String> entries) {
+        String normalizedName = entryName.replace('\\', '/');
+        if (!entries.add(normalizedName)) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_DUPLICATE_ENTRY
+                    + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + entryName);
+        }
+        long depth = normalizedName.chars().filter(character -> character == '/').count();
+        if (depth > archiveLimits.getMaxPathDepth()) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_PATH_DEPTH_LIMIT
+                    + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + entryName);
+        }
+    }
+
+    /**
+     * 安全累加压缩包展开大小，溢出时按超过限制处理。
+     *
+     * @param current 当前累计值
+     * @param value   本次增加值
+     * @return 新累计值
+     */
+    private long safeAdd(long current, long value) {
+        try {
+            return Math.addExact(current, value);
+        } catch (ArithmeticException exception) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_UNCOMPRESSED_LIMIT, exception);
+        }
+    }
+
+    /**
+     * 流式写出单个压缩条目并执行实时大小门禁。
+     *
+     * @param inputStream     Zip 输入流
+     * @param target          目标文件
+     * @param cancelRequested 取消检查回调
+     * @param totalBefore     当前已展开总字节数
+     * @return 本条目实际写入字节数
+     * @throws IOException 文件写入失败时抛出
+     */
+    private long copyArchiveEntry(InputStream inputStream,
+                                  Path target,
+                                  BooleanSupplier cancelRequested,
+                                  long totalBefore) throws IOException {
+        long entryWritten = 0L;
+        try (OutputStream outputStream = new BufferedOutputStream(Files.newOutputStream(target))) {
+            byte[] buffer = new byte[JarPatchConstants.BUFFER_SIZE];
+            int length;
+            while ((length = inputStream.read(buffer)) >= 0) {
+                ensureNotCancelled(cancelRequested);
+                entryWritten = safeAdd(entryWritten, length);
+                if (entryWritten > archiveLimits.getMaxEntryBytes()) {
+                    throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_ENTRY_TOO_LARGE
+                            + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + target.getFileName());
+                }
+                if (safeAdd(totalBefore, entryWritten) > archiveLimits.getMaxUncompressedBytes()) {
+                    throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_UNCOMPRESSED_LIMIT);
+                }
+                outputStream.write(buffer, 0, length);
+            }
+        }
+        return entryWritten;
     }
 
     /**
@@ -93,6 +230,24 @@ public class ArchiveService {
      * @throws IOException 打包失败时抛出
      */
     public void zipDirectory(Path sourceDir, Path outputFile, boolean springBootLayout, BooleanSupplier cancelRequested) throws IOException {
+        zipDirectory(sourceDir, outputFile, springBootLayout, false, cancelRequested);
+    }
+
+    /**
+     * 把目录重新打包为 Jar 或 War，并按明确策略排除失效签名。
+     *
+     * @param sourceDir          待打包目录
+     * @param outputFile         输出文件
+     * @param springBootLayout   是否按 Spring Boot 规则处理嵌套 Jar
+     * @param removeSignatures   是否移除根 META-INF 签名条目
+     * @param cancelRequested    取消检查回调
+     * @throws IOException 打包失败时抛出
+     */
+    public void zipDirectory(Path sourceDir,
+                             Path outputFile,
+                             boolean springBootLayout,
+                             boolean removeSignatures,
+                             BooleanSupplier cancelRequested) throws IOException {
         Files.createDirectories(outputFile.getParent());
         try (ZipOutputStream zipOutputStream = new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(outputFile)))) {
             List<Path> paths = collectPaths(sourceDir);
@@ -106,7 +261,7 @@ public class ArchiveService {
             }
             for (Path file : paths) {
                 ensureNotCancelled(cancelRequested);
-                if (Files.isRegularFile(file)) {
+                if (Files.isRegularFile(file) && !(removeSignatures && isSignatureEntry(sourceDir, file))) {
                     addFile(sourceDir, file, zipOutputStream, springBootLayout, cancelRequested);
                 }
             }
@@ -139,19 +294,19 @@ public class ArchiveService {
     public void replaceClassesInJar(Path jarFile, Path compiledDir, BooleanSupplier cancelRequested) throws IOException {
         Path tempFile = Files.createTempFile(jarFile.getParent(), jarFile.getFileName().toString(), ".tmp");
         Set<String> replacementEntries = collectClassEntries(compiledDir);
-        boolean completed = false;
-        try (ZipInputStream zipInputStream = new ZipInputStream(new BufferedInputStream(Files.newInputStream(jarFile)));
-             ZipOutputStream zipOutputStream = new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(tempFile)))) {
-            copyOriginalEntries(zipInputStream, zipOutputStream, replacementEntries, cancelRequested);
-            addReplacementClasses(compiledDir, zipOutputStream, cancelRequested);
-            completed = true;
-        } finally {
-            if (!completed) {
-                Files.deleteIfExists(tempFile);
+        try {
+            try (ZipInputStream zipInputStream = new ZipInputStream(new BufferedInputStream(Files.newInputStream(jarFile)));
+                 ZipOutputStream zipOutputStream = new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(tempFile)))) {
+                copyOriginalEntries(zipInputStream, zipOutputStream, replacementEntries, cancelRequested);
+                addReplacementClasses(compiledDir, zipOutputStream, cancelRequested);
             }
-        }
-        if (completed) {
-            Files.move(tempFile, jarFile, StandardCopyOption.REPLACE_EXISTING);
+            try {
+                Files.move(tempFile, jarFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException exception) {
+                throw new IOException(JarPatchConstants.MESSAGE_WORKSPACE_ATOMIC_MOVE_REQUIRED, exception);
+            }
+        } finally {
+            Files.deleteIfExists(tempFile);
         }
     }
 
@@ -164,9 +319,9 @@ public class ArchiveService {
      */
     private List<Path> collectPaths(Path sourceDir) throws IOException {
         List<Path> paths = new ArrayList<>();
-        Files.walk(sourceDir)
-                .sorted(Comparator.comparing(Path::toString))
-                .forEach(paths::add);
+        try (var stream = Files.walk(sourceDir)) {
+            stream.sorted(Comparator.comparing(Path::toString)).forEach(paths::add);
+        }
         return paths;
     }
 
@@ -367,7 +522,8 @@ public class ArchiveService {
             }
             zipOutputStream.closeEntry();
         } catch (IOException e) {
-            throw new IllegalStateException("写入压缩条目失败: " + entryName, e);
+            throw new IllegalStateException(MESSAGE_WRITE_ARCHIVE_ENTRY_FAILED
+                    + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + entryName, e);
         }
     }
 
@@ -397,7 +553,8 @@ public class ArchiveService {
             zipOutputStream.putNextEntry(new ZipEntry(entryName));
             zipOutputStream.closeEntry();
         } catch (IOException e) {
-            throw new IllegalStateException("写入目录条目失败: " + entryName, e);
+            throw new IllegalStateException(MESSAGE_WRITE_DIRECTORY_ENTRY_FAILED
+                    + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + entryName, e);
         }
     }
 
@@ -413,6 +570,25 @@ public class ArchiveService {
     }
 
     /**
+     * 判断文件是否为根 META-INF 下需移除的标准签名条目。
+     *
+     * @param sourceDir 打包根目录
+     * @param file      当前文件
+     * @return 是签名条目时返回 true
+     */
+    private boolean isSignatureEntry(Path sourceDir, Path file) {
+        String entryName = sourceDir.relativize(file).toString().replace('\\', '/');
+        if (!entryName.startsWith("META-INF/") || entryName.substring("META-INF/".length()).contains("/")) {
+            return false;
+        }
+        String fileName = file.getFileName().toString().toUpperCase();
+        int dotIndex = fileName.lastIndexOf('.');
+        String extension = dotIndex < 0 ? JarPatchConstants.EMPTY_TEXT
+                : fileName.substring(dotIndex + 1).toLowerCase();
+        return fileName.startsWith("SIG-") || JarPatchConstants.SIGNATURE_EXTENSIONS.contains(extension);
+    }
+
+    /**
      * 配置 STORED Zip 条目所需的大小和 CRC。
      *
      * @param file  文件路径
@@ -421,11 +597,17 @@ public class ArchiveService {
      */
     private void configureStoredEntry(Path file, ZipEntry entry) throws IOException {
         CRC32 crc32 = new CRC32();
-        byte[] bytes = Files.readAllBytes(file);
-        crc32.update(bytes);
+        long size = Files.size(file);
+        try (InputStream inputStream = new BufferedInputStream(Files.newInputStream(file))) {
+            byte[] buffer = new byte[JarPatchConstants.BUFFER_SIZE];
+            int length;
+            while ((length = inputStream.read(buffer)) >= 0) {
+                crc32.update(buffer, 0, length);
+            }
+        }
         entry.setMethod(ZipEntry.STORED);
-        entry.setSize(bytes.length);
-        entry.setCompressedSize(bytes.length);
+        entry.setSize(size);
+        entry.setCompressedSize(size);
         entry.setCrc(crc32.getValue());
     }
 

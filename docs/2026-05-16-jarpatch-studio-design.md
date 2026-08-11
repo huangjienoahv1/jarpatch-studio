@@ -30,8 +30,8 @@ JarPatch Studio 面向普通 Java 开发者，用于在缺少源码时对 Jar、
 8. 用户点击左侧项目历史删除时，前端调用 `DELETE /api/projects/{projectId}`，`ProjectService` 通过 `ProjectRepository` 删除 SQLite 历史和关联记录，工作区文件保留。
 9. 用户保存文件后，`FileContentService` 写入工作区文件，并通过 `FileChangeRepository` 记录修改。
 10. 分析入口调用 `AnalysisService` 生成结构报告和风险项。
-11. 编译入口调用 `CompileService`，先整理本次参与编译的反编译源码，删除完全重复的相邻注解和 `CommonResult.success(...)` 入参最外层多余 `(Object)` 强转，再执行本机 `javac`，主源码结果复制回 classes 根目录，嵌套 Jar 源码结果通过 `ArchiveService` 写回原 Jar。
-12. 导出入口调用 `ExportService`，由 `ArchiveService` 重新打包并写入导出记录。
+11. 编译入口调用 `CompileService`，从原始 class 识别目标 Java 版本，严格选择匹配 JDK 并使用 `--release` 编译未经业务特定改写的源码；全部目标在 staging 中成功后，才统一写回 classes 根目录或对应嵌套 Jar。
+12. 导出入口调用 `ExportService`，按明确的签名移除策略在 staging 中重新打包，并由 `ExportValidationService` 完成结构和编译产物校验；全部校验通过后才发布目标文件和写入导出记录。
 13. 前端 `notify` 统一显示打开、保存、搜索、分析、编译、导出等操作的成功、失败和取消提示，同时追加到底部执行日志。
 
 ## 工作区结构
@@ -78,14 +78,14 @@ SQLite 表：
 
 ## 后端启动包完整性检查
 
-- 入口：用户双击 `2026-05-16-start-jarpatch-studio.cmd`。
+- 入口：用户双击稳定入口 `start-jarpatch-studio.cmd`。
 - 实际检查点：脚本打开 `backend/target/jarpatch-studio-backend.jar`，确认包内存在 `BOOT-INF/lib/cfr-0.152.jar`。
 - 触发条件：后端 jar 不存在，或者只剩普通 jar、损坏 jar、不含 CFR 依赖的 jar。
 - 结果写入：脚本重新执行 `mvn -DskipTests package`，生成完整 Spring Boot 可执行包，避免导入时 CFR 内部类 `NoClassDefFoundError`。
 
-## 2026-05-16 编译兼容补充
+## 编译保真规则
 
 - 入口：前端点击“编译”后调用 `POST /api/projects/{id}/compile`。
-- 实际执行点：`CompileService` 在生成 `javac @参数文件` 前整理本次修改的 Java 源码，然后调用本机 `javac`。
-- 结果写入：整理后的源码写回 `sources`，编译产物写入 `compiled` 后再回写到 `extracted` 或对应嵌套 Jar。
-- 处理范围：仅删除同一连续注解序列内文本完全一致的重复注解，以及 `CommonResult.success(...)` 入参最外层多余 `(Object)` 强转。
+- 实际执行点：`CompileService` 读取原始 class 版本，使用已验证的匹配 JDK 和 `--release` 参数编译用户保存的原始源码。
+- 结果写入：编译产物先写入本次 staging 目录；全部目标成功后再统一回写到 `extracted` 或对应嵌套 Jar，失败时删除 staging 并恢复提交前状态。
+- 保真边界：不执行重复注解删除、业务方法参数改写或其他针对特定项目的源码后处理；用户未修改并保存时，不改变源码和包内容。

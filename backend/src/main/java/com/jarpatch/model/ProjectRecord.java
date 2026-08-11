@@ -16,6 +16,10 @@ public class ProjectRecord {
     private String packageType;
     private String originalPath;
     private String workspacePath;
+    private Integer targetJavaVersion;
+    private Integer classMajorVersion;
+    private String javaVersionEvidence;
+    private String workspaceCleanedAt;
     private String createdAt;
     private String updatedAt;
 
@@ -57,6 +61,78 @@ public class ProjectRecord {
 
     public void setWorkspacePath(String workspacePath) {
         this.workspacePath = workspacePath;
+    }
+
+    /**
+     * 获取原包目标 Java 版本。
+     *
+     * @return Java 特性版本
+     */
+    public Integer getTargetJavaVersion() {
+        return targetJavaVersion;
+    }
+
+    /**
+     * 设置原包目标 Java 版本。
+     *
+     * @param targetJavaVersion Java 特性版本
+     */
+    public void setTargetJavaVersion(Integer targetJavaVersion) {
+        this.targetJavaVersion = targetJavaVersion;
+    }
+
+    /**
+     * 获取检测到的 class major version。
+     *
+     * @return class major version
+     */
+    public Integer getClassMajorVersion() {
+        return classMajorVersion;
+    }
+
+    /**
+     * 设置检测到的 class major version。
+     *
+     * @param classMajorVersion class major version
+     */
+    public void setClassMajorVersion(Integer classMajorVersion) {
+        this.classMajorVersion = classMajorVersion;
+    }
+
+    /**
+     * 获取 Java 版本检测依据。
+     *
+     * @return 检测依据路径
+     */
+    public String getJavaVersionEvidence() {
+        return javaVersionEvidence;
+    }
+
+    /**
+     * 设置 Java 版本检测依据。
+     *
+     * @param javaVersionEvidence 检测依据路径
+     */
+    public void setJavaVersionEvidence(String javaVersionEvidence) {
+        this.javaVersionEvidence = javaVersionEvidence;
+    }
+
+    /**
+     * 获取独立工作区清理时间。
+     *
+     * @return 未清理时为 null
+     */
+    public String getWorkspaceCleanedAt() {
+        return workspaceCleanedAt;
+    }
+
+    /**
+     * 设置独立工作区清理时间。
+     *
+     * @param workspaceCleanedAt 清理时间
+     */
+    public void setWorkspaceCleanedAt(String workspaceCleanedAt) {
+        this.workspaceCleanedAt = workspaceCleanedAt;
     }
 
     public String getCreatedAt() {

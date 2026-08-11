@@ -2,14 +2,20 @@ package com.jarpatch.service;
 
 import com.jarpatch.common.JarPatchConstants;
 import com.jarpatch.model.JdkSettingsView;
+import com.jarpatch.model.JdkCompilerInfo;
 import com.jarpatch.repository.AppSettingsRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * JDK 工具定位服务。
@@ -28,6 +34,14 @@ public class JdkService {
     private static final String BIN_DIR = "bin";
     private static final String WINDOWS_JAVAC = "javac.exe";
     private static final String UNIX_JAVAC = "javac";
+    private static final String JAVAC_VERSION_ARGUMENT = "-version";
+    private static final long JAVAC_VERSION_TIMEOUT_SECONDS = 10L;
+    private static final int LEGACY_JAVA_VERSION_PREFIX = 1;
+    private static final Pattern JAVAC_VERSION_PATTERN = Pattern.compile("javac\\s+([0-9]+)(?:\\.([0-9]+))?.*");
+    private static final String MESSAGE_SAVED_JDK_ACTIVE = "已使用已保存的 JDK 配置";
+    private static final String MESSAGE_AUTO_JDK_ACTIVE = "当前使用自动检测到的 JDK";
+    private static final String MESSAGE_JDK_VALID = "JDK 校验通过";
+    private static final String MESSAGE_JAVAC_VERSION_INTERRUPTED = "执行 javac -version 被中断";
     private final AppSettingsRepository appSettingsRepository;
 
     /**
@@ -62,6 +76,15 @@ public class JdkService {
     }
 
     /**
+     * 定位并实际执行 javac -version，返回可用于严格目标版本编译的编译器信息。
+     *
+     * @return 已验证的 javac 信息
+     */
+    public JdkCompilerInfo findCompiler() {
+        return inspectJavac(findJavac());
+    }
+
+    /**
      * 读取当前 JDK 配置视图。
      * <p>
      * 入口来自设置页面加载，实际执行点是读取 SQLite 中保存的 JDK 配置并计算当前可用的
@@ -81,13 +104,16 @@ public class JdkService {
         view.setConfiguredValid(configuredJavac != null);
         view.setEffectiveJavaHome(effectiveJavac == null ? null : resolveJavaHome(effectiveJavac));
         view.setEffectiveJavacPath(effectiveJavac == null ? null : effectiveJavac.toString());
-        view.setEffectiveValid(effectiveJavac != null);
+        JdkCompilerInfo compilerInfo = effectiveJavac == null ? null : inspectJavac(effectiveJavac);
+        view.setEffectiveValid(compilerInfo != null);
+        view.setEffectiveFeatureVersion(compilerInfo == null ? null : compilerInfo.getFeatureVersion());
+        view.setEffectiveVersionText(compilerInfo == null ? null : compilerInfo.getVersionText());
         if (configuredJavac != null) {
-            view.setMessage("已使用已保存的 JDK 配置");
+            view.setMessage(MESSAGE_SAVED_JDK_ACTIVE);
         } else if (configuredJavaHome != null) {
             view.setMessage(JarPatchConstants.MESSAGE_JDK_CONFIG_INVALID);
         } else if (effectiveJavac != null) {
-            view.setMessage("当前使用自动检测到的 JDK");
+            view.setMessage(MESSAGE_AUTO_JDK_ACTIVE);
         } else {
             view.setMessage(JarPatchConstants.MESSAGE_JDK_NOT_FOUND);
         }
@@ -114,6 +140,7 @@ public class JdkService {
         if (javac == null) {
             throw new IllegalArgumentException(JarPatchConstants.MESSAGE_JDK_HOME_INVALID);
         }
+        JdkCompilerInfo compilerInfo = inspectJavac(javac);
         JdkSettingsView view = new JdkSettingsView();
         view.setConfiguredJavaHome(normalizedJavaHome);
         view.setConfiguredJavacPath(javac.toString());
@@ -121,8 +148,50 @@ public class JdkService {
         view.setEffectiveJavaHome(resolveJavaHome(javac));
         view.setEffectiveJavacPath(javac.toString());
         view.setEffectiveValid(true);
-        view.setMessage("JDK 校验通过");
+        view.setEffectiveFeatureVersion(compilerInfo.getFeatureVersion());
+        view.setEffectiveVersionText(compilerInfo.getVersionText());
+        view.setMessage(MESSAGE_JDK_VALID);
         return view;
+    }
+
+    /**
+     * 执行 javac -version 并严格解析 Java 特性版本。
+     *
+     * @param javacPath javac 可执行路径
+     * @return 已验证的编译器信息
+     */
+    private JdkCompilerInfo inspectJavac(Path javacPath) {
+        Process process = null;
+        try {
+            process = new ProcessBuilder(javacPath.toString(), JAVAC_VERSION_ARGUMENT)
+                    .redirectErrorStream(true)
+                    .start();
+            boolean completed = process.waitFor(JAVAC_VERSION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            if (!completed) {
+                process.destroyForcibly();
+                throw new IllegalArgumentException(JarPatchConstants.MESSAGE_JDK_VERSION_INVALID);
+            }
+            String versionText = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            Matcher matcher = JAVAC_VERSION_PATTERN.matcher(versionText);
+            if (process.exitValue() != 0 || !matcher.matches()) {
+                throw new IllegalArgumentException(JarPatchConstants.MESSAGE_JDK_VERSION_INVALID
+                        + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + versionText);
+            }
+            int firstNumber = Integer.parseInt(matcher.group(1));
+            int featureVersion = firstNumber == LEGACY_JAVA_VERSION_PREFIX && matcher.group(2) != null
+                    ? Integer.parseInt(matcher.group(2)) : firstNumber;
+            return new JdkCompilerInfo(javacPath, featureVersion, versionText);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_JDK_VERSION_INVALID
+                    + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + exception.getMessage(), exception);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(MESSAGE_JAVAC_VERSION_INTERRUPTED, exception);
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
+        }
     }
 
     /**
