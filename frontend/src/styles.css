@@ -459,6 +459,32 @@ button {
   gap: 10px;
 }
 
+.toolbar-actions .tool-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 1520px) {
+  .toolbar {
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+
+  .toolbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid #edf2f8;
+  }
+
+  .toolbar-actions .tool-btn {
+    height: 36px;
+    padding: 0 12px;
+  }
+}
+
 .task-bar {
   display: flex;
   align-items: center;
