@@ -33,6 +33,8 @@ public class DatabaseInitializer {
     private static final int MIGRATION_RELEASE_DATA = 2;
     private static final int MIGRATION_RUNTIME_STABILITY = 3;
     private static final int MIGRATION_PRODUCTIZATION = 4;
+    private static final int MIGRATION_HISTORY_AND_ENCODING = 5;
+    private static final int MIGRATION_FILE_ENCODING_SELECTIONS = 6;
 
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
@@ -75,6 +77,9 @@ public class DatabaseInitializer {
         applyMigration(MIGRATION_RELEASE_DATA, "release_data", this::createReleaseDataSchema);
         applyMigration(MIGRATION_RUNTIME_STABILITY, "runtime_stability", this::createRuntimeStabilitySchema);
         applyMigration(MIGRATION_PRODUCTIZATION, "productization", this::createProductizationSchema);
+        applyMigration(MIGRATION_HISTORY_AND_ENCODING, "history_and_encoding", this::createHistoryAndEncodingSchema);
+        applyMigration(MIGRATION_FILE_ENCODING_SELECTIONS, "file_encoding_selections",
+                this::createFileEncodingSelectionSchema);
     }
 
     /**
@@ -205,6 +210,26 @@ public class DatabaseInitializer {
                 "updater TEXT NOT NULL DEFAULT '" + JarPatchConstants.DEFAULT_AUDITOR + "', " +
                 "created_at TEXT NOT NULL, " +
                 "updated_at TEXT NOT NULL)");
+    }
+
+    /**
+     * 增加显式文本编码和可查询操作时间线字段。
+     */
+    private void createHistoryAndEncodingSchema() {
+        ensureColumn("project_settings", "default_encoding", "TEXT NOT NULL DEFAULT 'UTF-8'");
+        ensureColumn("operation_journals", "project_id", "TEXT");
+        ensureColumn("operation_journals", "operation_id", "TEXT");
+        ensureColumn("operation_journals", "status", "TEXT NOT NULL DEFAULT 'SUCCESS'");
+        ensureColumn("operation_journals", "details", "TEXT");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_operation_journals_project_id " +
+                "ON operation_journals(project_id, created_at DESC)");
+    }
+
+    /**
+     * 为已修改文件保留用户明确确认的编码，供差异和后续读取复用。
+     */
+    private void createFileEncodingSelectionSchema() {
+        ensureColumn("file_changes", "encoding", "TEXT");
     }
 
     /**

@@ -7,17 +7,17 @@ JarPatch Studio 是一个完全开源的跨平台桌面软件，面向普通 Jav
 - 打开普通 Jar、Spring Boot Jar、War。
 - 解压原始包到本地工作区。
 - 导入前解析 `pom.xml` 和嵌套 Jar，用户手动选择需要反编译的 Jar。
-- 使用 CFR 反编译主 class 和用户选中的嵌套 Jar 到 `sources` 目录。
-- 在桌面界面查看 `sources` 和 `extracted` 两类文件树。
+- 使用 CFR 主 API 分批反编译主 class 和用户选中的嵌套 Jar 到 `sources` 目录。
+- 在桌面界面懒加载查看 `sources` 和 `extracted` 两类文件树，展开目录时只读取直接子项。
 - 编辑 Java 源码和文本资源文件。
 - 编辑器提供“中文预览”按钮，可将 `\uXXXX` 形式的中文 Unicode 转义显示为正常中文；预览使用独立只读区域，不替换、不保存原始文本。
-- 保存时保留原始编码、BOM 和换行；内容未改变时不写文件，外部内容变化时阻止覆盖。
+- 保存时保留原始编码、BOM 和换行；无 BOM 旧文本通过项目默认编码或文件级编码显式选择读取，不做自动猜测；内容未改变时不写文件，外部内容变化时阻止覆盖。
 - 二进制文件和签名文件只读展示，点击会提示当前不能编辑。
 - 通过右上角“配置”打开 JDK 配置弹窗，保存时会校验 `bin/javac` 可用性并写入 SQLite。
 - 自动读取原始 class major version，严格选择匹配 JDK 并使用 `--release` 编译。
 - 记录本地项目历史、任务状态、持久化任务日志、修改基线、编译产物、分析报告和导出校验结果到 SQLite。
-- 左侧项目历史支持删除历史记录，删除时只移除 SQLite 中的历史和关联记录，不删除本地工作区文件。
-- 工作区清理与删除历史相互独立，清理前必须预览路径、文件数、大小和确认标识。
+- 项目历史界面可查询分析报告、导出校验和带统一操作 ID 的任务时间线。
+- 删除历史时可明确选择“仅删除历史”或“预览清理工作区后再删除”；孤立工作区必须单独扫描、预览和确认，不会后台自动删除。
 - 分析 Manifest、入口类、Spring Boot 结构、War 结构、依赖 Jar、签名文件、多版本目录和混淆迹象。
 - 提供基于固定导入基线的源码/资源差异和已提交 class 清单。
 - 编译先写独立 staging，全部成功后才统一写回，提交失败时恢复备份。
@@ -25,7 +25,7 @@ JarPatch Studio 是一个完全开源的跨平台桌面软件，面向普通 Jav
 - 签名包修改后默认阻止保留失效签名，只有明确选择后才移除签名并导出未签名包。
 - 后端仅监听 `127.0.0.1`，桌面端每次启动生成随机令牌和实例 ID，HTTP 与 WebSocket 都必须完成握手。
 - 后端迁移、索引、条件状态更新、崩溃恢复、健康检查和安全退出已接入。
-- 提供项目设置、错误排查向导、Windows 免安装包以及 macOS/Linux 原生构建入口。
+- 提供项目设置、错误排查向导、脱敏诊断导出、单实例启动、Windows 免安装包以及 macOS/Linux 原生构建入口。
 - 打开、保存、搜索、分析、编译、导出等操作会在右上角显示即时提示，并同步写入底部执行日志；导入、分析、编译、导出会先创建任务、连接 `/ws/tasks/{taskId}`，在任务状态栏里实时显示进度，执行期间可直接取消。
 - 项目历史和执行日志使用中国时区时间显示。
 - 桌面端已移除默认 `File / Edit / View / Window / Help` 菜单栏，后续需要菜单能力时再按功能补回。
@@ -47,6 +47,15 @@ JarPatch Studio 是一个完全开源的跨平台桌面软件，面向普通 Jav
 - 存储：SQLite。
 - 反编译：CFR。
 - 工作区：默认位于用户目录下的 `.jarpatch-studio/projects`。
+
+## 项目分析文档
+
+- 本轮五阶段开发、验证证据和正式发布边界见 [2026-08-23 全部阶段开发与验证报告](docs/2026-08-23-all-stages-development-report.md)。
+- 当前完成度、剩余进阶内容和优化优先级见 [2026-08-23 当前完成度与进阶优化分析](docs/2026-08-23-jarpatch-studio-current-status-and-optimization.md)。
+- 第一阶段发布一致性开发和 Windows 样本复验结果见 [2026-08-23 第一阶段开发与验收报告](docs/2026-08-23-first-stage-development-report.md)。
+- 1 万、5 万、20 万条目分级实测见 [2026-08-23 大包性能基准](docs/2026-08-23-large-archive-benchmark.md)。
+- 三平台签名、公证、原生验收和回滚步骤见 [发布运行手册](docs/release-runbook.md)。
+- 2026-08-10 六阶段发布级改造的历史分析见 [项目现状分析与补充建议](docs/2026-08-10-jarpatch-studio-project-analysis.md)。
 
 ## 目录说明
 
@@ -148,7 +157,7 @@ jarpatch-studio/
 
 ### GET/PUT `/api/projects/{id}/settings`
 
-读取或保存项目设置。目标 Java 版本只读，来源是原包 class；可设置默认导出目录、选择的嵌套 Jar、最大可编辑文件字节数和界面偏好 JSON。
+读取或保存项目设置。目标 Java 版本只读，来源是原包 class；可设置默认导出目录、选择的嵌套 Jar、最大可编辑文件字节数、无 BOM 文本默认编码和界面偏好 JSON。
 
 ### GET `/api/projects/{id}/workspace/cleanup-preview`
 
@@ -157,6 +166,18 @@ jarpatch-studio/
 ### DELETE `/api/projects/{id}/workspace?confirmationId=...`
 
 校验预览快照和一次性确认标识后只删除工作区，项目历史仍保留。存在运行中任务或预览后内容变化时拒绝清理。
+
+### GET `/api/projects/{id}/history`
+
+读取最近的结构分析快照、导出校验结果和统一操作时间线。
+
+### GET `/api/workspaces/orphans/cleanup-preview`
+
+扫描未被项目历史登记的 `.ready` 工作区，只返回路径、文件数、大小、最后修改时间和一次性确认标识。
+
+### DELETE `/api/workspaces/orphans?confirmationId=...`
+
+重新校验完整预览快照后清理孤立工作区；预览过期或目录内容变化时拒绝删除。
 
 ### GET `/api/projects/{id}/diff`
 
@@ -168,9 +189,13 @@ jarpatch-studio/
 
 返回：`sources` 和 `extracted` 两个根节点。
 
-### GET `/api/projects/{id}/files/content?path=...`
+### GET `/api/projects/{id}/tree/children?path=...`
 
-读取可编辑文件内容。
+按目录展开动作只返回一个目录的直接子节点，并使用稳定的大小写无关顺序。
+
+### GET `/api/projects/{id}/files/content?path=...&encoding=...`
+
+读取可编辑文件内容。`encoding` 可选，只用于用户明确覆盖无 BOM 文件的项目默认编码。
 
 路径示例：
 
@@ -188,7 +213,9 @@ extracted/application.yml
 ```json
 {
   "path": "sources/com/example/Demo.java",
-  "content": "文件内容"
+  "content": "文件内容",
+  "expectedHash": "打开文件时返回的 SHA-256",
+  "encoding": "打开文件时后端返回的编码"
 }
 ```
 
@@ -261,9 +288,7 @@ Windows 开发启动可直接双击根目录稳定入口：
 start-jarpatch-studio.cmd
 ```
 
-该脚本强制使用 PowerShell 7，检查 Java、npm、后端 Jar 和 Electron 依赖；后端 Jar 不存在或不完整时执行 Maven 构建。
-
-脚本不仅检查 `backend/target/jarpatch-studio-backend.jar` 是否存在，还会确认它是包含 `BOOT-INF/lib/cfr-0.152.jar` 的完整 Spring Boot 可执行包。如果之前构建被正在运行的后端进程打断，留下了普通 jar，脚本会重新构建后端，避免运行时反编译器缺少内部类。
+该脚本强制使用 PowerShell 7，检查 npm、后端 Jar 和 Electron 依赖。`scripts/ensure-backend-package.ps1` 会读取后端 Jar 目录，确认应用入口 class 和 CFR 依赖同时存在；文件缺失、损坏或结构不完整时，只停止命令行中精确引用该 Jar 路径的旧 Java 进程，再执行 Maven 构建并复验。
 
 ### 1. 构建后端
 
@@ -272,8 +297,11 @@ start-jarpatch-studio.cmd
 ```powershell
 pwsh.exe -NoLogo -NoProfile
 $env:JAVA_HOME='C:\Program Files\Java\jdk-17'
+node scripts/sync-version.js --check
 mvn.cmd "-Dmaven.test.skip=true" package
 ```
+
+应用版本唯一修改入口是根 `package.json` 的 `version`。修改后执行 `node scripts/sync-version.js` 同步 Maven `revision` 和前端版本；所有发布入口都会先执行只读一致性检查。
 
 ### 2. 启动桌面端
 
@@ -297,7 +325,7 @@ npm.cmd start
 pwsh.exe -NoLogo -NoProfile -File .\build.ps1
 ```
 
-产物写入 `release/windows/`，并生成包含环境、大小和 SHA-256 的 `release-manifest.json`。macOS/Linux 必须在对应原生系统执行 `./build-macos.sh` 或 `./build-linux.sh`，完整门禁见 `docs/release-checklist.md`。
+产物写入 `release/windows/`，并生成包含环境、Git commit、构建前源码是否干净、构建入口及其 SHA-256、签名状态、产物大小和 SHA-256 的 `release-manifest.json`。三个入口都会对解包应用执行 `--smoke-check`，确认内置 Java 和后端健康检查可用。正式签名所需环境变量、macOS 公证、Linux GPG 和回滚步骤见 `docs/release-runbook.md`；macOS/Linux 必须在对应原生系统执行 `./build-macos.sh` 或 `./build-linux.sh`。
 
 ## 使用流程
 
@@ -313,6 +341,7 @@ pwsh.exe -NoLogo -NoProfile -File .\build.ps1
    - Spring Boot 多模块包中，`BOOT-INF/classes` 的源码仍直接显示在 `sources/com/...`。
    - 被用户勾选的 `BOOT-INF/lib/*.jar` 或 `WEB-INF/lib/*.jar` 会显示在 `sources/nested-jars/原Jar相对路径/...`，例如 `sources/nested-jars/BOOT-INF/lib/AIQuality-module-qcs.jar/com/...`。
 9. 修改并保存。
+   - 无 BOM 的旧编码文件先在“项目设置”选择默认编码，也可在编辑器工具栏为当前文件明确切换编码；系统不会自动猜测后直接覆盖。
    - 遇到 `log.info("\u7535\u5b50...")` 这类内容时，可点击编辑器右上角“中文预览”；查看后点击“返回原文”继续编辑，预览不会修改源文件。
    - `Ctrl+S`/`Cmd+S` 可保存；切换文件、切换项目或关闭窗口时，未保存内容必须先确认。
 10. 点击“分析”，确认风险。
@@ -348,7 +377,7 @@ Jar 或 War 中如果存在 `META-INF/*.SF`、`*.RSA`、`*.DSA`、`*.EC`，修�
 
 如果后端运行期间又执行 `mvn package`，Windows 可能允许 Maven 把 `backend/target/jarpatch-studio-backend.jar` 覆盖成普通 jar，但因为旧后端进程占用文件，Spring Boot 重新打可执行包时无法把 jar 改名为 `.original`，最终留下一个不完整 jar。正在运行的后端后续调用 CFR 时，就可能报 `org/benf/cfr/...` 内部类找不到。
 
-处理方式是先关闭旧后端进程，再重新执行 Maven 构建并启动。当前一键启动脚本已增加完整性检查：如果 jar 里没有 `BOOT-INF/lib/cfr-0.152.jar`，会自动重新构建。
+当前一键启动脚本会在 Electron 启动前检查 `BOOT-INF/classes/com/jarpatch/JarPatchStudioApplication.class` 和 `BOOT-INF/lib/cfr-0.152.jar`。检查失败时会精确停止引用当前后端 Jar 的旧 Java 进程，重新执行 Maven 构建并再次校验；复验仍失败时停止启动并显示错误。
 
 ### Windows 编译时为什么可能出现 CreateProcess error=206？
 
@@ -467,13 +496,14 @@ Java 9 之后部分依赖 Jar 会包含 `module-info.class`，它是模块描述
 - 已完成二进制文件和签名文件只读提示，点击后会告诉用户当前不能编辑。
 - 已完成中国时区时间展示，项目历史和执行日志按 `Asia/Shanghai` 口径显示。
 - 已完成移除 Electron 默认菜单栏，避免展示暂未接入的 `File / Edit / View / Window / Help`。
-- 已完成 Windows 一键启动脚本，启动前会检查后端 Spring Boot 可执行 Jar 是否包含 CFR 依赖，不完整时重新构建。
-- 已完成 SQLite 初始化，当前落库表包括 `projects`、`tasks`、`file_changes`、`export_records`、`app_settings`，默认审计人字段使用 `admin`。
+- 已完成 Windows 一键启动脚本的后端包完整性门禁，应用入口或 CFR 依赖缺失时会停止旧后端、重新构建并复验。
+- 已完成 SQLite 初始化和顺序迁移，当前包含 11 张业务表：`projects`、`tasks`、`file_changes`、`export_records`、`app_settings`、`compiled_artifacts`、`export_validations`、`task_logs`、`analysis_reports`、`operation_journals`、`project_settings`，另有 `schema_migrations` 迁移记录表；默认审计人字段使用 `admin`。
 - 已完成 WebSocket 后端注册和任务日志广播服务，任务服务已经在导入、分析、编译、导出节点广播日志。
 
 ### 交付与验证边界
 
 - 当前 Windows 发布包没有组织 Authenticode 证书，应明确标记为未签名；不能宣称可信发布者签名。
+- `release/windows` 中 0.1.0 包已在本轮开发工作区重新构建并通过样本复验，但清单明确记录 `sourceClean: false`；它只能作为开发验证包，必须从干净提交再次构建后才能标记为正式当前版本。
 - macOS/Linux 构建脚本和配置已交付，但当前 Windows 主机不能替代对应原生系统的构建、签名和启动验收。
 - 混淆、损坏或反编译信息不足的 class 仍可能无法恢复为可编译源码，这是反编译边界，不使用业务特定改写绕过。
 - 公开发布前应在 Windows、macOS、Linux 原生主机分别执行发布清单，并记录签名/公证状态。

@@ -50,7 +50,7 @@ public class ProjectSettingsRepository {
         try {
             ProjectSettings settings = jdbcTemplate.queryForObject(
                     "SELECT project_id, default_export_directory, selected_nested_jars_json, " +
-                            "max_editable_file_bytes, ui_preferences_json, updated_at " +
+                            "max_editable_file_bytes, default_encoding, ui_preferences_json, updated_at " +
                             "FROM project_settings WHERE project_id = ?",
                     (resultSet, rowNum) -> {
                         ProjectSettings record = new ProjectSettings();
@@ -64,6 +64,7 @@ public class ProjectSettingsRepository {
                                     exception);
                         }
                         record.setMaxEditableFileBytes(resultSet.getLong("max_editable_file_bytes"));
+                        record.setDefaultEncoding(resultSet.getString("default_encoding"));
                         record.setUiPreferencesJson(resultSet.getString("ui_preferences_json"));
                         record.setUpdatedAt(resultSet.getString("updated_at"));
                         return record;
@@ -84,13 +85,14 @@ public class ProjectSettingsRepository {
     public void upsert(ProjectSettings settings, String now) throws JsonProcessingException {
         jdbcTemplate.update("INSERT INTO project_settings " +
                         "(project_id, default_export_directory, selected_nested_jars_json, max_editable_file_bytes, " +
-                        "ui_preferences_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+                        "default_encoding, ui_preferences_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
                         "ON CONFLICT(project_id) DO UPDATE SET default_export_directory = excluded.default_export_directory, " +
                         "selected_nested_jars_json = excluded.selected_nested_jars_json, " +
                         "max_editable_file_bytes = excluded.max_editable_file_bytes, " +
+                        "default_encoding = excluded.default_encoding, " +
                         "ui_preferences_json = excluded.ui_preferences_json, updated_at = excluded.updated_at",
                 settings.getProjectId(), settings.getDefaultExportDirectory(),
                 objectMapper.writeValueAsString(settings.getSelectedNestedJars()), settings.getMaxEditableFileBytes(),
-                settings.getUiPreferencesJson(), now, now);
+                settings.getDefaultEncoding(), settings.getUiPreferencesJson(), now, now);
     }
 }

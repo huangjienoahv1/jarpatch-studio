@@ -11,6 +11,8 @@
   "scripts": {
     "start": "npm --prefix frontend start",
     "backend:build": "mvn -Dmaven.test.skip=true package",
+    "version:check": "node scripts/sync-version.js --check",
+    "version:sync": "node scripts/sync-version.js",
     "frontend:start": "npm --prefix frontend start",
     "release:windows": "pwsh.exe -NoProfile -File ./build.ps1",
     "release:macos": "bash ./build-macos.sh",

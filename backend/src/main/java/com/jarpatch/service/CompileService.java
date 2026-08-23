@@ -11,25 +11,17 @@ import com.jarpatch.repository.FileChangeRepository;
 import com.jarpatch.repository.CompiledArtifactRepository;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-import java.util.function.BooleanSupplier;
 
 /**
  * Java 修改文件严格编译与提交服务。
@@ -56,10 +48,7 @@ public class CompileService {
     private static final String COMPILE_STAGING_PREFIX = ".staging-";
     private static final String OUTPUT_DIR = "outputs";
     private static final String BACKUP_DIR = "backup";
-    private static final String BACKUP_MAIN_DIR = "main";
-    private static final String BACKUP_NESTED_DIR = "nested";
     private static final int MINIMUM_RELEASE_COMPILER_VERSION = 9;
-    private static final long PROCESS_POLL_INTERVAL_MILLIS = 200L;
     private static final char WINDOWS_PATH_SEPARATOR = '\\';
     private static final char JAVAC_ARGUMENT_PATH_SEPARATOR = '/';
     private static final String JAVAC_ARGUMENT_QUOTE = "\"";
@@ -79,42 +68,46 @@ public class CompileService {
     private static final int PROGRESS_PREPARE_COMMIT = 75;
 
     private final WorkspaceService workspaceService;
-    private final ArchiveService archiveService;
     private final FileChangeRepository fileChangeRepository;
     private final TaskService taskService;
     private final JdkService jdkService;
     private final JavaVersionService javaVersionService;
     private final CompiledArtifactRepository compiledArtifactRepository;
     private final ClockService clockService;
+    private final CompileProcessRunner compileProcessRunner;
+    private final CompileArtifactCommitter compileArtifactCommitter;
 
     /**
      * 创建严格编译服务。
      *
      * @param workspaceService     工作区服务
-     * @param archiveService       压缩包服务
      * @param fileChangeRepository 修改记录仓储
      * @param taskService          任务服务
      * @param jdkService           JDK 工具服务
      * @param javaVersionService   原 class 版本识别服务
      * @param compiledArtifactRepository 已提交编译产物仓储
      * @param clockService         时间服务
+     * @param compileProcessRunner javac 子进程执行器
+     * @param compileArtifactCommitter 编译产物提交与恢复服务
      */
     public CompileService(WorkspaceService workspaceService,
-                          ArchiveService archiveService,
                           FileChangeRepository fileChangeRepository,
                           TaskService taskService,
                           JdkService jdkService,
                           JavaVersionService javaVersionService,
                           CompiledArtifactRepository compiledArtifactRepository,
-                          ClockService clockService) {
+                          ClockService clockService,
+                          CompileProcessRunner compileProcessRunner,
+                          CompileArtifactCommitter compileArtifactCommitter) {
         this.workspaceService = workspaceService;
-        this.archiveService = archiveService;
         this.fileChangeRepository = fileChangeRepository;
         this.taskService = taskService;
         this.jdkService = jdkService;
         this.javaVersionService = javaVersionService;
         this.compiledArtifactRepository = compiledArtifactRepository;
         this.clockService = clockService;
+        this.compileProcessRunner = compileProcessRunner;
+        this.compileArtifactCommitter = compileArtifactCommitter;
     }
 
     /**
@@ -141,7 +134,7 @@ public class CompileService {
     public OperationResult compile(ProjectRecord project, String taskId) throws IOException, InterruptedException {
         TaskRecord task = taskService.prepare(taskId, project.getId(), TASK_TYPE_COMPILE, MESSAGE_COMPILE_START);
         Path compileRunDir = null;
-        CompileCommit compileCommit = null;
+        CompileArtifactCommitter.CompileCommit compileCommit = null;
         boolean completed = false;
         boolean artifactRecordsUpdated = false;
         List<String> previousArtifacts = compiledArtifactRepository.findPaths(project.getId());
@@ -168,21 +161,23 @@ public class CompileService {
                 JavaVersionInfo targetVersion = javaVersionService.detectCompileTargetVersion(
                         project, entry.getKey(), entry.getValue());
                 validateCompilerVersion(compilerInfo, targetVersion);
-                Path targetOutput = compileRunDir.resolve(OUTPUT_DIR).resolve(safeCompileTargetName(entry.getKey()));
+                Path targetOutput = compileRunDir.resolve(OUTPUT_DIR)
+                        .resolve(compileArtifactCommitter.safeTargetName(entry.getKey()));
                 Files.createDirectories(targetOutput);
                 List<String> command = buildCommand(project, compilerInfo.getJavacPath(), targetOutput,
                         entry.getValue(), targetVersion.getFeatureVersion());
-                processOutput.append(runProcess(command, workspaceService.sourceDir(project),
+                processOutput.append(compileProcessRunner.run(command, workspaceService.sourceDir(project),
                         () -> taskService.isCancelled(task.getId())));
                 compiledOutputs.put(entry.getKey(), targetOutput);
             }
 
             taskService.running(task, PROGRESS_PREPARE_COMMIT, MESSAGE_COMPILE_PREPARE_COMMIT);
             taskService.ensureNotCancelled(task.getId());
-            compileCommit = prepareCompileCommit(project, compiledOutputs, compileRunDir.resolve(BACKUP_DIR));
+            compileCommit = compileArtifactCommitter.prepare(
+                    project, compiledOutputs, compileRunDir.resolve(BACKUP_DIR));
 
             // 实际写回只发生在全部 javac 成功之后；提交异常或任务取消由 finally 恢复备份。
-            applyCompiledOutputs(project, compiledOutputs, () -> taskService.isCancelled(task.getId()));
+            compileArtifactCommitter.apply(project, compiledOutputs, () -> taskService.isCancelled(task.getId()));
             List<String> compiledArtifacts = collectArtifactPaths(project, compiledOutputs);
             compiledArtifactRepository.replaceProjectArtifacts(project.getId(), compiledArtifacts, clockService.now());
             artifactRecordsUpdated = true;
@@ -207,13 +202,13 @@ public class CompileService {
             throw exception;
         } finally {
             if (!completed && compileCommit != null) {
-                restoreCompileCommit(compileCommit);
+                compileArtifactCommitter.restore(compileCommit);
             }
             if (!completed && artifactRecordsUpdated) {
                 compiledArtifactRepository.replaceProjectArtifacts(project.getId(), previousArtifacts, clockService.now());
             }
             if (compileRunDir != null) {
-                deleteTree(compileRunDir);
+                compileArtifactCommitter.deleteTree(compileRunDir);
             }
         }
     }
@@ -325,7 +320,7 @@ public class CompileService {
         List<String> entries = new ArrayList<>();
         Path extractedDir = workspaceService.extractedDir(project);
         entries.add(extractedDir.toString());
-        entries.add(classRoot(project).toString());
+        entries.add(compileArtifactCommitter.classRoot(project).toString());
         try (var stream = Files.walk(extractedDir)) {
             stream.filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().toLowerCase()
@@ -373,172 +368,6 @@ public class CompileService {
     }
 
     /**
-     * 在写回前备份所有可能被替换的 class 和嵌套 Jar。
-     *
-     * @param project         项目记录
-     * @param compiledOutputs 各目标编译输出
-     * @param backupRoot      本次备份根目录
-     * @return 可用于失败恢复的提交信息
-     * @throws IOException 备份失败时抛出
-     */
-    private CompileCommit prepareCompileCommit(ProjectRecord project,
-                                               Map<String, Path> compiledOutputs,
-                                               Path backupRoot) throws IOException {
-        CompileCommit commit = new CompileCommit();
-        Files.createDirectories(backupRoot);
-        for (Map.Entry<String, Path> entry : compiledOutputs.entrySet()) {
-            if (JarPatchConstants.COMPILE_TARGET_MAIN.equals(entry.getKey())) {
-                backupMainClasses(project, entry.getValue(), backupRoot.resolve(BACKUP_MAIN_DIR), commit);
-            } else {
-                backupNestedJar(project, entry.getKey(), backupRoot.resolve(BACKUP_NESTED_DIR), commit);
-            }
-        }
-        return commit;
-    }
-
-    /**
-     * 备份主 classes 目录中本次会被覆盖的文件，并记录原先不存在的新增文件。
-     *
-     * @param project      项目记录
-     * @param compiledDir  主目标编译输出
-     * @param backupRoot   主 class 备份目录
-     * @param commit       提交恢复信息
-     * @throws IOException 备份失败时抛出
-     */
-    private void backupMainClasses(ProjectRecord project,
-                                   Path compiledDir,
-                                   Path backupRoot,
-                                   CompileCommit commit) throws IOException {
-        Path targetRoot = classRoot(project);
-        for (Path classFile : collectClassFiles(compiledDir)) {
-            Path relativePath = compiledDir.relativize(classFile);
-            Path target = targetRoot.resolve(relativePath).normalize();
-            if (Files.exists(target)) {
-                Path backup = backupRoot.resolve(relativePath).normalize();
-                Files.createDirectories(backup.getParent());
-                Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
-                commit.originalFiles.put(target, backup);
-            } else {
-                commit.newFiles.add(target);
-            }
-        }
-    }
-
-    /**
-     * 完整备份本次会重建的嵌套 Jar。
-     *
-     * @param project       项目记录
-     * @param compileTarget 嵌套 Jar 相对路径
-     * @param backupRoot    嵌套 Jar 备份目录
-     * @param commit        提交恢复信息
-     * @throws IOException 备份失败时抛出
-     */
-    private void backupNestedJar(ProjectRecord project,
-                                 String compileTarget,
-                                 Path backupRoot,
-                                 CompileCommit commit) throws IOException {
-        Path target = workspaceService.resolveExtracted(project, compileTarget);
-        if (!Files.isRegularFile(target)) {
-            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_INVALID_NESTED_JAR_SOURCE_PATH);
-        }
-        Files.createDirectories(backupRoot);
-        Path backup = backupRoot.resolve(safeCompileTargetName(compileTarget) + ".backup");
-        Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
-        commit.originalFiles.put(target, backup);
-    }
-
-    /**
-     * 按目标应用全部已成功编译的 class。
-     *
-     * @param project         项目记录
-     * @param compiledOutputs 各目标编译输出
-     * @param cancelRequested 取消检查回调
-     * @throws IOException 写回失败时抛出
-     */
-    private void applyCompiledOutputs(ProjectRecord project,
-                                      Map<String, Path> compiledOutputs,
-                                      BooleanSupplier cancelRequested) throws IOException {
-        for (Map.Entry<String, Path> entry : compiledOutputs.entrySet()) {
-            ensureNotCancelled(cancelRequested);
-            if (JarPatchConstants.COMPILE_TARGET_MAIN.equals(entry.getKey())) {
-                copyCompiledClasses(entry.getValue(), classRoot(project), cancelRequested);
-            } else {
-                Path nestedJar = workspaceService.resolveExtracted(project, entry.getKey());
-                archiveService.replaceClassesInJar(nestedJar, entry.getValue(), cancelRequested);
-            }
-        }
-    }
-
-    /**
-     * 把主目标 class 逐文件原子替换到 class 根目录。
-     *
-     * @param compiledDir     编译输出目录
-     * @param targetRoot      class 根目录
-     * @param cancelRequested 取消检查回调
-     * @throws IOException 写回失败时抛出
-     */
-    private void copyCompiledClasses(Path compiledDir,
-                                     Path targetRoot,
-                                     BooleanSupplier cancelRequested) throws IOException {
-        for (Path classFile : collectClassFiles(compiledDir)) {
-            ensureNotCancelled(cancelRequested);
-            Path target = targetRoot.resolve(compiledDir.relativize(classFile)).normalize();
-            atomicReplaceFile(classFile, target);
-        }
-    }
-
-    /**
-     * 恢复提交前所有原文件并删除本次新增 class。
-     *
-     * @param commit 提交恢复信息
-     * @throws IOException 恢复失败时抛出
-     */
-    private void restoreCompileCommit(CompileCommit commit) throws IOException {
-        for (Map.Entry<Path, Path> entry : commit.originalFiles.entrySet()) {
-            atomicReplaceFile(entry.getValue(), entry.getKey());
-        }
-        for (Path newFile : commit.newFiles) {
-            Files.deleteIfExists(newFile);
-        }
-    }
-
-    /**
-     * 使用目标目录内临时文件原子替换单个文件。
-     *
-     * @param source 完整源文件
-     * @param target 最终目标文件
-     * @throws IOException 文件系统不支持原子移动或复制失败时抛出
-     */
-    private void atomicReplaceFile(Path source, Path target) throws IOException {
-        Files.createDirectories(target.getParent());
-        Path temporaryFile = Files.createTempFile(target.getParent(), "." + target.getFileName() + ".", ".tmp");
-        try {
-            Files.copy(source, temporaryFile, StandardCopyOption.REPLACE_EXISTING);
-            Files.move(temporaryFile, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException exception) {
-            throw new IOException(JarPatchConstants.MESSAGE_EXPORT_ATOMIC_MOVE_REQUIRED, exception);
-        } finally {
-            Files.deleteIfExists(temporaryFile);
-        }
-    }
-
-    /**
-     * 收集编译目录内全部 class 文件。
-     *
-     * @param compiledDir 编译输出目录
-     * @return 按路径排序的 class 文件
-     * @throws IOException 遍历失败时抛出
-     */
-    private List<Path> collectClassFiles(Path compiledDir) throws IOException {
-        try (var stream = Files.walk(compiledDir)) {
-            return stream.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().endsWith("." + JarPatchConstants.CLASS_EXTENSION))
-                    .sorted(Comparator.comparing(Path::toString))
-                    .toList();
-        }
-    }
-
-    /**
      * 把 staging class 文件转换为最终包内可校验的产物路径。
      *
      * @param project         项目记录
@@ -550,7 +379,7 @@ public class CompileService {
                                               Map<String, Path> compiledOutputs) throws IOException {
         List<String> artifacts = new ArrayList<>();
         for (Map.Entry<String, Path> entry : compiledOutputs.entrySet()) {
-            for (Path classFile : collectClassFiles(entry.getValue())) {
+            for (Path classFile : compileArtifactCommitter.collectClassFiles(entry.getValue())) {
                 String classEntry = entry.getValue().relativize(classFile).toString().replace('\\', '/');
                 if (JarPatchConstants.COMPILE_TARGET_MAIN.equals(entry.getKey())) {
                     artifacts.add(mainArchivePrefix(project) + classEntry);
@@ -579,129 +408,4 @@ public class CompileService {
         return JarPatchConstants.EMPTY_TEXT;
     }
 
-    /**
-     * 执行 javac 并在取消时终止子进程。
-     *
-     * @param command         命令参数
-     * @param workDir        工作目录
-     * @param cancelRequested 取消检查回调
-     * @return javac 输出
-     * @throws IOException          进程启动失败时抛出
-     * @throws InterruptedException 进程等待被中断时抛出
-     */
-    private String runProcess(List<String> command,
-                              Path workDir,
-                              BooleanSupplier cancelRequested) throws IOException, InterruptedException {
-        ProcessBuilder processBuilder = new ProcessBuilder(command);
-        processBuilder.directory(workDir.toFile());
-        processBuilder.redirectErrorStream(true);
-        Process process = processBuilder.start();
-        StringBuilder output = new StringBuilder();
-        Thread readerThread = new Thread(() -> readProcessOutput(process, output), "jarpatch-javac-output");
-        readerThread.setDaemon(true);
-        readerThread.start();
-        try {
-            while (process.isAlive()) {
-                if (cancelRequested.getAsBoolean()) {
-                    process.destroyForcibly();
-                    readerThread.join();
-                    throw new IllegalStateException(JarPatchConstants.MESSAGE_TASK_CANCELLED);
-                }
-                process.waitFor(PROCESS_POLL_INTERVAL_MILLIS, TimeUnit.MILLISECONDS);
-            }
-            readerThread.join();
-        } finally {
-            if (process.isAlive()) {
-                process.destroyForcibly();
-            }
-        }
-        int exitCode = process.waitFor();
-        if (exitCode != 0) {
-            throw new IllegalStateException(output.toString());
-        }
-        return output.toString();
-    }
-
-    /**
-     * 持续读取 javac 合并输出流。
-     *
-     * @param process javac 进程
-     * @param output  输出缓冲
-     */
-    private void readProcessOutput(Process process, StringBuilder output) {
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append(System.lineSeparator());
-            }
-        } catch (IOException ignored) {
-            // 取消会关闭进程流，读取线程在此正常结束，主线程负责输出最终任务状态。
-        }
-    }
-
-    /**
-     * 删除本次编译 staging 目录。
-     *
-     * @param root staging 根目录
-     * @throws IOException 删除失败时抛出
-     */
-    private void deleteTree(Path root) throws IOException {
-        if (!Files.exists(root)) {
-            return;
-        }
-        try (var stream = Files.walk(root)) {
-            for (Path path : stream.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(path);
-            }
-        }
-    }
-
-    /**
-     * 检查任务取消状态。
-     *
-     * @param cancelRequested 取消检查回调
-     */
-    private void ensureNotCancelled(BooleanSupplier cancelRequested) {
-        if (cancelRequested != null && cancelRequested.getAsBoolean()) {
-            throw new IllegalStateException(JarPatchConstants.MESSAGE_TASK_CANCELLED);
-        }
-    }
-
-    /**
-     * 把嵌套 Jar 路径转换为 staging 目录安全名称。
-     *
-     * @param compileTarget 编译目标
-     * @return 安全目录名
-     */
-    private String safeCompileTargetName(String compileTarget) {
-        return compileTarget.replace(JarPatchConstants.ZIP_SEPARATOR, "_")
-                .replace(WINDOWS_PATH_SEPARATOR, '_');
-    }
-
-    /**
-     * 按包类型解析主 class 根目录。
-     *
-     * @param project 项目记录
-     * @return 主 class 根目录
-     */
-    private Path classRoot(ProjectRecord project) {
-        Path extractedDir = workspaceService.extractedDir(project);
-        if (PackageType.SPRING_BOOT_JAR.getCode().equals(project.getPackageType())) {
-            return extractedDir.resolve(JarPatchConstants.SPRING_BOOT_CLASSES_DIR);
-        }
-        if (PackageType.WAR.getCode().equals(project.getPackageType())) {
-            return extractedDir.resolve(JarPatchConstants.WAR_CLASSES_DIR);
-        }
-        return extractedDir;
-    }
-
-    /**
-     * 单次编译提交恢复信息。
-     */
-    private static final class CompileCommit {
-
-        private final Map<Path, Path> originalFiles = new LinkedHashMap<>();
-        private final Set<Path> newFiles = new LinkedHashSet<>();
-    }
 }

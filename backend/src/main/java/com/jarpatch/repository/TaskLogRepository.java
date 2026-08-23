@@ -4,6 +4,9 @@ import com.jarpatch.model.TaskLogRecord;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -49,15 +52,41 @@ public class TaskLogRepository {
     public List<TaskLogRecord> findByTaskId(String taskId) {
         return jdbcTemplate.query("SELECT id, task_id, progress, status, message, created_at " +
                         "FROM task_logs WHERE task_id = ? ORDER BY rowid",
-                (resultSet, rowNum) -> {
-                    TaskLogRecord record = new TaskLogRecord();
-                    record.setId(resultSet.getString("id"));
-                    record.setTaskId(resultSet.getString("task_id"));
-                    record.setProgress(resultSet.getInt("progress"));
-                    record.setStatus(resultSet.getString("status"));
-                    record.setMessage(resultSet.getString("message"));
-                    record.setCreatedAt(resultSet.getString("created_at"));
-                    return record;
-                }, taskId);
+                this::mapTaskLog, taskId);
+    }
+
+    /**
+     * 读取全局最新的任务日志，用于生成受数量限制的诊断快照。
+     *
+     * @param limit 最大日志条数
+     * @return 按产生顺序排列的近期任务日志
+     */
+    public List<TaskLogRecord> findRecent(int limit) {
+        List<TaskLogRecord> records = jdbcTemplate.query(
+                "SELECT id, task_id, progress, status, message, created_at " +
+                        "FROM task_logs ORDER BY rowid DESC LIMIT ?",
+                this::mapTaskLog, limit
+        );
+        Collections.reverse(records);
+        return records;
+    }
+
+    /**
+     * 把任务日志查询结果映射为领域模型。
+     *
+     * @param resultSet 当前查询行
+     * @param rowNum 行号
+     * @return 任务日志记录
+     * @throws SQLException 数据库字段读取失败时抛出
+     */
+    private TaskLogRecord mapTaskLog(ResultSet resultSet, int rowNum) throws SQLException {
+        TaskLogRecord record = new TaskLogRecord();
+        record.setId(resultSet.getString("id"));
+        record.setTaskId(resultSet.getString("task_id"));
+        record.setProgress(resultSet.getInt("progress"));
+        record.setStatus(resultSet.getString("status"));
+        record.setMessage(resultSet.getString("message"));
+        record.setCreatedAt(resultSet.getString("created_at"));
+        return record;
     }
 }

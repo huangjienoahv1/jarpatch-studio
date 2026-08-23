@@ -23,6 +23,7 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * 保真文本文件读写服务。
@@ -46,6 +47,12 @@ public class FileContentService {
     private static final String LINE_ENDING_CR = "CR";
     private static final String LINE_ENDING_MIXED = "MIXED";
     private static final String LINE_ENDING_NONE = "NONE";
+    private static final List<String> SUPPORTED_ENCODINGS = List.of(
+            JarPatchConstants.UTF_8,
+            JarPatchConstants.UTF_16_LE,
+            JarPatchConstants.UTF_16_BE,
+            JarPatchConstants.GBK,
+            JarPatchConstants.GB_18030);
 
     private final WorkspaceService workspaceService;
     private final FileKindService fileKindService;
@@ -91,9 +98,29 @@ public class FileContentService {
      * @throws IOException 读取失败时抛出
      */
     public FileContentView read(ProjectRecord project, String relativePath) throws IOException {
+        return read(project, relativePath, null);
+    }
+
+    /**
+     * 按项目默认编码或用户明确选择的文件编码读取可编辑文件。
+     * <p>
+     * 带 BOM 文件始终遵循 BOM；无 BOM 文件不做自动猜测，只使用项目设置或本次明确选择。
+     * </p>
+     *
+     * @param project      项目记录
+     * @param relativePath 文件树相对路径
+     * @param encoding     文件级明确编码，可为空
+     * @return 内容、哈希、编码和换行格式
+     * @throws IOException 读取失败时抛出
+     */
+    public FileContentView read(ProjectRecord project, String relativePath, String encoding) throws IOException {
         Path path = resolveEditablePath(project, relativePath);
         ensureWithinEditableLimit(project, Files.size(path));
-        return toView(readSnapshot(path), false);
+        boolean explicitEncoding = encoding != null && !encoding.isBlank();
+        String selectedEncoding = explicitEncoding
+                ? normalizeEncoding(encoding)
+                : projectSettingsService.defaultEncoding(project.getId());
+        return toView(readSnapshot(path, selectedEncoding, explicitEncoding), false);
     }
 
     /**
@@ -104,7 +131,19 @@ public class FileContentService {
      * @throws IOException 读取失败时抛出
      */
     public FileContentView readPath(Path path) throws IOException {
-        return toView(readSnapshot(path), false);
+        return toView(readSnapshot(path, JarPatchConstants.UTF_8, false), false);
+    }
+
+    /**
+     * 使用已持久化的明确编码读取服务内部安全路径。
+     *
+     * @param path     文本文件路径
+     * @param encoding 项目默认或文件级明确编码
+     * @return 内容视图
+     * @throws IOException 读取失败时抛出
+     */
+    public FileContentView readPath(Path path, String encoding) throws IOException {
+        return toView(readSnapshot(path, encoding, false), false);
     }
 
     /**
@@ -121,9 +160,31 @@ public class FileContentService {
                                 String relativePath,
                                 String content,
                                 String expectedHash) throws IOException {
+        return save(project, relativePath, content, expectedHash, null);
+    }
+
+    /**
+     * 使用打开文件时确认的编码校验原始哈希并原子保存真实修改。
+     *
+     * @param project      项目记录
+     * @param relativePath 文件树相对路径
+     * @param content      编辑器内容
+     * @param expectedHash 打开文件时的原始哈希
+     * @param encoding     打开文件时后端返回的编码，可为空
+     * @return 保存后的内容视图
+     * @throws IOException 写入失败时抛出
+     */
+    public FileContentView save(ProjectRecord project,
+                                String relativePath,
+                                String content,
+                                String expectedHash,
+                                String encoding) throws IOException {
         Path path = resolveEditablePath(project, relativePath);
         ensureWithinEditableLimit(project, Files.size(path));
-        TextSnapshot original = readSnapshot(path);
+        String selectedEncoding = encoding == null || encoding.isBlank()
+                ? projectSettingsService.defaultEncoding(project.getId())
+                : normalizeEncoding(encoding);
+        TextSnapshot original = readSnapshot(path, selectedEncoding, encoding != null && !encoding.isBlank());
         if (expectedHash == null || !expectedHash.equals(original.hash)) {
             throw new IllegalStateException(JarPatchConstants.MESSAGE_FILE_CHANGED_EXTERNALLY);
         }
@@ -141,21 +202,21 @@ public class FileContentService {
         String now = clockService.now();
         Path baselinePath = workspaceService.resolveBaseline(project, relativePath);
         if (Files.isRegularFile(baselinePath)) {
-            TextSnapshot baseline = readSnapshot(baselinePath);
-            TextSnapshot current = readSnapshot(path);
+            TextSnapshot baseline = readSnapshot(baselinePath, original.charset.name(), false);
+            TextSnapshot current = readSnapshot(path, original.charset.name(), false);
             if (baseline.hash.equals(current.hash)) {
                 fileChangeRepository.delete(project.getId(), relativePath);
             } else {
                 fileChangeRepository.upsert(project.getId(), relativePath, kind.getCode(),
-                        baseline.hash, current.hash, now);
+                        baseline.hash, current.hash, original.charset.name(), now);
             }
         } else {
-            TextSnapshot current = readSnapshot(path);
+            TextSnapshot current = readSnapshot(path, original.charset.name(), false);
             fileChangeRepository.upsert(project.getId(), relativePath, kind.getCode(),
-                    null, current.hash, now);
+                    null, current.hash, original.charset.name(), now);
         }
         projectRepository.touch(project.getId(), now);
-        return toView(readSnapshot(path), true);
+        return toView(readSnapshot(path, original.charset.name(), false), true);
     }
 
     /**
@@ -173,24 +234,27 @@ public class FileContentService {
     /**
      * 读取文件字节并严格识别 UTF 编码、BOM 和换行格式。
      *
-     * @param path 文件路径
+     * @param path             文件路径
+     * @param selectedEncoding 文件级选择或项目默认编码
+     * @param explicitEncoding 是否为用户本次明确选择
      * @return 原始文本快照
      * @throws IOException 读取失败时抛出
      */
-    private TextSnapshot readSnapshot(Path path) throws IOException {
+    private TextSnapshot readSnapshot(Path path, String selectedEncoding, boolean explicitEncoding) throws IOException {
         byte[] bytes = Files.readAllBytes(path);
-        Charset charset = StandardCharsets.UTF_8;
+        Charset charset = Charset.forName(normalizeEncoding(selectedEncoding));
         byte[] bom = new byte[0];
         int offset = 0;
         if (startsWith(bytes, UTF_8_BOM)) {
+            charset = requireBomCompatible(charset, StandardCharsets.UTF_8, explicitEncoding);
             bom = UTF_8_BOM;
             offset = UTF_8_BOM.length;
         } else if (startsWith(bytes, UTF_16_LE_BOM)) {
-            charset = StandardCharsets.UTF_16LE;
+            charset = requireBomCompatible(charset, StandardCharsets.UTF_16LE, explicitEncoding);
             bom = UTF_16_LE_BOM;
             offset = UTF_16_LE_BOM.length;
         } else if (startsWith(bytes, UTF_16_BE_BOM)) {
-            charset = StandardCharsets.UTF_16BE;
+            charset = requireBomCompatible(charset, StandardCharsets.UTF_16BE, explicitEncoding);
             bom = UTF_16_BE_BOM;
             offset = UTF_16_BE_BOM.length;
         }
@@ -230,11 +294,61 @@ public class FileContentService {
             throw new IllegalArgumentException(JarPatchConstants.MESSAGE_FILE_MIXED_LINE_ENDINGS);
         }
         String normalizedContent = normalizeLineEndings(content, original.lineEnding);
-        byte[] body = normalizedContent.getBytes(original.charset);
+        byte[] body = encodeStrict(normalizedContent, original.charset);
         byte[] result = new byte[original.bom.length + body.length];
         System.arraycopy(original.bom, 0, result, 0, original.bom.length);
         System.arraycopy(body, 0, result, original.bom.length, body.length);
         return result;
+    }
+
+    /**
+     * 使用严格编码器生成字节，不允许把无法表示的字符静默替换为问号。
+     *
+     * @param content 文本内容
+     * @param charset 用户明确确认的字符集
+     * @return 编码后的正文，不含 BOM
+     */
+    private byte[] encodeStrict(String content, Charset charset) {
+        try {
+            ByteBuffer encoded = charset.newEncoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .encode(CharBuffer.wrap(content));
+            byte[] bytes = new byte[encoded.remaining()];
+            encoded.get(bytes);
+            return bytes;
+        } catch (CharacterCodingException exception) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_FILE_ENCODING_UNSUPPORTED, exception);
+        }
+    }
+
+    /**
+     * 规范化并校验文件级明确编码。
+     *
+     * @param encoding 用户或项目设置提供的编码名
+     * @return 产品支持清单中的标准编码名
+     */
+    private String normalizeEncoding(String encoding) {
+        String requested = encoding == null || encoding.isBlank() ? JarPatchConstants.UTF_8 : encoding.trim();
+        return SUPPORTED_ENCODINGS.stream()
+                .filter(candidate -> candidate.equalsIgnoreCase(requested))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(JarPatchConstants.MESSAGE_FILE_ENCODING_UNSUPPORTED));
+    }
+
+    /**
+     * 校验文件级显式选择不得与 BOM 冲突，项目默认编码则由 BOM 正确覆盖。
+     *
+     * @param selected 用户选择或项目默认字符集
+     * @param bomCharset BOM 声明的字符集
+     * @param explicitEncoding 是否为用户本次明确选择
+     * @return 实际解码字符集
+     */
+    private Charset requireBomCompatible(Charset selected, Charset bomCharset, boolean explicitEncoding) {
+        if (explicitEncoding && !selected.equals(bomCharset)) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_FILE_ENCODING_CONFLICT);
+        }
+        return bomCharset;
     }
 
     /**

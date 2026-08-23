@@ -111,6 +111,7 @@ public class ProjectRepository {
         jdbcTemplate.update("DELETE FROM compiled_artifacts WHERE project_id = ?", id);
         jdbcTemplate.update("DELETE FROM export_validations WHERE project_id = ?", id);
         jdbcTemplate.update("DELETE FROM analysis_reports WHERE project_id = ?", id);
+        jdbcTemplate.update("DELETE FROM operation_journals WHERE project_id = ?", id);
         jdbcTemplate.update("DELETE FROM project_settings WHERE project_id = ?", id);
         jdbcTemplate.update("DELETE FROM projects WHERE id = ?", id);
     }

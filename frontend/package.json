@@ -45,6 +45,7 @@
       }
     ],
     "win": {
+      "executableName": "jarpatch-studio",
       "target": [
         "portable"
       ],
@@ -56,9 +57,11 @@
         "zip"
       ],
       "artifactName": "JarPatch-Studio-${version}-macOS-${arch}.${ext}",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true
     },
     "linux": {
+      "executableName": "jarpatch-studio",
       "target": [
         "AppImage",
         "tar.gz"

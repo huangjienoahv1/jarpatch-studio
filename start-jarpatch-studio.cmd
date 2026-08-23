@@ -25,19 +25,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
-if not exist "%BACKEND_JAR%" (
-    where mvn.cmd >nul 2>nul
-    if errorlevel 1 (
-        echo Maven was not found and the backend package does not exist.
-        pause
-        exit /b 1
-    )
-    call mvn.cmd "-Dmaven.test.skip=true" package
-    if errorlevel 1 (
-        echo Backend build failed.
-        pause
-        exit /b 1
-    )
+pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%APP_ROOT%scripts\ensure-backend-package.ps1" -JarPath "%BACKEND_JAR%" -ProjectRoot "%APP_ROOT%"
+if errorlevel 1 (
+    echo Backend package validation or rebuild failed.
+    pause
+    exit /b 1
 )
 
 if not exist "%APP_ROOT%frontend\node_modules\electron" (

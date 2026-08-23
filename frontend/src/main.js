@@ -13,19 +13,37 @@ const BACKEND_READY_TIMEOUT_MS = 20000;
 const BACKEND_POLL_INTERVAL_MS = 250;
 const BACKEND_SHUTDOWN_TIMEOUT_MS = 5000;
 const BACKEND_LOG_LIMIT = 80;
+const DIAGNOSTIC_FILE_MAX_BYTES = 5 * 1024 * 1024;
+const DIAGNOSTIC_FILE_DEFAULT_NAME = 'jarpatch-studio-diagnostics.json';
+const DIAGNOSTIC_FILE_ENCODING = 'utf8';
+const BACKEND_LOG_DIRECTORY_NAME = 'logs';
+const BACKEND_LOG_FILE_NAME = 'backend.log';
 const PRODUCT_NAME = 'JarPatch Studio';
 const ENV_AUTH_TOKEN = 'JARPATCH_AUTH_TOKEN';
 const ENV_INSTANCE_ID = 'JARPATCH_INSTANCE_ID';
+const ENV_BACKEND_LOG_FILE = 'JARPATCH_LOG_FILE';
+const SMOKE_CHECK_ARGUMENT = '--smoke-check';
+const SMOKE_CHECK_STATUS = 'READY';
+const smokeCheckRequested = process.argv.includes(SMOKE_CHECK_ARGUMENT);
 let backendProcess = null;
 let backendStopping = false;
 let applicationQuitAllowed = false;
 let backendShutdownPromise = null;
 let backendToken = null;
 let backendInstanceId = null;
+let backendLogPath = null;
+let mainWindow = null;
 const backendLogs = [];
 
+const singleInstanceLockAcquired = app.requestSingleInstanceLock();
+
+/**
+ * 创建并记录主工作台窗口，供第二次启动时激活现有实例。
+ *
+ * @returns {BrowserWindow} 新建的主窗口
+ */
 function createWindow() {
-  const window = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
     minWidth: 1180,
@@ -39,9 +57,16 @@ function createWindow() {
     }
   });
 
-  window.loadFile(path.join(__dirname, 'index.html'));
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  return mainWindow;
 }
 
+/**
+ * 启动当前 Electron 实例专属的后端进程，并把实例 ID、访问令牌和日志路径传入后端。
+ */
 function startBackend() {
   const backendJar = resolveBackendJarPath();
   if (!fs.existsSync(backendJar)) {
@@ -49,13 +74,15 @@ function startBackend() {
   }
   backendToken = crypto.randomBytes(32).toString('hex');
   backendInstanceId = crypto.randomUUID();
+  backendLogPath = resolveBackendLogPath();
   const javaExecutable = resolveJavaExecutable();
   backendProcess = spawn(javaExecutable, ['-jar', backendJar], {
     cwd: path.dirname(backendJar),
     env: {
       ...process.env,
       [ENV_AUTH_TOKEN]: backendToken,
-      [ENV_INSTANCE_ID]: backendInstanceId
+      [ENV_INSTANCE_ID]: backendInstanceId,
+      [ENV_BACKEND_LOG_FILE]: backendLogPath
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true
@@ -69,6 +96,17 @@ function startBackend() {
       dialog.showErrorBox('JarPatch Studio 后端已停止', formatBackendFailure('后端进程异常退出'));
     }
   });
+}
+
+/**
+ * 创建桌面端可定位的后端滚动日志目录。
+ *
+ * @returns {string} 后端主日志文件绝对路径
+ */
+function resolveBackendLogPath() {
+  const logDirectory = path.join(app.getPath('userData'), BACKEND_LOG_DIRECTORY_NAME);
+  fs.mkdirSync(logDirectory, { recursive: true });
+  return path.join(logDirectory, BACKEND_LOG_FILE_NAME);
 }
 
 function resolveBackendJarPath() {
@@ -115,7 +153,7 @@ async function waitForBackendReady() {
   const deadline = Date.now() + BACKEND_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (backendProcess && backendProcess.exitCode != null) {
-      throw new Error(formatBackendFailure('后端进程在就绪前退出'));
+      throw new Error('后端进程在就绪前退出');
     }
     try {
       const response = await fetch(`${BACKEND_BASE_URL}/api/system/health`, {
@@ -133,12 +171,13 @@ async function waitForBackendReady() {
     }
     await new Promise((resolve) => setTimeout(resolve, BACKEND_POLL_INTERVAL_MS));
   }
-  throw new Error(formatBackendFailure('等待后端健康检查超时，端口可能被其他进程占用'));
+  throw new Error('等待后端健康检查超时，端口可能被其他进程占用');
 }
 
 function formatBackendFailure(message) {
   const details = backendLogs.slice(-20).join('\n');
-  return details ? `${message}\n\n${details}` : message;
+  const identity = `实例 ID：${backendInstanceId || '未生成'}\n后端日志：${backendLogPath || '未生成'}`;
+  return details ? `${message}\n${identity}\n\n${details}` : `${message}\n${identity}`;
 }
 
 async function stopBackendGracefully() {
@@ -203,28 +242,87 @@ ipcMain.handle('dialog:pickDirectory', async (_, defaultPath, title) => {
   return result.filePaths[0];
 });
 
+/**
+ * 通过系统保存对话框写出后端已经脱敏的诊断 JSON。
+ *
+ * @param {Electron.IpcMainInvokeEvent} _ IPC 事件
+ * @param {string} defaultName 默认文件名
+ * @param {string} content 诊断 JSON 文本
+ * @returns {Promise<string|null>} 保存路径；取消时返回 null
+ */
+async function saveDiagnosticFile(_, defaultName, content) {
+  if (typeof content !== 'string' || Buffer.byteLength(content, DIAGNOSTIC_FILE_ENCODING) > DIAGNOSTIC_FILE_MAX_BYTES) {
+    throw new Error('诊断信息为空或超过允许大小。');
+  }
+  const result = await dialog.showSaveDialog({
+    title: '导出脱敏诊断信息',
+    defaultPath: defaultName || DIAGNOSTIC_FILE_DEFAULT_NAME,
+    filters: [
+      { name: 'JSON', extensions: ['json'] }
+    ]
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+  await fs.promises.writeFile(result.filePath, content, { encoding: DIAGNOSTIC_FILE_ENCODING });
+  return result.filePath;
+}
+
+ipcMain.handle('dialog:saveDiagnostic', saveDiagnosticFile);
+
 ipcMain.handle('backend:connection', () => ({
   apiBase: BACKEND_BASE_URL,
   token: backendToken,
   instanceId: backendInstanceId
 }));
 
-app.whenReady().then(async () => {
-  Menu.setApplicationMenu(null);
-  try {
-    startBackend();
-    await waitForBackendReady();
-    createWindow();
-  } catch (error) {
-    dialog.showErrorBox('JarPatch Studio 启动失败', error.message);
-    backendStopping = true;
-    if (backendProcess && backendProcess.exitCode == null) {
-      backendProcess.kill();
+if (!singleInstanceLockAcquired) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const existingWindow = mainWindow || BrowserWindow.getAllWindows()[0];
+    if (!existingWindow) {
+      return;
     }
-    applicationQuitAllowed = true;
-    app.quit();
-  }
-});
+    if (existingWindow.isMinimized()) {
+      existingWindow.restore();
+    }
+    existingWindow.show();
+    existingWindow.focus();
+  });
+
+  app.whenReady().then(async () => {
+    Menu.setApplicationMenu(null);
+    try {
+      startBackend();
+      await waitForBackendReady();
+      if (smokeCheckRequested) {
+        process.stdout.write(`${JSON.stringify({
+          product: PRODUCT_NAME,
+          status: SMOKE_CHECK_STATUS,
+          instanceId: backendInstanceId
+        })}\n`);
+        await stopBackendGracefully();
+        applicationQuitAllowed = true;
+        app.quit();
+        return;
+      }
+      createWindow();
+    } catch (error) {
+      if (smokeCheckRequested) {
+        process.stderr.write(`${formatBackendFailure(error.message)}\n`);
+      } else {
+        dialog.showErrorBox('JarPatch Studio 启动失败', formatBackendFailure(error.message));
+      }
+      backendStopping = true;
+      if (backendProcess && backendProcess.exitCode == null) {
+        backendProcess.kill();
+      }
+      applicationQuitAllowed = true;
+      app.quit();
+    }
+  });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -247,7 +345,7 @@ app.on('before-quit', (event) => {
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  if (!smokeCheckRequested && BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
 });

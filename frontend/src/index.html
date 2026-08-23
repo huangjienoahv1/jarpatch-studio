@@ -6,6 +6,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src http://127.0.0.1:18765 ws://127.0.0.1:18765; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
   <title>JarPatch Studio</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles-settings.css">
 </head>
 <body>
   <div id="notificationArea" class="notification-area" aria-live="polite"></div>
@@ -20,6 +21,20 @@
       <div id="diffContent" class="diff-content"></div>
       <footer class="modal-footer">
         <button id="closeDiffBtn" class="primary-action modal-primary" type="button">关闭</button>
+      </footer>
+    </section>
+  </div>
+  <div id="projectHistoryDialog" class="modal-backdrop" aria-hidden="true">
+    <section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="projectHistoryDialogTitle">
+      <header class="modal-header">
+        <div>
+          <h2 id="projectHistoryDialogTitle">项目历史</h2>
+          <p>查看最近的操作时间线、结构分析和导出校验记录</p>
+        </div>
+      </header>
+      <div id="projectHistoryContent" class="project-history-content"></div>
+      <footer class="modal-footer">
+        <button id="closeProjectHistoryBtn" class="tool-btn" type="button">关闭</button>
       </footer>
     </section>
   </div>
@@ -93,6 +108,15 @@
         <label class="field-label">可编辑单文件上限（MB）
           <input id="maxEditableFileMbInput" type="number" min="1" max="100" step="1">
         </label>
+        <label class="field-label">无 BOM 文本默认编码
+          <select id="projectDefaultEncodingSelect">
+            <option value="UTF-8">UTF-8</option>
+            <option value="GB18030">GB18030</option>
+            <option value="GBK">GBK</option>
+            <option value="UTF-16LE">UTF-16LE</option>
+            <option value="UTF-16BE">UTF-16BE</option>
+          </select>
+        </label>
         <label class="field-label field-wide">推荐嵌套 Jar（每行一个包内相对路径）
           <textarea id="selectedNestedJarsInput" rows="4"></textarea>
         </label>
@@ -148,8 +172,11 @@
           <button id="compileBtn" class="tool-btn" disabled>编译</button>
           <button id="exportBtn" class="tool-btn" disabled>导出</button>
           <button id="projectSettingsBtn" class="tool-btn" type="button" disabled>项目设置</button>
+          <button id="projectHistoryBtn" class="tool-btn" type="button" disabled>项目历史</button>
           <button id="cleanupWorkspaceBtn" class="tool-btn" type="button" disabled>清理工作区</button>
+          <button id="orphanWorkspacesBtn" class="tool-btn" type="button">孤立工作区</button>
           <button id="errorGuideBtn" class="tool-btn" type="button">排错向导</button>
+          <button id="diagnosticBtn" class="tool-btn" type="button">导出诊断</button>
           <button id="settingsBtn" class="tool-btn" type="button">⚙ JDK</button>
         </div>
       </header>
@@ -182,6 +209,15 @@
               <div id="activeFileKind" class="file-kind">可编辑 Java 与文本资源</div>
             </div>
             <div class="editor-actions">
+              <label class="editor-encoding">文件编码
+                <select id="fileEncodingSelect" disabled>
+                  <option value="UTF-8">UTF-8</option>
+                  <option value="GB18030">GB18030</option>
+                  <option value="GBK">GBK</option>
+                  <option value="UTF-16LE">UTF-16LE</option>
+                  <option value="UTF-16BE">UTF-16BE</option>
+                </select>
+              </label>
               <button id="unicodePreviewBtn" class="tool-btn" type="button" aria-pressed="false" disabled>中文预览</button>
               <button id="saveBtn" class="tool-btn" disabled>保存</button>
             </div>
@@ -211,6 +247,7 @@
     </main>
   </div>
 
+  <script src="api-client.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

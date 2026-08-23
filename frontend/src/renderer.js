@@ -1,6 +1,3 @@
-let API_BASE = '';
-let WS_BASE = '';
-let API_TOKEN = '';
 const TOAST_AUTO_CLOSE_MS = 3200;
 const NOTICE_TYPE_SUCCESS = 'success';
 const NOTICE_TYPE_ERROR = 'error';
@@ -40,6 +37,7 @@ const MESSAGE_SETTINGS_SAVE_SUCCESS = 'JDK 配置已保存';
 const MESSAGE_PROJECT_SETTINGS_LOAD_FAILED = '读取项目设置失败';
 const MESSAGE_PROJECT_SETTINGS_SAVE_FAILED = '保存项目设置失败';
 const MESSAGE_PROJECT_SETTINGS_SAVE_SUCCESS = '项目设置已保存';
+const MESSAGE_PROJECT_HISTORY_LOAD_FAILED = '读取项目历史失败';
 const MESSAGE_WORKSPACE_CLEANUP_FAILED = '工作区清理失败';
 const MESSAGE_WORKSPACE_CLEANUP_SUCCESS = '工作区已清理，项目历史仍然保留';
 const MESSAGE_WORKSPACE_CLEANUP_CONFIRM = '确认清理以下工作区吗？此操作会删除工作区文件，但保留项目历史。';
@@ -56,6 +54,11 @@ const MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_PREFIX = '确认从项目历史删�
 const MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_SUFFIX = '”？这只会移除历史记录，不会删除本地工作区文件。';
 const MESSAGE_PROJECT_HISTORY_DELETE_SUCCESS = '项目历史已删除';
 const MESSAGE_PROJECT_HISTORY_DELETE_FAILED = '项目历史删除失败';
+const MESSAGE_PROJECT_HISTORY_DELETE_WITH_WORKSPACE = '是否先预览并清理该项目工作区，再删除历史？\n\n选择“确定”：预览确认清理后删除历史。\n选择“取消”：下一步可选择仅删除历史或放弃。';
+const MESSAGE_PROJECT_HISTORY_DELETE_ONLY = '确认仅删除项目历史并保留工作区吗？保留的目录稍后可在“孤立工作区”中预览清理。';
+const MESSAGE_ORPHAN_WORKSPACE_EMPTY = '没有发现孤立工作区';
+const MESSAGE_ORPHAN_WORKSPACE_CLEAN_SUCCESS = '孤立工作区已清理';
+const MESSAGE_ORPHAN_WORKSPACE_CLEAN_FAILED = '孤立工作区清理失败';
 const MESSAGE_PROJECT_NOT_OPENED = '未打开项目';
 const MESSAGE_PROJECT_OPEN_TIP = '请选择一个 Jar 或 War 文件开始';
 const MESSAGE_FILE_TREE_EMPTY = '暂无文件';
@@ -77,6 +80,8 @@ const MESSAGE_TASK_FAILED = '任务已失败';
 const MESSAGE_TASK_CANCEL_FAILED = '取消任务失败';
 const MESSAGE_TASK_START_FAILED = '任务启动失败';
 const MESSAGE_TASK_LOG_UNAVAILABLE = '任务日志连接失败';
+const MESSAGE_DIAGNOSTIC_EXPORT_SUCCESS = '脱敏诊断信息已导出';
+const MESSAGE_DIAGNOSTIC_EXPORT_FAILED = '导出诊断信息失败';
 const MESSAGE_TASK_LABEL_IMPORT = '导入';
 const MESSAGE_TASK_LABEL_ANALYZE = '分析';
 const MESSAGE_TASK_LABEL_COMPILE = '编译';
@@ -103,6 +108,8 @@ const BUTTON_TEXT_COMPILE_RUNNING = '编译中...';
 const BUTTON_TEXT_EXPORT_RUNNING = '导出中...';
 const BUTTON_TEXT_UNICODE_PREVIEW = '中文预览';
 const BUTTON_TEXT_UNICODE_SOURCE = '返回原文';
+const DIAGNOSTIC_DEFAULT_FILE_NAME = 'jarpatch-studio-diagnostics.json';
+const JSON_INDENT_SPACES = 2;
 const STORAGE_KEY_TREE_PANEL_WIDTH = 'jarpatch.treePanelWidth';
 const TREE_PANEL_DEFAULT_WIDTH = 380;
 const TREE_PANEL_MIN_WIDTH = 280;
@@ -160,6 +167,7 @@ const state = {
   currentProject: null,
   currentFilePath: null,
   currentFileHash: null,
+  currentFileEncoding: null,
   currentFileOriginalContent: null,
   unicodePreviewOpen: false,
   analysisOpen: false,
@@ -174,7 +182,7 @@ const state = {
   jdkSettings: null,
   projectSettings: null,
   treePanelWidth: TREE_PANEL_DEFAULT_WIDTH,
-  expandedPaths: new Set(['', 'sources', 'extracted'])
+  expandedPaths: new Set([''])
 };
 
 const elements = {
@@ -188,8 +196,11 @@ const elements = {
   exportBtn: document.getElementById('exportBtn'),
   settingsBtn: document.getElementById('settingsBtn'),
   projectSettingsBtn: document.getElementById('projectSettingsBtn'),
+  projectHistoryBtn: document.getElementById('projectHistoryBtn'),
   cleanupWorkspaceBtn: document.getElementById('cleanupWorkspaceBtn'),
+  orphanWorkspacesBtn: document.getElementById('orphanWorkspacesBtn'),
   errorGuideBtn: document.getElementById('errorGuideBtn'),
+  diagnosticBtn: document.getElementById('diagnosticBtn'),
   settingsDialog: document.getElementById('settingsDialog'),
   settingsDialogSummary: document.getElementById('settingsDialogSummary'),
   jdkHomeInput: document.getElementById('jdkHomeInput'),
@@ -203,10 +214,14 @@ const elements = {
   defaultExportDirectoryInput: document.getElementById('defaultExportDirectoryInput'),
   browseExportDirectoryBtn: document.getElementById('browseExportDirectoryBtn'),
   maxEditableFileMbInput: document.getElementById('maxEditableFileMbInput'),
+  projectDefaultEncodingSelect: document.getElementById('projectDefaultEncodingSelect'),
   selectedNestedJarsInput: document.getElementById('selectedNestedJarsInput'),
   uiPreferencesInput: document.getElementById('uiPreferencesInput'),
   closeProjectSettingsBtn: document.getElementById('closeProjectSettingsBtn'),
   saveProjectSettingsBtn: document.getElementById('saveProjectSettingsBtn'),
+  projectHistoryDialog: document.getElementById('projectHistoryDialog'),
+  projectHistoryContent: document.getElementById('projectHistoryContent'),
+  closeProjectHistoryBtn: document.getElementById('closeProjectHistoryBtn'),
   errorGuideDialog: document.getElementById('errorGuideDialog'),
   errorGuideContent: document.getElementById('errorGuideContent'),
   closeErrorGuideBtn: document.getElementById('closeErrorGuideBtn'),
@@ -222,6 +237,7 @@ const elements = {
   activeFileName: document.getElementById('activeFileName'),
   activeFileKind: document.getElementById('activeFileKind'),
   unicodePreviewBtn: document.getElementById('unicodePreviewBtn'),
+  fileEncodingSelect: document.getElementById('fileEncodingSelect'),
   saveBtn: document.getElementById('saveBtn'),
   editor: document.getElementById('editor'),
   unicodePreview: document.getElementById('unicodePreview'),
@@ -247,25 +263,7 @@ const elements = {
   confirmDecompileBtn: document.getElementById('confirmDecompileBtn')
 };
 
-async function api(path, options = {}) {
-  if (!API_BASE || !API_TOKEN) {
-    throw new Error('后端安全连接尚未就绪');
-  }
-  const { headers = {}, ...requestOptions } = options;
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...requestOptions,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-JarPatch-Token': API_TOKEN,
-      ...headers
-    }
-  });
-  const body = await response.json();
-  if (!body.success) {
-    throw new Error(body.message || '操作失败');
-  }
-  return body.data;
-}
+const api = window.jarPatchApiClient.request;
 
 /**
  * 获取任务展示名称。
@@ -464,7 +462,9 @@ function restoreWorkspaceControls() {
   elements.settingsBtn.disabled = false;
   elements.errorGuideBtn.disabled = false;
   elements.projectSettingsBtn.disabled = !state.currentProject;
+  elements.projectHistoryBtn.disabled = !state.currentProject;
   elements.cleanupWorkspaceBtn.disabled = !state.currentProject;
+  elements.orphanWorkspacesBtn.disabled = false;
   elements.projectList.style.pointerEvents = '';
   elements.fileTree.style.pointerEvents = '';
   elements.searchResults.style.pointerEvents = '';
@@ -473,6 +473,7 @@ function restoreWorkspaceControls() {
   elements.searchInput.disabled = !state.currentProject;
   elements.searchBtn.disabled = !state.currentProject;
   elements.saveBtn.disabled = !state.currentProject || !state.currentFilePath;
+  elements.fileEncodingSelect.disabled = !state.currentProject || !state.currentFilePath;
   elements.editor.disabled = !state.currentProject || !state.currentFilePath;
   updateUnicodePreviewButton();
   elements.analyzeBtn.disabled = !state.currentProject;
@@ -495,7 +496,9 @@ function lockWorkspaceControls() {
   elements.settingsBtn.disabled = true;
   elements.errorGuideBtn.disabled = true;
   elements.projectSettingsBtn.disabled = true;
+  elements.projectHistoryBtn.disabled = true;
   elements.cleanupWorkspaceBtn.disabled = true;
+  elements.orphanWorkspacesBtn.disabled = true;
   elements.projectList.style.pointerEvents = 'none';
   elements.fileTree.style.pointerEvents = 'none';
   elements.searchResults.style.pointerEvents = 'none';
@@ -504,6 +507,7 @@ function lockWorkspaceControls() {
   elements.searchInput.disabled = true;
   elements.searchBtn.disabled = true;
   elements.saveBtn.disabled = true;
+  elements.fileEncodingSelect.disabled = true;
   elements.unicodePreviewBtn.disabled = true;
   elements.editor.disabled = true;
   elements.analyzeBtn.disabled = true;
@@ -534,7 +538,7 @@ function closeTaskSocket() {
  */
 function openTaskSocket(taskId) {
   closeTaskSocket();
-  const socket = new WebSocket(`${WS_BASE}/ws/tasks/${taskId}?token=${encodeURIComponent(API_TOKEN)}`);
+  const socket = new WebSocket(window.jarPatchApiClient.taskWebSocketUrl(taskId));
   state.currentTaskSocket = socket;
   return new Promise((resolve) => {
     let settled = false;
@@ -793,6 +797,7 @@ async function openProjectSettingsDialog() {
     elements.projectJavaVersionInput.value = `Java ${settings.targetJavaVersion}`;
     elements.defaultExportDirectoryInput.value = settings.defaultExportDirectory || '';
     elements.maxEditableFileMbInput.value = settings.maxEditableFileBytes / BYTES_PER_MEGABYTE;
+    elements.projectDefaultEncodingSelect.value = settings.defaultEncoding || 'UTF-8';
     elements.selectedNestedJarsInput.value = (settings.selectedNestedJars || []).join('\n');
     elements.uiPreferencesInput.value = settings.uiPreferencesJson || EMPTY_JSON_OBJECT;
   } catch (error) {
@@ -807,6 +812,61 @@ async function openProjectSettingsDialog() {
 function closeProjectSettingsDialog() {
   elements.projectSettingsDialog.classList.remove('open');
   elements.projectSettingsDialog.setAttribute('aria-hidden', 'true');
+}
+
+/**
+ * 加载并展示当前项目最近的业务操作、分析和导出校验历史。
+ */
+async function openProjectHistoryDialog() {
+  if (!state.currentProject) {
+    return;
+  }
+  elements.projectHistoryDialog.classList.add('open');
+  elements.projectHistoryDialog.setAttribute('aria-hidden', 'false');
+  elements.projectHistoryContent.innerHTML = '<div class="empty">正在读取项目历史...</div>';
+  try {
+    const history = await api(`/api/projects/${state.currentProject.id}/history`);
+    renderProjectHistory(history);
+  } catch (error) {
+    elements.projectHistoryContent.innerHTML = '<div class="empty">项目历史读取失败</div>';
+    notify(`${MESSAGE_PROJECT_HISTORY_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
+}
+
+/**
+ * 关闭项目历史弹窗。
+ */
+function closeProjectHistoryDialog() {
+  elements.projectHistoryDialog.classList.remove('open');
+  elements.projectHistoryDialog.setAttribute('aria-hidden', 'true');
+}
+
+/**
+ * 渲染项目历史聚合视图。
+ *
+ * @param history 后端历史聚合数据
+ */
+function renderProjectHistory(history) {
+  const operations = (history.operations || []).map((item) => `
+    <div class="history-item">
+      <strong>${escapeHtml(item.createdAt)} · ${escapeHtml(item.operationType)} · ${escapeHtml(item.status)}</strong>
+      <span>操作 ID：${escapeHtml(item.operationId || '-')}</span>
+      <span>${escapeHtml(item.details || '')}</span>
+    </div>`).join('') || '<div class="empty">暂无操作记录</div>';
+  const analyses = (history.analyses || []).map((item) => {
+    const risks = item.report && Array.isArray(item.report.risks) ? item.report.risks.length : 0;
+    return `<div class="history-item"><strong>${escapeHtml(item.createdAt)}</strong><span>风险项：${risks}</span></div>`;
+  }).join('') || '<div class="empty">暂无分析记录</div>';
+  const validations = (history.exportValidations || []).map((item) => `
+    <div class="history-item">
+      <strong>${escapeHtml(item.createdAt)} · ${item.valid ? '通过' : '未通过'}</strong>
+      <span>${escapeHtml(item.outputPath || '')}</span>
+      <span>检查 ${item.checks ? item.checks.length : 0} 项，错误 ${item.errors ? item.errors.length : 0} 项</span>
+    </div>`).join('') || '<div class="empty">暂无导出校验记录</div>';
+  elements.projectHistoryContent.innerHTML = `
+    <section class="history-section"><h3>操作时间线</h3>${operations}</section>
+    <section class="history-section"><h3>结构分析历史</h3>${analyses}</section>
+    <section class="history-section"><h3>导出校验历史</h3>${validations}</section>`;
 }
 
 /**
@@ -842,6 +902,7 @@ async function saveProjectSettings() {
         defaultExportDirectory: elements.defaultExportDirectoryInput.value.trim() || null,
         selectedNestedJars,
         maxEditableFileBytes: maxEditableFileMb * BYTES_PER_MEGABYTE,
+        defaultEncoding: elements.projectDefaultEncodingSelect.value,
         uiPreferencesJson: elements.uiPreferencesInput.value.trim()
       })
     });
@@ -918,6 +979,25 @@ function closeErrorGuideDialog() {
 }
 
 /**
+ * 请求后端生成脱敏诊断快照，并通过系统保存对话框导出 JSON。
+ */
+async function exportDiagnostics() {
+  elements.diagnosticBtn.disabled = true;
+  try {
+    const snapshot = await api('/api/system/diagnostics');
+    const content = `${JSON.stringify(snapshot, null, JSON_INDENT_SPACES)}\n`;
+    const savedPath = await window.jarPatch.saveDiagnostic(DIAGNOSTIC_DEFAULT_FILE_NAME, content);
+    if (savedPath) {
+      notify(`${MESSAGE_DIAGNOSTIC_EXPORT_SUCCESS}：${savedPath}`, NOTICE_TYPE_SUCCESS);
+    }
+  } catch (error) {
+    notify(`${MESSAGE_DIAGNOSTIC_EXPORT_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  } finally {
+    elements.diagnosticBtn.disabled = false;
+  }
+}
+
+/**
  * 把字节数格式化为便于确认的容量文本。
  *
  * @param bytes 字节数
@@ -978,8 +1058,10 @@ async function selectProject(project) {
   state.diffReport = null;
   state.currentFilePath = null;
   state.currentFileHash = null;
+  state.currentFileEncoding = null;
   state.currentFileOriginalContent = null;
   state.currentTree = null;
+  state.expandedPaths = new Set(['']);
   elements.currentProjectName.textContent = project.name;
   elements.currentProjectMeta.textContent = `${project.packageType} · ${project.workspacePath}`;
   restoreWorkspaceControls();
@@ -1000,11 +1082,23 @@ async function deleteProjectHistory(project) {
   if (state.currentProject && state.currentProject.id === project.id && !confirmDiscardUnsavedChanges()) {
     return;
   }
-  const confirmed = window.confirm(`${MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_PREFIX}${project.name}${MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_SUFFIX}`);
-  if (!confirmed) {
-    return;
-  }
   try {
+    if (!project.workspaceCleanedAt) {
+      const cleanWorkspace = window.confirm(MESSAGE_PROJECT_HISTORY_DELETE_WITH_WORKSPACE);
+      if (cleanWorkspace) {
+        const cleaned = await previewAndCleanProjectWorkspace(project);
+        if (!cleaned) {
+          return;
+        }
+      } else if (!window.confirm(MESSAGE_PROJECT_HISTORY_DELETE_ONLY)) {
+        return;
+      }
+    } else {
+      const confirmed = window.confirm(`${MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_PREFIX}${project.name}${MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_SUFFIX}`);
+      if (!confirmed) {
+        return;
+      }
+    }
     await api(`/api/projects/${project.id}`, { method: 'DELETE' });
     if (state.currentProject && state.currentProject.id === project.id) {
       resetCurrentProject();
@@ -1022,13 +1116,16 @@ function resetCurrentProject() {
   state.diffReport = null;
   state.currentFilePath = null;
   state.currentFileHash = null;
+  state.currentFileEncoding = null;
   state.currentFileOriginalContent = null;
   state.currentTree = null;
+  state.expandedPaths = new Set(['']);
   elements.currentProjectName.textContent = MESSAGE_PROJECT_NOT_OPENED;
   elements.currentProjectMeta.textContent = MESSAGE_PROJECT_OPEN_TIP;
   restoreWorkspaceControls();
   elements.searchBtn.disabled = true;
   elements.saveBtn.disabled = true;
+  elements.fileEncodingSelect.disabled = true;
   elements.searchInput.value = '';
   elements.searchResults.innerHTML = '';
   elements.fileTree.classList.add('empty');
@@ -1072,7 +1169,7 @@ function renderCurrentTree(keepScroll) {
 
 function renderTreeNode(node) {
   const wrapper = document.createElement('div');
-  const hasChildren = node.children && node.children.length;
+  const hasChildren = Boolean(node.hasChildren);
   const expanded = state.expandedPaths.has(node.path);
   wrapper.className = `tree-node ${hasChildren && !expanded ? 'collapsed' : ''}`;
 
@@ -1083,7 +1180,7 @@ function renderTreeNode(node) {
   label.addEventListener('click', () => handleTreeClick(node));
   wrapper.appendChild(label);
 
-  if (node.children && node.children.length && expanded) {
+  if (node.childrenLoaded && node.children && node.children.length && expanded) {
     const children = document.createElement('div');
     children.className = 'tree-children';
     node.children.forEach((child) => children.appendChild(renderTreeNode(child)));
@@ -1092,12 +1189,20 @@ function renderTreeNode(node) {
   return wrapper;
 }
 
-function handleTreeClick(node) {
-  if (node.children && node.children.length) {
+async function handleTreeClick(node) {
+  if (node.kind === 'DIRECTORY' && node.hasChildren) {
     if (state.expandedPaths.has(node.path)) {
       state.expandedPaths.delete(node.path);
     } else {
-      state.expandedPaths.add(node.path);
+      try {
+        if (!node.childrenLoaded) {
+          await loadTreeChildren(node);
+        }
+        state.expandedPaths.add(node.path);
+      } catch (error) {
+        notify(`文件树加载失败：${error.message}`, NOTICE_TYPE_ERROR);
+        return;
+      }
     }
     renderCurrentTree(true);
     return;
@@ -1117,7 +1222,22 @@ function handleTreeClick(node) {
   notify(MESSAGE_FILE_OPEN_FAILED, NOTICE_TYPE_INFO);
 }
 
-async function openFile(node) {
+/**
+ * 从后端懒加载一个目录的直接子节点。
+ *
+ * @param node 待展开目录节点
+ */
+async function loadTreeChildren(node) {
+  if (!state.currentProject || node.childrenLoaded) {
+    return;
+  }
+  const children = await api(`/api/projects/${state.currentProject.id}/tree/children?path=${encodeURIComponent(node.path)}`);
+  node.children = children;
+  node.childrenLoaded = true;
+  node.hasChildren = children.length > 0;
+}
+
+async function openFile(node, encoding = null) {
   if (!state.currentProject) {
     return;
   }
@@ -1125,13 +1245,17 @@ async function openFile(node) {
     return;
   }
   try {
-    const contentView = await api(`/api/projects/${state.currentProject.id}/files/content?path=${encodeURIComponent(node.path)}`);
+    const encodingQuery = encoding ? `&encoding=${encodeURIComponent(encoding)}` : '';
+    const contentView = await api(`/api/projects/${state.currentProject.id}/files/content?path=${encodeURIComponent(node.path)}${encodingQuery}`);
     closeUnicodePreview();
     state.currentFilePath = node.path;
     elements.editor.disabled = false;
     elements.editor.value = contentView.content;
     state.currentFileOriginalContent = elements.editor.value;
     state.currentFileHash = contentView.contentHash;
+    state.currentFileEncoding = contentView.encoding;
+    elements.fileEncodingSelect.value = contentView.encoding;
+    elements.fileEncodingSelect.disabled = false;
     updateDirtyIndicator();
     elements.saveBtn.disabled = false;
     elements.activeFileName.textContent = node.path;
@@ -1178,7 +1302,7 @@ function renderSearchResults(results) {
 }
 
 async function openSearchResult(result) {
-  expandPathParents(result.path);
+  await expandPathParents(result.path);
   if (state.currentTree) {
     renderCurrentTree(true);
   } else {
@@ -1192,13 +1316,88 @@ async function openSearchResult(result) {
   focusEditorLine(result.lineNumber);
 }
 
-function expandPathParents(path) {
+async function expandPathParents(path) {
   const parts = path.split('/');
   let current = '';
+  let currentNode = state.currentTree;
   for (let index = 0; index < parts.length - 1; index++) {
     current = current ? `${current}/${parts[index]}` : parts[index];
     state.expandedPaths.add(current);
+    if (!currentNode) {
+      continue;
+    }
+    if (!currentNode.childrenLoaded) {
+      await loadTreeChildren(currentNode);
+    }
+    currentNode = (currentNode.children || []).find((child) => child.path === current) || null;
   }
+}
+
+/**
+ * 预览并确认清理指定项目工作区，供删除历史和独立清理入口复用。
+ *
+ * @param project 项目记录
+ * @return 用户确认且清理完成时返回 true
+ */
+async function previewAndCleanProjectWorkspace(project) {
+  const preview = await api(`/api/projects/${project.id}/workspace/cleanup-preview`);
+  const details = [
+    MESSAGE_WORKSPACE_CLEANUP_CONFIRM,
+    `项目：${preview.projectName}`,
+    `路径：${preview.workspacePath}`,
+    `文件：${preview.fileCount} 个`,
+    `大小：${formatBytes(preview.totalBytes)}`,
+    `最后使用：${preview.lastUsedAt}`
+  ].join('\n');
+  if (!window.confirm(details)) {
+    return false;
+  }
+  await api(`/api/projects/${project.id}/workspace?confirmationId=${encodeURIComponent(preview.confirmationId)}`, {
+    method: 'DELETE'
+  });
+  return true;
+}
+
+/**
+ * 扫描并显式确认清理全部孤立工作区。
+ */
+async function cleanupOrphanWorkspaces() {
+  try {
+    const preview = await api('/api/workspaces/orphans/cleanup-preview');
+    if (!preview.entries || !preview.entries.length) {
+      notify(MESSAGE_ORPHAN_WORKSPACE_EMPTY, NOTICE_TYPE_INFO);
+      return;
+    }
+    const summary = preview.entries.map((entry) =>
+      `${entry.workspacePath}\n  ${entry.fileCount} 个文件，${formatBytes(entry.totalBytes)}，最后修改 ${entry.lastModifiedAt}`
+    ).join('\n\n');
+    if (!window.confirm(`确认清理以下 ${preview.entries.length} 个孤立工作区吗？\n\n${summary}`)) {
+      return;
+    }
+    const cleanedCount = await api(`/api/workspaces/orphans?confirmationId=${encodeURIComponent(preview.confirmationId)}`, {
+      method: 'DELETE'
+    });
+    notify(`${MESSAGE_ORPHAN_WORKSPACE_CLEAN_SUCCESS}：${cleanedCount} 个`, NOTICE_TYPE_SUCCESS);
+  } catch (error) {
+    notify(`${MESSAGE_ORPHAN_WORKSPACE_CLEAN_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
+}
+
+/**
+ * 按用户明确选择的编码重新打开当前文件，不做编码猜测或自动写回。
+ */
+async function reopenCurrentFileWithEncoding() {
+  if (!state.currentProject || !state.currentFilePath) {
+    return;
+  }
+  if (!confirmDiscardUnsavedChanges()) {
+    elements.fileEncodingSelect.value = state.currentFileEncoding || 'UTF-8';
+    return;
+  }
+  await openFile({
+    path: state.currentFilePath,
+    kind: elements.activeFileKind.dataset.kind
+  }, elements.fileEncodingSelect.value);
 }
 
 function focusEditorLine(lineNumber) {
@@ -1225,7 +1424,8 @@ async function saveCurrentFile() {
       body: JSON.stringify({
         path: state.currentFilePath,
         content: elements.editor.value,
-        expectedHash: state.currentFileHash
+        expectedHash: state.currentFileHash,
+        encoding: state.currentFileEncoding
       })
     });
     elements.editor.value = contentView.content;
@@ -1234,6 +1434,8 @@ async function saveCurrentFile() {
     }
     state.currentFileOriginalContent = elements.editor.value;
     state.currentFileHash = contentView.contentHash;
+    state.currentFileEncoding = contentView.encoding;
+    elements.fileEncodingSelect.value = contentView.encoding;
     updateDirtyIndicator();
     notify(`${MESSAGE_SAVE_SUCCESS}：${state.currentFilePath}`, NOTICE_TYPE_SUCCESS);
   } catch (error) {
@@ -1694,14 +1896,18 @@ function escapeHtml(value) {
 elements.openArchiveBtn.addEventListener('click', importArchive);
 elements.unicodePreviewBtn.addEventListener('click', toggleUnicodePreview);
 elements.saveBtn.addEventListener('click', saveCurrentFile);
+elements.fileEncodingSelect.addEventListener('change', reopenCurrentFileWithEncoding);
 elements.analyzeBtn.addEventListener('click', analyzeProject);
 elements.diffBtn.addEventListener('click', openDiffDialog);
 elements.compileBtn.addEventListener('click', compileProject);
 elements.exportBtn.addEventListener('click', exportProject);
 elements.settingsBtn.addEventListener('click', openSettingsDialog);
 elements.projectSettingsBtn.addEventListener('click', openProjectSettingsDialog);
+elements.projectHistoryBtn.addEventListener('click', openProjectHistoryDialog);
 elements.cleanupWorkspaceBtn.addEventListener('click', cleanupCurrentWorkspace);
+elements.orphanWorkspacesBtn.addEventListener('click', cleanupOrphanWorkspaces);
 elements.errorGuideBtn.addEventListener('click', openErrorGuideDialog);
+elements.diagnosticBtn.addEventListener('click', exportDiagnostics);
 elements.searchBtn.addEventListener('click', searchProject);
 elements.cancelTaskBtn.addEventListener('click', cancelCurrentTask);
 elements.browseJdkBtn.addEventListener('click', pickJdkHomeDirectory);
@@ -1731,9 +1937,7 @@ elements.searchInput.addEventListener('keydown', (event) => {
 
 async function initializeApplication() {
   const connection = await window.jarPatch.getBackendConnection();
-  API_BASE = connection.apiBase;
-  WS_BASE = API_BASE.replace(/^http/, 'ws');
-  API_TOKEN = connection.token;
+  window.jarPatchApiClient.configure(connection);
   initializeTreePanelWidth();
   restoreWorkspaceControls();
   await loadProjects();
@@ -1745,6 +1949,12 @@ initializeApplication().catch((error) => {
 elements.projectSettingsDialog.addEventListener('click', (event) => {
   if (event.target === elements.projectSettingsDialog) {
     closeProjectSettingsDialog();
+  }
+});
+elements.closeProjectHistoryBtn.addEventListener('click', closeProjectHistoryDialog);
+elements.projectHistoryDialog.addEventListener('click', (event) => {
+  if (event.target === elements.projectHistoryDialog) {
+    closeProjectHistoryDialog();
   }
 });
 elements.errorGuideDialog.addEventListener('click', (event) => {

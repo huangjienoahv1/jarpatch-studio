@@ -22,6 +22,10 @@ public final class JarPatchConstants {
     public static final String MESSAGE_LIST_SEPARATOR = "；";
     public static final String DEFAULT_AUDITOR = "admin";
     public static final String UTF_8 = "UTF-8";
+    public static final String UTF_16_LE = "UTF-16LE";
+    public static final String UTF_16_BE = "UTF-16BE";
+    public static final String GBK = "GBK";
+    public static final String GB_18030 = "GB18030";
     public static final String WORKSPACE_ORIGINAL_DIR = "original";
     public static final String WORKSPACE_EXTRACTED_DIR = "extracted";
     public static final String WORKSPACE_SOURCE_DIR = "sources";
@@ -81,7 +85,9 @@ public final class JarPatchConstants {
     public static final String MESSAGE_FILE_SIGNATURE_READONLY = "签名文件只支持查看，不支持编辑";
     public static final String MESSAGE_FILE_OUT_OF_WORKSPACE = "文件路径不在项目工作区内";
     public static final String MESSAGE_FILE_CHANGED_EXTERNALLY = "文件已在其他位置发生变化，请重新打开后再保存";
-    public static final String MESSAGE_FILE_ENCODING_UNSUPPORTED = "文件编码不是受支持的 UTF-8、UTF-16LE 或 UTF-16BE";
+    public static final String MESSAGE_FILE_ENCODING_UNSUPPORTED = "文件编码不受支持，请在项目设置或文件工具栏明确选择编码";
+    public static final String MESSAGE_FILE_ENCODING_CONFLICT = "显式编码与文件 BOM 不一致，请选择与 BOM 相同的编码";
+    public static final String MESSAGE_PROJECT_SETTING_ENCODING_INVALID = "项目默认编码仅支持 UTF-8、UTF-16LE、UTF-16BE、GBK 或 GB18030";
     public static final String MESSAGE_FILE_MIXED_LINE_ENDINGS = "文件包含混合换行格式，修改前请先统一换行格式";
     public static final String MESSAGE_UNSUPPORTED_PACKAGE = "仅支持 jar 和 war 文件";
     public static final String MESSAGE_JDK_NOT_FOUND = "未检测到可用 JDK，请先配置 JDK 路径或系统环境变量 JAVA_HOME";
@@ -98,6 +104,7 @@ public final class JarPatchConstants {
     public static final String MESSAGE_PROJECT_SETTING_FILE_LIMIT_INVALID = "可编辑文件大小限制不在允许范围内";
     public static final String MESSAGE_PROJECT_SETTING_UI_PREFERENCES_INVALID = "界面偏好必须是 JSON 对象";
     public static final String MESSAGE_PROJECT_SETTING_NESTED_JARS_CORRUPTED = "项目嵌套 Jar 设置损坏";
+    public static final String MESSAGE_ANALYSIS_HISTORY_CORRUPTED = "分析历史数据无法解析";
     public static final String MESSAGE_FILE_TOO_LARGE_TO_EDIT = "文件超过项目设置的可编辑大小限制";
     public static final String MESSAGE_EXPORT_OVERWRITE_ORIGINAL = "导出路径不能覆盖输入原包或工作区原包";
     public static final String MESSAGE_EXPORT_ATOMIC_MOVE_REQUIRED = "当前文件系统不支持原子发布导出文件，请选择同一文件系统内的其他目录";
@@ -116,6 +123,8 @@ public final class JarPatchConstants {
     public static final String MESSAGE_BACKEND_SHUTDOWN_ACCEPTED = "后端已接受安全退出请求";
     public static final String MESSAGE_SIGNATURE_POLICY_UNSUPPORTED = "不支持的签名策略";
     public static final String MESSAGE_FILE_TREE_BUILD_FAILED = "构建文件树失败: ";
+    public static final String MESSAGE_FILE_TREE_PATH_INVALID = "文件树路径必须位于 sources 或 extracted";
+    public static final String MESSAGE_FILE_TREE_DIRECTORY_REQUIRED = "文件树路径不是可读取目录";
     public static final String MESSAGE_SHA256_UNAVAILABLE = "当前 Java 运行时缺少 SHA-256";
     public static final String LOG_UNEXPECTED_EXCEPTION = "后端发生未预期异常";
     public static final String SETTING_KEY_JDK_HOME = "jdk.home";

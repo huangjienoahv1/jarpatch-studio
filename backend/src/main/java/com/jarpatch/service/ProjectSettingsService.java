@@ -29,6 +29,13 @@ import java.util.Objects;
 @Service
 public class ProjectSettingsService {
 
+    private static final List<String> SUPPORTED_ENCODINGS = List.of(
+            JarPatchConstants.UTF_8,
+            JarPatchConstants.UTF_16_LE,
+            JarPatchConstants.UTF_16_BE,
+            JarPatchConstants.GBK,
+            JarPatchConstants.GB_18030);
+
     private final ProjectRepository projectRepository;
     private final ProjectSettingsRepository projectSettingsRepository;
     private final ClockService clockService;
@@ -85,6 +92,7 @@ public class ProjectSettingsService {
         settings.setDefaultExportDirectory(validateExportDirectory(requested.getDefaultExportDirectory()));
         settings.setSelectedNestedJars(normalizeNestedJars(requested.getSelectedNestedJars()));
         settings.setMaxEditableFileBytes(validateFileLimit(requested.getMaxEditableFileBytes()));
+        settings.setDefaultEncoding(validateEncoding(requested.getDefaultEncoding()));
         settings.setUiPreferencesJson(validateUiPreferences(requested.getUiPreferencesJson()));
         projectSettingsRepository.upsert(settings, clockService.now());
         return get(projectId);
@@ -111,6 +119,16 @@ public class ProjectSettingsService {
     }
 
     /**
+     * 获取项目对无 BOM 文本明确配置的默认编码。
+     *
+     * @param projectId 项目 ID
+     * @return 标准编码名
+     */
+    public String defaultEncoding(String projectId) {
+        return get(projectId).getDefaultEncoding();
+    }
+
+    /**
      * 创建未持久化的项目默认设置。
      *
      * @param project 项目记录
@@ -122,6 +140,7 @@ public class ProjectSettingsService {
         settings.setTargetJavaVersion(project.getTargetJavaVersion());
         settings.setSelectedNestedJars(new ArrayList<>());
         settings.setMaxEditableFileBytes(JarPatchConstants.DEFAULT_MAX_EDITABLE_FILE_BYTES);
+        settings.setDefaultEncoding(JarPatchConstants.UTF_8);
         settings.setUiPreferencesJson(JarPatchConstants.EMPTY_JSON_OBJECT);
         settings.setUpdatedAt(project.getUpdatedAt());
         return settings;
@@ -181,6 +200,21 @@ public class ProjectSettingsService {
             throw new IllegalArgumentException(JarPatchConstants.MESSAGE_PROJECT_SETTING_FILE_LIMIT_INVALID);
         }
         return value;
+    }
+
+    /**
+     * 校验项目默认编码必须来自产品明确支持的编码清单。
+     *
+     * @param value 用户选择的编码名
+     * @return 规范化标准编码名
+     */
+    private String validateEncoding(String value) {
+        String requested = value == null || value.isBlank() ? JarPatchConstants.UTF_8 : value.trim();
+        return SUPPORTED_ENCODINGS.stream()
+                .filter(candidate -> candidate.equalsIgnoreCase(requested))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        JarPatchConstants.MESSAGE_PROJECT_SETTING_ENCODING_INVALID));
     }
 
     /**

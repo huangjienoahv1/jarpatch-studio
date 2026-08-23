@@ -3,8 +3,10 @@ package com.jarpatch.controller;
 import com.jarpatch.common.ApiResponse;
 import com.jarpatch.common.JarPatchConstants;
 import com.jarpatch.config.LocalAccessProperties;
+import com.jarpatch.model.DiagnosticSnapshot;
 import com.jarpatch.model.SystemStatus;
 import com.jarpatch.service.BackendShutdownService;
+import com.jarpatch.service.DiagnosticService;
 import com.jarpatch.service.ErrorGuideService;
 import com.jarpatch.model.ErrorGuideItem;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,6 +34,7 @@ public class SystemController {
     private final LocalAccessProperties localAccessProperties;
     private final BackendShutdownService backendShutdownService;
     private final ErrorGuideService errorGuideService;
+    private final DiagnosticService diagnosticService;
 
     /**
      * 创建系统状态控制器。
@@ -39,13 +42,16 @@ public class SystemController {
      * @param localAccessProperties 本地实例访问配置
      * @param backendShutdownService 后端退出服务
      * @param errorGuideService 错误排查向导服务
+     * @param diagnosticService 脱敏诊断快照服务
      */
     public SystemController(LocalAccessProperties localAccessProperties,
                             BackendShutdownService backendShutdownService,
-                            ErrorGuideService errorGuideService) {
+                            ErrorGuideService errorGuideService,
+                            DiagnosticService diagnosticService) {
         this.localAccessProperties = localAccessProperties;
         this.backendShutdownService = backendShutdownService;
         this.errorGuideService = errorGuideService;
+        this.diagnosticService = diagnosticService;
     }
 
     /**
@@ -81,5 +87,15 @@ public class SystemController {
     @GetMapping("/error-guide")
     public ApiResponse<List<ErrorGuideItem>> errorGuide() {
         return ApiResponse.success(errorGuideService.list());
+    }
+
+    /**
+     * 生成不包含源码、令牌和私钥的系统诊断快照。
+     *
+     * @return 版本、环境、操作 ID 和脱敏日志
+     */
+    @GetMapping("/diagnostics")
+    public ApiResponse<DiagnosticSnapshot> diagnostics() {
+        return ApiResponse.success(diagnosticService.createSnapshot());
     }
 }

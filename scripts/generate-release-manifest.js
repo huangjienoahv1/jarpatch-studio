@@ -2,8 +2,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const EXPECTED_ARGUMENT_COUNT = 7;
+const EXPECTED_ARGUMENT_COUNT = 12;
 const MANIFEST_FILE_NAME = 'release-manifest.json';
+const SHA256_HEX_LENGTH = 64;
 
 /**
  * 计算发布文件的 SHA-256。
@@ -28,9 +29,34 @@ function sha256(filePath) {
  */
 async function main() {
   if (process.argv.length !== EXPECTED_ARGUMENT_COUNT) {
-    throw new Error('用法: node generate-release-manifest.js <platform> <architecture> <releaseDir> <javaVersion> <npmVersion>');
+    throw new Error('用法: node generate-release-manifest.js <platform> <architecture> <releaseDir> <javaVersion> <npmVersion> <gitCommit> <sourceClean> <buildEntry> <buildEntrySha256> <signingStatus>');
   }
-  const [, , platform, architecture, releaseDirectoryArgument, javaVersion, npmVersion] = process.argv;
+  const [
+    ,
+    ,
+    platform,
+    architecture,
+    releaseDirectoryArgument,
+    javaVersion,
+    npmVersion,
+    gitCommit,
+    sourceCleanArgument,
+    buildEntry,
+    buildEntrySha256,
+    signingStatus
+  ] = process.argv;
+  if (!/^[0-9a-f]{40,64}$/i.test(gitCommit)) {
+    throw new Error(`Git commit 格式无效：${gitCommit}`);
+  }
+  if (!['true', 'false'].includes(sourceCleanArgument)) {
+    throw new Error(`源码干净状态必须为 true 或 false：${sourceCleanArgument}`);
+  }
+  if (!buildEntry || !/^[0-9a-f]+$/i.test(buildEntrySha256) || buildEntrySha256.length !== SHA256_HEX_LENGTH) {
+    throw new Error('构建入口名称或 SHA-256 无效。');
+  }
+  if (!['NOT_SIGNED', 'VALID', 'VALID_NOTARIZED', 'VALID_GPG'].includes(signingStatus)) {
+    throw new Error(`签名状态无效：${signingStatus}`);
+  }
   const releaseDirectory = path.resolve(releaseDirectoryArgument);
   const entries = fs.readdirSync(releaseDirectory, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name !== MANIFEST_FILE_NAME)
@@ -57,6 +83,11 @@ async function main() {
     javaVersion,
     nodeVersion: process.version,
     npmVersion,
+    gitCommit: gitCommit.toLowerCase(),
+    sourceClean: sourceCleanArgument === 'true',
+    buildEntry,
+    buildEntrySha256: buildEntrySha256.toLowerCase(),
+    signingStatus,
     artifacts
   };
   fs.writeFileSync(path.join(releaseDirectory, MANIFEST_FILE_NAME), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');

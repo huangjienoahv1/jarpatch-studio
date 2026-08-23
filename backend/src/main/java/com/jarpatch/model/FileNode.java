@@ -18,6 +18,8 @@ public class FileNode {
     private String path;
     private String kind;
     private boolean editable;
+    private boolean hasChildren;
+    private boolean childrenLoaded;
     private List<FileNode> children = new ArrayList<>();
 
     public String getName() {
@@ -50,6 +52,22 @@ public class FileNode {
 
     public void setEditable(boolean editable) {
         this.editable = editable;
+    }
+
+    public boolean isHasChildren() {
+        return hasChildren;
+    }
+
+    public void setHasChildren(boolean hasChildren) {
+        this.hasChildren = hasChildren;
+    }
+
+    public boolean isChildrenLoaded() {
+        return childrenLoaded;
+    }
+
+    public void setChildrenLoaded(boolean childrenLoaded) {
+        this.childrenLoaded = childrenLoaded;
     }
 
     public List<FileNode> getChildren() {

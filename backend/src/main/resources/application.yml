@@ -17,12 +17,28 @@ spring:
       maximum-pool-size: 1
       connection-init-sql: PRAGMA foreign_keys=ON
 
+logging:
+  file:
+    name: ${JARPATCH_LOG_FILE:${user.home}/.jarpatch-studio/logs/backend.log}
+  logback:
+    rollingpolicy:
+      max-file-size: 10MB
+      max-history: 5
+      total-size-cap: 50MB
+      clean-history-on-start: false
+
 jarpatch:
   workspace-root: ${user.home}/.jarpatch-studio/projects
   local-access:
     token: ${JARPATCH_AUTH_TOKEN:}
     instance-id: ${JARPATCH_INSTANCE_ID:}
     allowed-origin: ${JARPATCH_ALLOWED_ORIGIN:null}
+  diagnostics:
+    application-version: "@project.version@"
+    log-file: ${JARPATCH_LOG_FILE:${user.home}/.jarpatch-studio/logs/backend.log}
+    recent-task-log-limit: 200
+    recent-backend-log-limit: 200
+    max-message-length: 500
   archive-limits:
     max-archive-bytes: 1073741824
     max-entry-count: 200000

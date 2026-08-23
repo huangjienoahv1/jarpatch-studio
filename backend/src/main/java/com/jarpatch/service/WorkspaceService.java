@@ -113,7 +113,8 @@ public class WorkspaceService {
      * 启动时清理上次进程中断留下且未写入数据库的导入工作区。
      * <p>
      * 入口在应用就绪恢复服务；只处理带 .importing/.ready 标记的新协议目录和旧版
-     * .staging- 目录，已有历史项目且没有内部标记的目录不会被推断或删除。
+     * .staging- 目录；带 .ready 标记但已无历史记录的目录交给孤立工作区预览入口，
+     * 启动过程不会推断或删除。
      * </p>
      *
      * @param registeredWorkspacePaths SQLite 已登记的工作区路径
@@ -134,9 +135,8 @@ public class WorkspaceService {
             Path candidate = path.toAbsolutePath().normalize();
             boolean legacyStaging = candidate.getFileName().toString()
                     .startsWith(JarPatchConstants.WORKSPACE_STAGING_PREFIX);
-            boolean importMarked = Files.exists(candidate.resolve(JarPatchConstants.WORKSPACE_IMPORTING_MARKER))
-                    || Files.exists(candidate.resolve(JarPatchConstants.WORKSPACE_READY_MARKER));
-            if (legacyStaging || (importMarked && !registeredPaths.contains(candidate))) {
+            boolean importing = Files.exists(candidate.resolve(JarPatchConstants.WORKSPACE_IMPORTING_MARKER));
+            if (legacyStaging || (importing && !registeredPaths.contains(candidate))) {
                 deleteWorkspace(candidate);
             }
         }

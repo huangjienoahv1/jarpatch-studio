@@ -14,6 +14,7 @@ public class SaveContentRequest {
     private String path;
     private String content;
     private String expectedHash;
+    private String encoding;
 
     public String getPath() {
         return path;
@@ -47,5 +48,23 @@ public class SaveContentRequest {
      */
     public void setExpectedHash(String expectedHash) {
         this.expectedHash = expectedHash;
+    }
+
+    /**
+     * 获取打开文件时由用户明确确认的编码。
+     *
+     * @return 标准编码名
+     */
+    public String getEncoding() {
+        return encoding;
+    }
+
+    /**
+     * 设置打开文件时由用户明确确认的编码。
+     *
+     * @param encoding 标准编码名
+     */
+    public void setEncoding(String encoding) {
+        this.encoding = encoding;
     }
 }

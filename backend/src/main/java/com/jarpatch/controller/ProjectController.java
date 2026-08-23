@@ -11,6 +11,7 @@ import com.jarpatch.model.ImportProjectRequest;
 import com.jarpatch.model.OperationResult;
 import com.jarpatch.model.ProjectImportInspection;
 import com.jarpatch.model.ProjectRecord;
+import com.jarpatch.model.ProjectHistoryView;
 import com.jarpatch.model.ProjectSettings;
 import com.jarpatch.model.WorkspaceCleanupPreview;
 import com.jarpatch.model.SaveContentRequest;
@@ -23,6 +24,7 @@ import com.jarpatch.service.FileContentService;
 import com.jarpatch.service.FileTreeService;
 import com.jarpatch.service.ProjectInspectionService;
 import com.jarpatch.service.ProjectService;
+import com.jarpatch.service.ProjectHistoryService;
 import com.jarpatch.service.SearchService;
 import com.jarpatch.service.ProjectSettingsService;
 import com.jarpatch.service.WorkspaceCleanupService;
@@ -64,6 +66,7 @@ public class ProjectController {
     private final DiffService diffService;
     private final ProjectSettingsService projectSettingsService;
     private final WorkspaceCleanupService workspaceCleanupService;
+    private final ProjectHistoryService projectHistoryService;
 
     /**
      * 创建项目控制器。
@@ -79,6 +82,7 @@ public class ProjectController {
      * @param diffService        导出前差异服务
      * @param projectSettingsService 项目设置服务
      * @param workspaceCleanupService 工作区清理服务
+     * @param projectHistoryService 项目历史聚合服务
      */
     public ProjectController(ProjectService projectService,
                              FileTreeService fileTreeService,
@@ -90,7 +94,8 @@ public class ProjectController {
                              ProjectInspectionService projectInspectionService,
                              DiffService diffService,
                              ProjectSettingsService projectSettingsService,
-                             WorkspaceCleanupService workspaceCleanupService) {
+                             WorkspaceCleanupService workspaceCleanupService,
+                             ProjectHistoryService projectHistoryService) {
         this.projectService = projectService;
         this.fileTreeService = fileTreeService;
         this.fileContentService = fileContentService;
@@ -102,6 +107,18 @@ public class ProjectController {
         this.diffService = diffService;
         this.projectSettingsService = projectSettingsService;
         this.workspaceCleanupService = workspaceCleanupService;
+        this.projectHistoryService = projectHistoryService;
+    }
+
+    /**
+     * 查询当前项目的分析、导出校验和统一操作时间线。
+     *
+     * @param projectId 项目 ID
+     * @return 有数量上限的历史聚合视图
+     */
+    @GetMapping("/{projectId}/history")
+    public ApiResponse<ProjectHistoryView> history(@PathVariable("projectId") String projectId) {
+        return ApiResponse.success(projectHistoryService.get(projectId));
     }
 
     /**
@@ -237,6 +254,21 @@ public class ProjectController {
     }
 
     /**
+     * 按前端目录展开动作查询一个目录的直接子节点。
+     *
+     * @param projectId 项目 ID
+     * @param path sources 或 extracted 下的目录路径
+     * @return 已排序的直接子节点
+     * @throws IOException 读取目录失败时抛出
+     */
+    @GetMapping("/{projectId}/tree/children")
+    public ApiResponse<List<FileNode>> treeChildren(@PathVariable("projectId") String projectId,
+                                                    @RequestParam("path") String path) throws IOException {
+        ProjectRecord project = requireProject(projectId);
+        return ApiResponse.success(fileTreeService.loadChildren(project, path));
+    }
+
+    /**
      * 读取文件内容。
      *
      * @param projectId 项目 ID
@@ -247,7 +279,23 @@ public class ProjectController {
     @GetMapping("/{projectId}/files/content")
     public ApiResponse<FileContentView> readContent(@PathVariable("projectId") String projectId, @RequestParam("path") String path) throws IOException {
         ProjectRecord project = requireProject(projectId);
-        return ApiResponse.success(fileContentService.read(project, path));
+        return ApiResponse.success(fileContentService.read(project, path, null));
+    }
+
+    /**
+     * 使用用户明确选择的文件编码读取内容；空值继续使用项目默认编码。
+     *
+     * @param projectId 项目 ID
+     * @param path      文件树相对路径
+     * @param encoding  文件级明确编码，可为空
+     * @return 文件内容
+     * @throws IOException 读取失败时抛出
+     */
+    @GetMapping(value = "/{projectId}/files/content", params = "encoding")
+    public ApiResponse<FileContentView> readContentWithEncoding(@PathVariable("projectId") String projectId,
+                                                                 @RequestParam("path") String path,
+                                                                 @RequestParam("encoding") String encoding) throws IOException {
+        return ApiResponse.success(fileContentService.read(requireProject(projectId), path, encoding));
     }
 
     /**
@@ -261,7 +309,8 @@ public class ProjectController {
     @PutMapping("/{projectId}/files/content")
     public ApiResponse<FileContentView> saveContent(@PathVariable("projectId") String projectId, @RequestBody SaveContentRequest request) throws IOException {
         ProjectRecord project = requireProject(projectId);
-        return ApiResponse.success(fileContentService.save(project, request.getPath(), request.getContent(), request.getExpectedHash()));
+        return ApiResponse.success(fileContentService.save(project, request.getPath(), request.getContent(),
+                request.getExpectedHash(), request.getEncoding()));
     }
 
     /**

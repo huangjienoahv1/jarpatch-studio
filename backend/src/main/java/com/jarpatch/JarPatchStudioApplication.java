@@ -2,6 +2,7 @@ package com.jarpatch;
 
 import com.jarpatch.config.JarPatchProperties;
 import com.jarpatch.config.ArchiveLimitsProperties;
+import com.jarpatch.config.DiagnosticProperties;
 import com.jarpatch.config.LocalAccessProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -18,7 +19,12 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
  * @author 黄杰
  */
 @SpringBootApplication
-@EnableConfigurationProperties({JarPatchProperties.class, LocalAccessProperties.class, ArchiveLimitsProperties.class})
+@EnableConfigurationProperties({
+        JarPatchProperties.class,
+        LocalAccessProperties.class,
+        ArchiveLimitsProperties.class,
+        DiagnosticProperties.class
+})
 public class JarPatchStudioApplication {
 
     /**

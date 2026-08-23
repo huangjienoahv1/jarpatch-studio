@@ -1,7 +1,6 @@
 package com.jarpatch.service;
 
 import com.jarpatch.common.JarPatchConstants;
-import org.benf.cfr.reader.Main;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -30,14 +29,17 @@ public class DecompilerService {
     private static final String NESTED_JAR_TEMP_PREFIX = "jarpatch-nested-classes-";
 
     private final ArchiveService archiveService;
+    private final CfrBatchDecompiler cfrBatchDecompiler;
 
     /**
      * 创建反编译服务。
      *
      * @param archiveService 压缩包服务，用于把嵌套 Jar 展开为临时 class 目录
+     * @param cfrBatchDecompiler CFR 批量反编译执行器
      */
-    public DecompilerService(ArchiveService archiveService) {
+    public DecompilerService(ArchiveService archiveService, CfrBatchDecompiler cfrBatchDecompiler) {
         this.archiveService = archiveService;
+        this.cfrBatchDecompiler = cfrBatchDecompiler;
     }
 
     /**
@@ -87,10 +89,8 @@ public class DecompilerService {
      * @throws IOException 读取 class 文件失败时抛出
      */
     private void decompileClassesRoot(Path classesRoot, Path sourceDir, BooleanSupplier cancelRequested) throws IOException {
-        for (Path classFile : findClassFiles(classesRoot)) {
-            ensureNotCancelled(cancelRequested);
-            decompileClassFile(classFile, sourceDir);
-        }
+        ensureNotCancelled(cancelRequested);
+        cfrBatchDecompiler.decompile(findClassFiles(classesRoot), sourceDir, cancelRequested);
     }
 
     /**
@@ -147,6 +147,7 @@ public class DecompilerService {
         try (Stream<Path> stream = Files.walk(classesRoot)) {
             return stream.filter(Files::isRegularFile)
                     .filter(this::isDecompilableClassFile)
+                    .sorted(Comparator.comparing(Path::toString))
                     .collect(Collectors.toList());
         }
     }
@@ -179,6 +180,7 @@ public class DecompilerService {
         return selectedNestedJars.stream()
                 .map(path -> normalizedExtractedDir.resolve(path).normalize())
                 .filter(path -> isValidSelectedNestedJar(normalizedExtractedDir, path))
+                .sorted(Comparator.comparing(Path::toString))
                 .collect(Collectors.toList());
     }
 
@@ -196,22 +198,6 @@ public class DecompilerService {
     }
 
     /**
-     * 反编译单个 class 文件。
-     *
-     * @param classFile class 文件路径
-     * @param sourceDir Java 源码输出目录
-     */
-    private void decompileClassFile(Path classFile, Path sourceDir) {
-        // 入口在导入项目接口，实际执行点在 CFR Main，结果写入项目工作区 sources 目录。
-        String[] args = new String[]{
-                classFile.toAbsolutePath().toString(),
-                "--outputdir", sourceDir.toAbsolutePath().toString(),
-                "--silent", "true"
-        };
-        Main.main(args);
-    }
-
-    /**
      * 反编译单个嵌套 Jar。
      *
      * @param archiveFile 嵌套 Jar 文件
@@ -223,7 +209,7 @@ public class DecompilerService {
         Path tempDir = Files.createTempDirectory(NESTED_JAR_TEMP_PREFIX);
         try {
             archiveService.unzip(archiveFile, tempDir, cancelRequested);
-            // 嵌套 Jar 先展开再逐个 class 反编译，确保 module-info.class 不进入 CFR 普通类处理链路。
+            // 嵌套 Jar 先展开再批量反编译，确保 module-info.class 不进入 CFR 普通类处理链路。
             decompileClassesRoot(tempDir, sourceDir, cancelRequested);
         } finally {
             deleteDirectoryQuietly(tempDir);

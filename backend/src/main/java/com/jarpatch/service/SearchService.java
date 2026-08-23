@@ -4,6 +4,7 @@ import com.jarpatch.common.FileKind;
 import com.jarpatch.common.JarPatchConstants;
 import com.jarpatch.model.ProjectRecord;
 import com.jarpatch.model.SearchResult;
+import com.jarpatch.repository.FileChangeRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -15,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 /**
@@ -33,6 +35,7 @@ public class SearchService {
     private final FileKindService fileKindService;
     private final JavaUnicodeEscapeService javaUnicodeEscapeService;
     private final ProjectSettingsService projectSettingsService;
+    private final FileChangeRepository fileChangeRepository;
     private static final int UTF_8_BOM_FIRST = 0xEF;
     private static final int UTF_8_BOM_SECOND = 0xBB;
     private static final int UTF_8_BOM_THIRD = 0xBF;
@@ -48,15 +51,18 @@ public class SearchService {
      * @param fileKindService         文件类型识别服务
      * @param javaUnicodeEscapeService Java 中文 Unicode 转义还原服务
      * @param projectSettingsService 项目设置服务
+     * @param fileChangeRepository 文件修改仓储
      */
     public SearchService(WorkspaceService workspaceService,
                          FileKindService fileKindService,
                          JavaUnicodeEscapeService javaUnicodeEscapeService,
-                         ProjectSettingsService projectSettingsService) {
+                         ProjectSettingsService projectSettingsService,
+                         FileChangeRepository fileChangeRepository) {
         this.workspaceService = workspaceService;
         this.fileKindService = fileKindService;
         this.javaUnicodeEscapeService = javaUnicodeEscapeService;
         this.projectSettingsService = projectSettingsService;
+        this.fileChangeRepository = fileChangeRepository;
     }
 
     /**
@@ -73,10 +79,12 @@ public class SearchService {
         }
         List<SearchResult> results = new ArrayList<>();
         long maxFileBytes = projectSettingsService.maxEditableFileBytes(project.getId());
+        String defaultEncoding = projectSettingsService.defaultEncoding(project.getId());
+        Map<String, String> fileEncodings = fileChangeRepository.findEncodings(project.getId());
         searchRoot(workspaceService.sourceDir(project), JarPatchConstants.TREE_SOURCE_PREFIX,
-                keyword.trim(), maxFileBytes, results);
+                keyword.trim(), maxFileBytes, defaultEncoding, fileEncodings, results);
         searchRoot(workspaceService.extractedDir(project), JarPatchConstants.TREE_EXTRACTED_PREFIX,
-                keyword.trim(), maxFileBytes, results);
+                keyword.trim(), maxFileBytes, defaultEncoding, fileEncodings, results);
         return results;
     }
 
@@ -87,6 +95,8 @@ public class SearchService {
      * @param prefix  文件树路径前缀
      * @param keyword 搜索关键词
      * @param maxFileBytes 允许搜索内容的最大文件字节数
+     * @param defaultEncoding 项目默认编码
+     * @param fileEncodings 已修改文件明确编码
      * @param results 搜索结果集合
      * @throws IOException 读取目录失败时抛出
      */
@@ -94,6 +104,8 @@ public class SearchService {
                             String prefix,
                             String keyword,
                             long maxFileBytes,
+                            String defaultEncoding,
+                            Map<String, String> fileEncodings,
                             List<SearchResult> results) throws IOException {
         if (!Files.exists(root) || results.size() >= JarPatchConstants.SEARCH_MAX_RESULTS) {
             return;
@@ -101,7 +113,8 @@ public class SearchService {
         try (Stream<Path> stream = Files.walk(root)) {
             var iterator = stream.filter(Files::isRegularFile).iterator();
             while (iterator.hasNext() && results.size() < JarPatchConstants.SEARCH_MAX_RESULTS) {
-                searchFile(root, prefix, iterator.next(), keyword, maxFileBytes, results);
+                searchFile(root, prefix, iterator.next(), keyword, maxFileBytes,
+                        defaultEncoding, fileEncodings, results);
             }
         }
     }
@@ -114,6 +127,8 @@ public class SearchService {
      * @param file    文件路径
      * @param keyword 搜索关键词
      * @param maxFileBytes 允许搜索内容的最大文件字节数
+     * @param defaultEncoding 项目默认编码
+     * @param fileEncodings 已修改文件明确编码
      * @param results 搜索结果集合
      */
     private void searchFile(Path root,
@@ -121,6 +136,8 @@ public class SearchService {
                             Path file,
                             String keyword,
                             long maxFileBytes,
+                            String defaultEncoding,
+                            Map<String, String> fileEncodings,
                             List<SearchResult> results) throws IOException {
         if (results.size() >= JarPatchConstants.SEARCH_MAX_RESULTS) {
             return;
@@ -137,7 +154,8 @@ public class SearchService {
         if (Files.size(file) > maxFileBytes) {
             return;
         }
-        searchFileContent(treePath, file, keyword, results);
+        searchFileContent(treePath, file, keyword,
+                fileEncodings.getOrDefault(treePath, defaultEncoding), results);
     }
 
     /**
@@ -146,13 +164,15 @@ public class SearchService {
      * @param treePath 文件树路径
      * @param file     文件路径
      * @param keyword  搜索关键词
+     * @param encoding 文件级明确编码或项目默认编码
      * @param results  搜索结果集合
      */
     private void searchFileContent(String treePath,
                                    Path file,
                                    String keyword,
+                                   String encoding,
                                    List<SearchResult> results) throws IOException {
-        Charset charset = detectCharset(file);
+        Charset charset = detectCharset(file, encoding);
         try (BufferedReader reader = Files.newBufferedReader(file, charset)) {
             String rawLine;
             int lineNumber = 0;
@@ -170,13 +190,14 @@ public class SearchService {
     }
 
     /**
-     * 根据 BOM 识别搜索文本编码，未带 BOM 时严格按 UTF-8 读取。
+     * 根据 BOM 识别搜索文本编码，未带 BOM 时只使用明确配置的编码。
      *
      * @param file 文本文件
+     * @param encoding 文件级明确编码或项目默认编码
      * @return 搜索使用的字符集
      * @throws IOException 读取 BOM 失败时抛出
      */
-    private Charset detectCharset(Path file) throws IOException {
+    private Charset detectCharset(Path file, String encoding) throws IOException {
         try (InputStream inputStream = Files.newInputStream(file)) {
             int first = inputStream.read();
             int second = inputStream.read();
@@ -188,7 +209,7 @@ public class SearchService {
                     || (first == UTF_16_BE_BOM_FIRST && second == UTF_16_BE_BOM_SECOND)) {
                 return StandardCharsets.UTF_16;
             }
-            return StandardCharsets.UTF_8;
+            return Charset.forName(encoding);
         }
     }
 

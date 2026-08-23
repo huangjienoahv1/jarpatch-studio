@@ -6,6 +6,7 @@ import com.jarpatch.model.FileContentView;
 import com.jarpatch.model.FileDiff;
 import com.jarpatch.model.ProjectRecord;
 import com.jarpatch.repository.CompiledArtifactRepository;
+import com.jarpatch.repository.FileChangeRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -38,6 +39,8 @@ public class DiffService {
     private final FileKindService fileKindService;
     private final FileContentService fileContentService;
     private final CompiledArtifactRepository compiledArtifactRepository;
+    private final FileChangeRepository fileChangeRepository;
+    private final ProjectSettingsService projectSettingsService;
 
     /**
      * 创建项目差异服务。
@@ -46,15 +49,21 @@ public class DiffService {
      * @param fileKindService           文件类型服务
      * @param fileContentService        保真文件读取服务
      * @param compiledArtifactRepository 编译产物仓储
+     * @param fileChangeRepository 文件修改仓储
+     * @param projectSettingsService 项目设置服务
      */
     public DiffService(WorkspaceService workspaceService,
                        FileKindService fileKindService,
                        FileContentService fileContentService,
-                       CompiledArtifactRepository compiledArtifactRepository) {
+                       CompiledArtifactRepository compiledArtifactRepository,
+                       FileChangeRepository fileChangeRepository,
+                       ProjectSettingsService projectSettingsService) {
         this.workspaceService = workspaceService;
         this.fileKindService = fileKindService;
         this.fileContentService = fileContentService;
         this.compiledArtifactRepository = compiledArtifactRepository;
+        this.fileChangeRepository = fileChangeRepository;
+        this.projectSettingsService = projectSettingsService;
     }
 
     /**
@@ -138,8 +147,10 @@ public class DiffService {
         Path currentPath = resolveCurrentPath(project, path);
         boolean baselineExists = Files.isRegularFile(baselinePath);
         boolean currentExists = Files.isRegularFile(currentPath);
-        FileContentView baseline = baselineExists ? fileContentService.readPath(baselinePath) : null;
-        FileContentView current = currentExists ? fileContentService.readPath(currentPath) : null;
+        String encoding = fileChangeRepository.findEncoding(project.getId(), path)
+                .orElseGet(() -> projectSettingsService.defaultEncoding(project.getId()));
+        FileContentView baseline = baselineExists ? fileContentService.readPath(baselinePath, encoding) : null;
+        FileContentView current = currentExists ? fileContentService.readPath(currentPath, encoding) : null;
         if (baseline != null && current != null && baseline.getContentHash().equals(current.getContentHash())) {
             return null;
         }

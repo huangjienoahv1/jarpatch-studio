@@ -165,6 +165,7 @@ public class ProjectService {
             ProjectRecord record = buildRecord(projectId, archiveFile, readyRoot, packageType, javaVersionInfo);
             projectRepository.insert(record);
             projectInserted = true;
+            taskService.bindProject(task, projectId);
             taskService.success(task, MESSAGE_IMPORT_SUCCESS);
             return record;
         } catch (IllegalStateException e) {

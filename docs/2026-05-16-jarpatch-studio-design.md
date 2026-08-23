@@ -79,9 +79,9 @@ SQLite 表：
 ## 后端启动包完整性检查
 
 - 入口：用户双击稳定入口 `start-jarpatch-studio.cmd`。
-- 实际检查点：脚本打开 `backend/target/jarpatch-studio-backend.jar`，确认包内存在 `BOOT-INF/lib/cfr-0.152.jar`。
+- 实际检查点：`scripts/ensure-backend-package.ps1` 打开 `backend/target/jarpatch-studio-backend.jar`，确认包内同时存在应用入口 `BOOT-INF/classes/com/jarpatch/JarPatchStudioApplication.class` 和依赖 `BOOT-INF/lib/cfr-0.152.jar`。
 - 触发条件：后端 jar 不存在，或者只剩普通 jar、损坏 jar、不含 CFR 依赖的 jar。
-- 结果写入：脚本重新执行 `mvn -DskipTests package`，生成完整 Spring Boot 可执行包，避免导入时 CFR 内部类 `NoClassDefFoundError`。
+- 结果写入：脚本只停止命令行中精确引用当前后端 Jar 路径的旧 Java 进程，再执行 `mvn.cmd "-Dmaven.test.skip=true" package`；新包必须通过同一结构复验后才继续启动，避免导入时 CFR 内部类 `NoClassDefFoundError`。
 
 ## 编译保真规则
 

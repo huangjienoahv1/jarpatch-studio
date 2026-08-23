@@ -60,6 +60,16 @@ public class TaskRepository {
     }
 
     /**
+     * 导入成功创建项目后，把预创建任务精确绑定到该项目。
+     *
+     * @param taskId    任务 ID
+     * @param projectId 项目 ID
+     */
+    public void bindProject(String taskId, String projectId) {
+        jdbcTemplate.update("UPDATE tasks SET project_id = ? WHERE id = ? AND project_id IS NULL", projectId, taskId);
+    }
+
+    /**
      * 查询指定状态的全部任务，用于启动时恢复中断任务。
      *
      * @param status 任务状态

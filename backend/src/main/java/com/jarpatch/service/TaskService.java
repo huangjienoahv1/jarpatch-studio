@@ -5,6 +5,7 @@ import com.jarpatch.common.TaskStatus;
 import com.jarpatch.model.TaskRecord;
 import com.jarpatch.model.TaskLogRecord;
 import com.jarpatch.repository.TaskLogRepository;
+import com.jarpatch.repository.OperationJournalRepository;
 import com.jarpatch.repository.TaskRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +31,7 @@ public class TaskService {
     private final TaskLogRepository taskLogRepository;
     private final ClockService clockService;
     private final TaskLogBroadcaster broadcaster;
+    private final OperationJournalRepository operationJournalRepository;
 
     /**
      * 创建任务服务。
@@ -38,15 +40,18 @@ public class TaskService {
      * @param taskLogRepository 任务日志仓储
      * @param clockService      时间服务
      * @param broadcaster       WebSocket 日志广播服务
+     * @param operationJournalRepository 操作时间线仓储
      */
     public TaskService(TaskRepository taskRepository,
                        TaskLogRepository taskLogRepository,
                        ClockService clockService,
-                       TaskLogBroadcaster broadcaster) {
+                       TaskLogBroadcaster broadcaster,
+                       OperationJournalRepository operationJournalRepository) {
         this.taskRepository = taskRepository;
         this.taskLogRepository = taskLogRepository;
         this.clockService = clockService;
         this.broadcaster = broadcaster;
+        this.operationJournalRepository = operationJournalRepository;
     }
 
     /**
@@ -70,6 +75,7 @@ public class TaskService {
         record.setUpdatedAt(now);
         taskRepository.insert(record);
         appendLog(record, message);
+        appendOperation(record, message);
         broadcaster.broadcast(record.getId(), message);
         return record;
     }
@@ -159,6 +165,17 @@ public class TaskService {
     }
 
     /**
+     * 导入完成项目落库后，把预创建任务绑定到项目，使任务日志和操作时间线可按项目追溯。
+     *
+     * @param record    导入任务
+     * @param projectId 已落库项目 ID
+     */
+    public void bindProject(TaskRecord record, String projectId) {
+        taskRepository.bindProject(record.getId(), projectId);
+        record.setProjectId(projectId);
+    }
+
+    /**
      * 查询任务的持久化日志。
      *
      * @param taskId 任务 ID
@@ -185,6 +202,7 @@ public class TaskService {
             record.setUpdatedAt(clockService.now());
             if (taskRepository.updateIfRunning(record) > 0) {
                 appendLog(record, record.getMessage());
+                appendOperation(record, record.getMessage());
                 recoveredCount++;
             }
         }
@@ -247,6 +265,7 @@ public class TaskService {
             return;
         }
         appendLog(record, message);
+        appendOperation(record, message);
         broadcaster.broadcast(record.getId(), String.format(JarPatchConstants.TASK_LOG_PROGRESS_FORMAT,
                 progress, message));
     }
@@ -266,6 +285,21 @@ public class TaskService {
         log.setMessage(message == null ? JarPatchConstants.EMPTY_TEXT : message);
         log.setCreatedAt(clockService.now());
         taskLogRepository.insert(log);
+    }
+
+    /**
+     * 把任务状态同步追加到项目操作时间线；尚未绑定项目的导入任务在落库成功前不写入。
+     *
+     * @param record  当前任务状态
+     * @param message 状态说明
+     */
+    private void appendOperation(TaskRecord record, String message) {
+        if (record.getProjectId() == null || record.getProjectId().isBlank()) {
+            return;
+        }
+        operationJournalRepository.insert(record.getProjectId(), record.getId(), record.getTaskType(),
+                record.getProjectId(), record.getStatus(),
+                message == null ? JarPatchConstants.EMPTY_TEXT : message, clockService.now());
     }
 
     /**

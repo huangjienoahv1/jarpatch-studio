@@ -1,7 +1,6 @@
 package com.jarpatch.service;
 
 import com.jarpatch.common.JarPatchConstants;
-import com.jarpatch.config.ArchiveLimitsProperties;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedInputStream;
@@ -13,7 +12,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -23,7 +21,6 @@ import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
-import java.util.zip.ZipFile;
 
 /**
  * Jar/War 压缩包处理服务。
@@ -40,15 +37,15 @@ public class ArchiveService {
     private static final String MESSAGE_WRITE_ARCHIVE_ENTRY_FAILED = "写入压缩条目失败";
     private static final String MESSAGE_WRITE_DIRECTORY_ENTRY_FAILED = "写入目录条目失败";
 
-    private final ArchiveLimitsProperties archiveLimits;
+    private final ArchiveExtractor archiveExtractor;
 
     /**
      * 创建压缩包服务。
      *
-     * @param archiveLimits 压缩包资源限制配置
+     * @param archiveExtractor 输入校验与受限解压服务
      */
-    public ArchiveService(ArchiveLimitsProperties archiveLimits) {
-        this.archiveLimits = archiveLimits;
+    public ArchiveService(ArchiveExtractor archiveExtractor) {
+        this.archiveExtractor = archiveExtractor;
     }
 
     /**
@@ -71,26 +68,7 @@ public class ArchiveService {
      * @throws IOException 解压失败时抛出
      */
     public void unzip(Path archiveFile, Path targetDir, BooleanSupplier cancelRequested) throws IOException {
-        validateArchive(archiveFile);
-        Files.createDirectories(targetDir);
-        long totalWritten = 0L;
-        Set<String> extractedEntries = new HashSet<>();
-        try (ZipInputStream zipInputStream = new ZipInputStream(new BufferedInputStream(Files.newInputStream(archiveFile)))) {
-            ZipEntry entry;
-            while ((entry = zipInputStream.getNextEntry()) != null) {
-                ensureNotCancelled(cancelRequested);
-                validateEntryName(entry.getName(), extractedEntries);
-                Path target = safeResolve(targetDir, entry.getName());
-                if (entry.isDirectory()) {
-                    Files.createDirectories(target);
-                } else {
-                    Files.createDirectories(target.getParent());
-                    long entryWritten = copyArchiveEntry(zipInputStream, target, cancelRequested, totalWritten);
-                    totalWritten += entryWritten;
-                }
-                zipInputStream.closeEntry();
-            }
-        }
+        archiveExtractor.unzip(archiveFile, targetDir, cancelRequested);
     }
 
     /**
@@ -100,112 +78,7 @@ public class ArchiveService {
      * @throws IOException 压缩包不可读取时抛出
      */
     public void validateArchive(Path archiveFile) throws IOException {
-        if (Files.size(archiveFile) > archiveLimits.getMaxArchiveBytes()) {
-            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_TOO_LARGE);
-        }
-        int entryCount = 0;
-        long totalSize = 0L;
-        Set<String> entries = new HashSet<>();
-        try (ZipFile zipFile = new ZipFile(archiveFile.toFile())) {
-            var enumeration = zipFile.entries();
-            while (enumeration.hasMoreElements()) {
-                ZipEntry entry = enumeration.nextElement();
-                entryCount++;
-                if (entryCount > archiveLimits.getMaxEntryCount()) {
-                    throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_ENTRY_LIMIT);
-                }
-                validateEntryName(entry.getName(), entries);
-                if (entry.isDirectory()) {
-                    continue;
-                }
-                long size = entry.getSize();
-                long compressedSize = entry.getCompressedSize();
-                if (size > archiveLimits.getMaxEntryBytes()) {
-                    throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_ENTRY_TOO_LARGE
-                            + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + entry.getName());
-                }
-                if (size >= 0L) {
-                    totalSize = safeAdd(totalSize, size);
-                    if (totalSize > archiveLimits.getMaxUncompressedBytes()) {
-                        throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_UNCOMPRESSED_LIMIT);
-                    }
-                }
-                if ((size > 0L && compressedSize == 0L)
-                        || (compressedSize > 0L
-                        && (double) size / compressedSize > archiveLimits.getMaxCompressionRatio())) {
-                    throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_RATIO_LIMIT
-                            + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + entry.getName());
-                }
-            }
-        }
-    }
-
-    /**
-     * 校验条目名称唯一且路径深度受控。
-     *
-     * @param entryName 条目名称
-     * @param entries   当前压缩包已出现条目
-     */
-    private void validateEntryName(String entryName, Set<String> entries) {
-        String normalizedName = entryName.replace('\\', '/');
-        if (!entries.add(normalizedName)) {
-            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_DUPLICATE_ENTRY
-                    + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + entryName);
-        }
-        long depth = normalizedName.chars().filter(character -> character == '/').count();
-        if (depth > archiveLimits.getMaxPathDepth()) {
-            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_PATH_DEPTH_LIMIT
-                    + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + entryName);
-        }
-    }
-
-    /**
-     * 安全累加压缩包展开大小，溢出时按超过限制处理。
-     *
-     * @param current 当前累计值
-     * @param value   本次增加值
-     * @return 新累计值
-     */
-    private long safeAdd(long current, long value) {
-        try {
-            return Math.addExact(current, value);
-        } catch (ArithmeticException exception) {
-            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_UNCOMPRESSED_LIMIT, exception);
-        }
-    }
-
-    /**
-     * 流式写出单个压缩条目并执行实时大小门禁。
-     *
-     * @param inputStream     Zip 输入流
-     * @param target          目标文件
-     * @param cancelRequested 取消检查回调
-     * @param totalBefore     当前已展开总字节数
-     * @return 本条目实际写入字节数
-     * @throws IOException 文件写入失败时抛出
-     */
-    private long copyArchiveEntry(InputStream inputStream,
-                                  Path target,
-                                  BooleanSupplier cancelRequested,
-                                  long totalBefore) throws IOException {
-        long entryWritten = 0L;
-        try (OutputStream outputStream = new BufferedOutputStream(Files.newOutputStream(target))) {
-            byte[] buffer = new byte[JarPatchConstants.BUFFER_SIZE];
-            int length;
-            while ((length = inputStream.read(buffer)) >= 0) {
-                ensureNotCancelled(cancelRequested);
-                entryWritten = safeAdd(entryWritten, length);
-                if (entryWritten > archiveLimits.getMaxEntryBytes()) {
-                    throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_ENTRY_TOO_LARGE
-                            + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + target.getFileName());
-                }
-                if (safeAdd(totalBefore, entryWritten) > archiveLimits.getMaxUncompressedBytes()) {
-                    throw new IllegalArgumentException(JarPatchConstants.MESSAGE_ARCHIVE_UNCOMPRESSED_LIMIT);
-                }
-                outputStream.write(buffer, 0, length);
-            }
-        }
-        return entryWritten;
+        archiveExtractor.validate(archiveFile);
     }
 
     /**
@@ -250,21 +123,9 @@ public class ArchiveService {
                              BooleanSupplier cancelRequested) throws IOException {
         Files.createDirectories(outputFile.getParent());
         try (ZipOutputStream zipOutputStream = new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(outputFile)))) {
-            List<Path> paths = collectPaths(sourceDir);
-
-            // Spring Boot 启动器会把 BOOT-INF/classes/ 作为 classpath 根，必须先保留目录条目。
-            for (Path directory : paths) {
-                ensureNotCancelled(cancelRequested);
-                if (Files.isDirectory(directory) && !sourceDir.equals(directory)) {
-                    addDirectory(sourceDir, directory, zipOutputStream, cancelRequested);
-                }
-            }
-            for (Path file : paths) {
-                ensureNotCancelled(cancelRequested);
-                if (Files.isRegularFile(file) && !(removeSignatures && isSignatureEntry(sourceDir, file))) {
-                    addFile(sourceDir, file, zipOutputStream, springBootLayout, cancelRequested);
-                }
-            }
+            // 每层只排序直接子节点，目录条目先于其内容写入，避免把全目录路径同时保存在内存。
+            writeDirectoryContents(sourceDir, sourceDir, zipOutputStream, springBootLayout,
+                    removeSignatures, cancelRequested);
         }
     }
 
@@ -311,18 +172,38 @@ public class ArchiveService {
     }
 
     /**
-     * 收集并排序待打包路径。
+     * 以确定顺序递归写入目录内容，每次只持有当前目录的直接子节点。
      *
-     * @param sourceDir 源目录
-     * @return 排序后的路径列表
-     * @throws IOException 读取目录失败时抛出
+     * @param sourceDir 打包根目录
+     * @param currentDir 当前遍历目录
+     * @param zipOutputStream Zip 输出流
+     * @param springBootLayout 是否使用 Spring Boot 嵌套 Jar 规则
+     * @param removeSignatures 是否移除根签名条目
+     * @param cancelRequested 取消检查回调
+     * @throws IOException 目录读取或文件写入失败时抛出
      */
-    private List<Path> collectPaths(Path sourceDir) throws IOException {
-        List<Path> paths = new ArrayList<>();
-        try (var stream = Files.walk(sourceDir)) {
-            stream.sorted(Comparator.comparing(Path::toString)).forEach(paths::add);
+    private void writeDirectoryContents(Path sourceDir,
+                                        Path currentDir,
+                                        ZipOutputStream zipOutputStream,
+                                        boolean springBootLayout,
+                                        boolean removeSignatures,
+                                        BooleanSupplier cancelRequested) throws IOException {
+        List<Path> children;
+        try (var stream = Files.list(currentDir)) {
+            children = stream.sorted(Comparator.comparing(path -> path.getFileName().toString())).toList();
         }
-        return paths;
+        for (Path child : children) {
+            ensureNotCancelled(cancelRequested);
+            if (Files.isDirectory(child)) {
+                addDirectory(sourceDir, child, zipOutputStream, cancelRequested);
+                writeDirectoryContents(sourceDir, child, zipOutputStream, springBootLayout,
+                        removeSignatures, cancelRequested);
+            }
+            else if (Files.isRegularFile(child)
+                    && !(removeSignatures && isSignatureEntry(sourceDir, child))) {
+                addFile(sourceDir, child, zipOutputStream, springBootLayout, cancelRequested);
+            }
+        }
     }
 
     /**
@@ -409,65 +290,6 @@ public class ArchiveService {
             copy(inputStream, zipOutputStream, cancelRequested);
         }
         zipOutputStream.closeEntry();
-    }
-
-    /**
-     * 安全解析 Zip 条目输出路径，防止恶意条目逃逸目标目录。
-     *
-     * @param targetDir 目标目录
-     * @param entryName Zip 条目名称
-     * @return 安全输出路径
-     */
-    private Path safeResolve(Path targetDir, String entryName) {
-        Path normalizedTarget = targetDir.toAbsolutePath().normalize();
-        Path resolved = normalizedTarget.resolve(entryName).normalize();
-        if (!resolved.startsWith(normalizedTarget)) {
-            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_FILE_OUT_OF_WORKSPACE);
-        }
-        return resolved;
-    }
-
-    /**
-     * 从 Zip 输入流复制单个文件。
-     *
-     * @param inputStream Zip 输入流
-     * @param target      目标文件路径
-     * @param cancelRequested 取消检查回调
-     * @throws IOException 文件写入失败时抛出
-     */
-    private void copy(InputStream inputStream, Path target) throws IOException {
-        copy(inputStream, target, () -> false);
-    }
-
-    /**
-     * 从 Zip 输入流复制单个文件，并支持任务取消检查。
-     *
-     * @param inputStream    Zip 输入流
-     * @param target         目标文件路径
-     * @param cancelRequested 取消检查回调
-     * @throws IOException 文件写入失败时抛出
-     */
-    private void copy(InputStream inputStream, Path target, BooleanSupplier cancelRequested) throws IOException {
-        try (OutputStream outputStream = new BufferedOutputStream(Files.newOutputStream(target))) {
-            byte[] buffer = new byte[JarPatchConstants.BUFFER_SIZE];
-            int length;
-            while ((length = inputStream.read(buffer)) >= 0) {
-                ensureNotCancelled(cancelRequested);
-                outputStream.write(buffer, 0, length);
-            }
-        }
-    }
-
-    /**
-     * 从一个流复制内容到另一个流。
-     *
-     * @param inputStream  输入流
-     * @param outputStream 输出流
-     * @param cancelRequested 取消检查回调
-     * @throws IOException 复制失败时抛出
-     */
-    private void copy(InputStream inputStream, OutputStream outputStream) throws IOException {
-        copy(inputStream, outputStream, () -> false);
     }
 
     /**

@@ -1,10 +1,13 @@
 package com.jarpatch.repository;
 
 import com.jarpatch.model.ExportValidationResult;
+import com.jarpatch.model.ExportValidationHistoryRecord;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.util.UUID;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * 导出结构校验结果仓储。
@@ -46,5 +49,43 @@ public class ExportValidationRepository {
                 String.join(ITEM_SEPARATOR, result.getChecks()),
                 String.join(ITEM_SEPARATOR, result.getErrors()),
                 createdAt);
+    }
+
+    /**
+     * 查询项目最近导出校验历史。
+     *
+     * @param projectId 项目 ID
+     * @param limit     最大记录数
+     * @return 按时间倒序的校验记录
+     */
+    public List<ExportValidationHistoryRecord> findByProjectId(String projectId, int limit) {
+        return jdbcTemplate.query("SELECT id, output_path, valid, checks, errors, created_at " +
+                        "FROM export_validations WHERE project_id = ? " +
+                        "ORDER BY created_at DESC, id DESC LIMIT ?",
+                (resultSet, rowNum) -> {
+                    ExportValidationHistoryRecord record = new ExportValidationHistoryRecord();
+                    record.setId(resultSet.getString("id"));
+                    record.setOutputPath(resultSet.getString("output_path"));
+                    record.setValid(resultSet.getInt("valid") == 1);
+                    record.setChecks(splitItems(resultSet.getString("checks")));
+                    record.setErrors(splitItems(resultSet.getString("errors")));
+                    record.setCreatedAt(resultSet.getString("created_at"));
+                    return record;
+                }, projectId, limit);
+    }
+
+    /**
+     * 把数据库换行分隔字段恢复为列表。
+     *
+     * @param value 数据库存储值
+     * @return 非空项目列表
+     */
+    private List<String> splitItems(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(value.split(ITEM_SEPARATOR, -1))
+                .filter(item -> !item.isBlank())
+                .toList();
     }
 }
