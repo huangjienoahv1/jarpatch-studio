@@ -4,6 +4,7 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const readline = require('readline');
+const { DevelopmentServices } = require('./development-services');
 
 const BACKEND_PORT = 18765;
 const BACKEND_HOST = '127.0.0.1';
@@ -34,6 +35,7 @@ let backendInstanceId = null;
 let backendLogPath = null;
 let mainWindow = null;
 const backendLogs = [];
+const developmentServices = new DevelopmentServices();
 
 const singleInstanceLockAcquired = app.requestSingleInstanceLock();
 
@@ -58,6 +60,8 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
+    developmentServices.stopLanguageServer()
+      .catch((error) => appendBackendLog('JDTLS', `关闭语言服务器失败：${error.message}`));
     mainWindow = null;
   });
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
@@ -276,6 +280,9 @@ ipcMain.handle('backend:connection', () => ({
   instanceId: backendInstanceId
 }));
 
+// 开发能力 IPC 只暴露固定的 JDT LS 与 AI 操作，不允许渲染页面启动任意进程或读取密钥。
+developmentServices.registerIpc(ipcMain);
+
 if (!singleInstanceLockAcquired) {
   app.quit();
 } else {
@@ -302,7 +309,7 @@ if (!singleInstanceLockAcquired) {
           status: SMOKE_CHECK_STATUS,
           instanceId: backendInstanceId
         })}\n`);
-        await stopBackendGracefully();
+        await Promise.all([stopBackendGracefully(), developmentServices.shutdown()]);
         applicationQuitAllowed = true;
         app.quit();
         return;
@@ -336,7 +343,10 @@ app.on('before-quit', (event) => {
   }
   event.preventDefault();
   if (!backendShutdownPromise) {
-    backendShutdownPromise = stopBackendGracefully();
+    backendShutdownPromise = Promise.all([
+      stopBackendGracefully(),
+      developmentServices.shutdown()
+    ]);
   }
   backendShutdownPromise.finally(() => {
     applicationQuitAllowed = true;

@@ -4,6 +4,7 @@ node_modules/
 **/node_modules/
 dist/
 **/dist/
+frontend/src/generated/
 out/
 **/out/
 frontend/backend/

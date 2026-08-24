@@ -34,6 +34,33 @@ const MESSAGE_SETTINGS_LOADING = '正在读取 JDK 配置';
 const MESSAGE_SETTINGS_LOAD_FAILED = '读取 JDK 配置失败';
 const MESSAGE_SETTINGS_SAVE_FAILED = '保存 JDK 配置失败';
 const MESSAGE_SETTINGS_SAVE_SUCCESS = 'JDK 配置已保存';
+const MESSAGE_DEVELOPMENT_SETTINGS_SAVE_SUCCESS = '开发能力配置已保存';
+const MESSAGE_DEVELOPMENT_SETTINGS_LOAD_FAILED = '读取开发能力配置失败';
+const MESSAGE_DEVELOPMENT_SETTINGS_SUMMARY = '分别配置项目编译 JDK、Java 语言服务器和 AI 代码助手';
+const MESSAGE_DEVELOPMENT_SETTINGS_PARTIAL = '配置未全部保存';
+const MESSAGE_COMPILE_JDK_LABEL = '编译 JDK';
+const MESSAGE_DEVELOPMENT_SETTINGS_LABEL = '开发能力';
+const MESSAGE_AI_KEY_SAVED = 'AI API Key 已由系统安全存储加密保存。';
+const MESSAGE_AI_KEY_EMPTY = '尚未保存 AI API Key；本机无鉴权端点可以保持为空。';
+const MESSAGE_LANGUAGE_SERVER_NOT_CONFIGURED = 'Java 智能未启用；Monaco 基础编辑功能可用';
+const MESSAGE_LANGUAGE_SERVER_UNAVAILABLE = 'Java 智能启动失败';
+const MESSAGE_ORGANIZE_IMPORTS_EMPTY = '没有可整理的 import';
+const MESSAGE_ORGANIZE_IMPORTS_SUCCESS = 'import 已整理，请检查后保存';
+const MESSAGE_AI_NOT_CONFIGURED = 'AI 代码助手尚未启用，请先打开开发能力配置';
+const MESSAGE_AI_RUNNING = 'AI 正在处理代码';
+const MESSAGE_AI_FAILED = 'AI 代码助手执行失败';
+const MESSAGE_AI_STALE_RESULT = 'AI 处理期间代码已变化，结果未应用';
+const MESSAGE_AI_APPLIED = 'AI 修改已应用到编辑器，请检查后保存';
+const MESSAGE_AI_INLINE_REQUESTED = '正在请求 AI 行内补全，返回后按 Tab 接受';
+const MESSAGE_AI_PREVIEW_DEFAULT = 'AI 结果会先在这里预览，不会自动覆盖源码。';
+const MESSAGE_AI_CONTEXT_SELECTION = '将发送当前选区';
+const MESSAGE_AI_CONTEXT_FILE = '未选择代码，将发送当前文件';
+const MESSAGE_AI_CONTEXT_SUFFIX = '个字符';
+const MESSAGE_AI_RESULT_EXPLANATION = 'AI 已返回解释，不会修改代码。';
+const MESSAGE_AI_RESULT_REPLACEMENT = 'AI 已返回修改建议；确认预览内容后可应用到编辑器。';
+const MESSAGE_AI_NO_FILE = '请先打开需要处理的文件';
+const BUTTON_TEXT_AI_RUN = '运行 AI';
+const BUTTON_TEXT_AI_RUNNING = 'AI 处理中...';
 const MESSAGE_PROJECT_SETTINGS_LOAD_FAILED = '读取项目设置失败';
 const MESSAGE_PROJECT_SETTINGS_SAVE_FAILED = '保存项目设置失败';
 const MESSAGE_PROJECT_SETTINGS_SAVE_SUCCESS = '项目设置已保存';
@@ -108,6 +135,12 @@ const BUTTON_TEXT_COMPILE_RUNNING = '编译中...';
 const BUTTON_TEXT_EXPORT_RUNNING = '导出中...';
 const BUTTON_TEXT_UNICODE_PREVIEW = '中文预览';
 const BUTTON_TEXT_UNICODE_SOURCE = '返回原文';
+const AI_ACTION_EXPLAIN = 'EXPLAIN';
+const AI_ACTION_FIX = 'FIX';
+const AI_ACTION_REFACTOR = 'REFACTOR';
+const AI_ACTION_COMPLETE = 'COMPLETE';
+const AI_RESULT_TYPE_REPLACEMENT = 'replacement';
+const AI_CONTEXT_MAX_SOURCE_CHARACTERS = 60000;
 const DIAGNOSTIC_DEFAULT_FILE_NAME = 'jarpatch-studio-diagnostics.json';
 const JSON_INDENT_SPACES = 2;
 const STORAGE_KEY_TREE_PANEL_WIDTH = 'jarpatch.treePanelWidth';
@@ -181,6 +214,10 @@ const state = {
   currentTaskCancelRequested: false,
   jdkSettings: null,
   projectSettings: null,
+  developmentSettings: null,
+  languageServerReady: false,
+  aiRequestContext: null,
+  aiResult: null,
   treePanelWidth: TREE_PANEL_DEFAULT_WIDTH,
   expandedPaths: new Set([''])
 };
@@ -209,6 +246,18 @@ const elements = {
   jdkSettingsStatus: document.getElementById('jdkSettingsStatus'),
   closeSettingsBtn: document.getElementById('closeSettingsBtn'),
   saveJdkSettingsBtn: document.getElementById('saveJdkSettingsBtn'),
+  languageServerEnabledInput: document.getElementById('languageServerEnabledInput'),
+  jdtLsHomeInput: document.getElementById('jdtLsHomeInput'),
+  browseJdtLsBtn: document.getElementById('browseJdtLsBtn'),
+  jdtLsJavaHomeInput: document.getElementById('jdtLsJavaHomeInput'),
+  browseJdtLsJavaBtn: document.getElementById('browseJdtLsJavaBtn'),
+  aiEnabledInput: document.getElementById('aiEnabledInput'),
+  aiProtocolSelect: document.getElementById('aiProtocolSelect'),
+  aiEndpointInput: document.getElementById('aiEndpointInput'),
+  aiModelInput: document.getElementById('aiModelInput'),
+  aiApiKeyInput: document.getElementById('aiApiKeyInput'),
+  clearAiApiKeyInput: document.getElementById('clearAiApiKeyInput'),
+  developmentSettingsStatus: document.getElementById('developmentSettingsStatus'),
   projectSettingsDialog: document.getElementById('projectSettingsDialog'),
   projectJavaVersionInput: document.getElementById('projectJavaVersionInput'),
   defaultExportDirectoryInput: document.getElementById('defaultExportDirectoryInput'),
@@ -239,8 +288,22 @@ const elements = {
   unicodePreviewBtn: document.getElementById('unicodePreviewBtn'),
   fileEncodingSelect: document.getElementById('fileEncodingSelect'),
   saveBtn: document.getElementById('saveBtn'),
-  editor: document.getElementById('editor'),
+  quickFixBtn: document.getElementById('quickFixBtn'),
+  organizeImportsBtn: document.getElementById('organizeImportsBtn'),
+  aiInlineBtn: document.getElementById('aiInlineBtn'),
+  aiAssistantBtn: document.getElementById('aiAssistantBtn'),
+  editorIntelligenceStatus: document.getElementById('editorIntelligenceStatus'),
+  editor: window.jarPatchEditor.create(document.getElementById('editor')),
   unicodePreview: document.getElementById('unicodePreview'),
+  aiAssistantDialog: document.getElementById('aiAssistantDialog'),
+  aiContextSummary: document.getElementById('aiContextSummary'),
+  aiActionSelect: document.getElementById('aiActionSelect'),
+  aiInstructionInput: document.getElementById('aiInstructionInput'),
+  aiResultSummary: document.getElementById('aiResultSummary'),
+  aiResultOutput: document.getElementById('aiResultOutput'),
+  closeAiAssistantBtn: document.getElementById('closeAiAssistantBtn'),
+  applyAiResultBtn: document.getElementById('applyAiResultBtn'),
+  runAiAssistantBtn: document.getElementById('runAiAssistantBtn'),
   analysisToggleBtn: document.getElementById('analysisToggleBtn'),
   analysisCloseBtn: document.getElementById('analysisCloseBtn'),
   analysisBadge: document.getElementById('analysisBadge'),
@@ -317,6 +380,51 @@ function updateDirtyIndicator() {
   elements.activeFileKind.textContent = dirty ? `${kind} · ${MESSAGE_UNSAVED_CHANGES}` : kind;
   elements.saveBtn.classList.toggle('busy', dirty);
   updateUnicodePreviewButton();
+}
+
+/**
+ * 根据文件类型和已启用能力更新传统代码智能与 AI 按钮。
+ */
+function updateEditorActionButtons() {
+  const hasFile = Boolean(state.currentProject && state.currentFilePath);
+  const javaFile = hasFile && state.currentFilePath.toLowerCase().endsWith('.java');
+  const aiEnabled = Boolean(state.developmentSettings && state.developmentSettings.aiEnabled);
+  elements.quickFixBtn.disabled = !javaFile || !state.languageServerReady;
+  elements.organizeImportsBtn.disabled = !javaFile || !state.languageServerReady;
+  elements.aiInlineBtn.disabled = !hasFile || !aiEnabled;
+  elements.aiAssistantBtn.disabled = !hasFile || !aiEnabled;
+}
+
+/**
+ * 展示 Java 语言服务器状态和当前文件诊断数量。
+ *
+ * @param status Monaco 编辑器返回的语言智能状态
+ */
+function handleLanguageStatus(status) {
+  state.languageServerReady = status.state === 'ready';
+  elements.editorIntelligenceStatus.dataset.state = status.state || 'idle';
+  elements.editorIntelligenceStatus.textContent = status.message || MESSAGE_LANGUAGE_SERVER_NOT_CONFIGURED;
+  updateEditorActionButtons();
+}
+
+/**
+ * 按当前开发配置启动项目专属 Java 语言服务器。
+ *
+ * @param project 当前项目
+ */
+async function startLanguageIntelligence(project) {
+  state.languageServerReady = false;
+  updateEditorActionButtons();
+  if (!state.developmentSettings || !state.developmentSettings.languageServerEnabled) {
+    await elements.editor.stopLanguageServer();
+    handleLanguageStatus({ state: 'idle', message: MESSAGE_LANGUAGE_SERVER_NOT_CONFIGURED });
+    return;
+  }
+  try {
+    await elements.editor.startLanguageServer(project);
+  } catch (error) {
+    handleLanguageStatus({ state: 'error', message: `${MESSAGE_LANGUAGE_SERVER_UNAVAILABLE}：${error.message}` });
+  }
 }
 
 /**
@@ -476,6 +584,7 @@ function restoreWorkspaceControls() {
   elements.fileEncodingSelect.disabled = !state.currentProject || !state.currentFilePath;
   elements.editor.disabled = !state.currentProject || !state.currentFilePath;
   updateUnicodePreviewButton();
+  updateEditorActionButtons();
   elements.analyzeBtn.disabled = !state.currentProject;
   elements.diffBtn.disabled = !state.currentProject;
   elements.compileBtn.disabled = !state.currentProject;
@@ -510,6 +619,10 @@ function lockWorkspaceControls() {
   elements.fileEncodingSelect.disabled = true;
   elements.unicodePreviewBtn.disabled = true;
   elements.editor.disabled = true;
+  elements.quickFixBtn.disabled = true;
+  elements.organizeImportsBtn.disabled = true;
+  elements.aiInlineBtn.disabled = true;
+  elements.aiAssistantBtn.disabled = true;
   elements.analyzeBtn.disabled = true;
   elements.diffBtn.disabled = true;
   elements.compileBtn.disabled = true;
@@ -662,19 +775,25 @@ async function cancelCurrentTask() {
 }
 
 /**
- * 打开 JDK 配置弹窗。
+ * 打开开发能力配置弹窗，同时读取编译 JDK、JDT LS 与 AI 配置。
  */
 async function openSettingsDialog() {
   elements.settingsDialog.classList.add('open');
   elements.settingsDialog.setAttribute('aria-hidden', 'false');
   renderJdkSettings(null, MESSAGE_SETTINGS_LOADING);
   try {
-    const settings = await api('/api/settings/jdk');
-    state.jdkSettings = settings;
-    renderJdkSettings(settings, MESSAGE_SETTINGS_SUMMARY);
+    const [jdkSettings, developmentSettings] = await Promise.all([
+      api('/api/settings/jdk'),
+      window.jarPatch.getDevelopmentSettings()
+    ]);
+    state.jdkSettings = jdkSettings;
+    state.developmentSettings = developmentSettings;
+    renderJdkSettings(jdkSettings, MESSAGE_DEVELOPMENT_SETTINGS_SUMMARY);
+    renderDevelopmentSettings(developmentSettings);
+    updateEditorActionButtons();
   } catch (error) {
     renderJdkSettings(null, MESSAGE_SETTINGS_LOADING);
-    notify(`${MESSAGE_SETTINGS_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+    notify(`${MESSAGE_DEVELOPMENT_SETTINGS_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
   }
 }
 
@@ -730,6 +849,36 @@ function renderJdkSettings(settings, summary) {
 }
 
 /**
+ * 渲染脱敏后的 JDT LS 与 AI 配置。
+ *
+ * @param settings Electron 主进程返回的开发能力配置
+ */
+function renderDevelopmentSettings(settings) {
+  const view = settings || {
+    languageServerEnabled: false,
+    jdtLsHome: '',
+    jdtLsJavaHome: '',
+    aiEnabled: false,
+    aiProtocol: 'responses',
+    aiEndpoint: '',
+    aiModel: '',
+    hasAiApiKey: false
+  };
+  elements.languageServerEnabledInput.checked = view.languageServerEnabled;
+  elements.jdtLsHomeInput.value = view.jdtLsHome || '';
+  elements.jdtLsJavaHomeInput.value = view.jdtLsJavaHome || '';
+  elements.aiEnabledInput.checked = view.aiEnabled;
+  elements.aiProtocolSelect.value = view.aiProtocol || 'responses';
+  elements.aiEndpointInput.value = view.aiEndpoint || '';
+  elements.aiModelInput.value = view.aiModel || '';
+  elements.aiApiKeyInput.value = '';
+  elements.clearAiApiKeyInput.checked = false;
+  elements.developmentSettingsStatus.textContent = view.hasAiApiKey
+    ? MESSAGE_AI_KEY_SAVED
+    : MESSAGE_AI_KEY_EMPTY;
+}
+
+/**
  * 设置 JDK 配置弹窗中的按钮状态。
  *
  * @param busy 是否忙碌
@@ -739,6 +888,17 @@ function setSettingsDialogBusy(busy) {
   elements.browseJdkBtn.disabled = busy;
   elements.saveJdkSettingsBtn.disabled = busy;
   elements.closeSettingsBtn.disabled = busy;
+  elements.languageServerEnabledInput.disabled = busy;
+  elements.jdtLsHomeInput.disabled = busy;
+  elements.browseJdtLsBtn.disabled = busy;
+  elements.jdtLsJavaHomeInput.disabled = busy;
+  elements.browseJdtLsJavaBtn.disabled = busy;
+  elements.aiEnabledInput.disabled = busy;
+  elements.aiProtocolSelect.disabled = busy;
+  elements.aiEndpointInput.disabled = busy;
+  elements.aiModelInput.disabled = busy;
+  elements.aiApiKeyInput.disabled = busy;
+  elements.clearAiApiKeyInput.disabled = busy;
 }
 
 /**
@@ -757,23 +917,80 @@ async function pickJdkHomeDirectory() {
 }
 
 /**
- * 保存 JDK 配置。
+ * 浏览并填充 Eclipse JDT LS 解压目录。
+ */
+async function pickJdtLsHomeDirectory() {
+  const selectedPath = await window.jarPatch.pickDirectory(
+    elements.jdtLsHomeInput.value.trim(),
+    '选择 Eclipse JDT LS 解压目录'
+  );
+  if (selectedPath) {
+    elements.jdtLsHomeInput.value = selectedPath;
+  }
+}
+
+/**
+ * 浏览并填充 JDT LS 专用 Java 21+ 运行 JDK。
+ */
+async function pickJdtLsJavaHomeDirectory() {
+  const selectedPath = await window.jarPatch.pickDirectory(
+    elements.jdtLsJavaHomeInput.value.trim(),
+    '选择 JDT LS 运行 JDK（Java 21+）'
+  );
+  if (selectedPath) {
+    elements.jdtLsJavaHomeInput.value = selectedPath;
+  }
+}
+
+/**
+ * 保存编译 JDK、Java 语言服务器与 AI 配置，并分别报告两个独立配置域的结果。
  */
 async function saveJdkSettings() {
   const javaHome = elements.jdkHomeInput.value.trim();
-  if (!javaHome) {
-    notify('请输入 JDK 安装目录', NOTICE_TYPE_INFO);
-    return;
-  }
   setSettingsDialogBusy(true);
   try {
-    const settings = await api('/api/settings/jdk', {
-      method: 'PUT',
-      body: JSON.stringify({ javaHome })
-    });
-    state.jdkSettings = settings;
-    renderJdkSettings(settings, MESSAGE_SETTINGS_SUMMARY);
-    notify(MESSAGE_SETTINGS_SAVE_SUCCESS, NOTICE_TYPE_SUCCESS);
+    const developmentRequest = {
+      languageServerEnabled: elements.languageServerEnabledInput.checked,
+      jdtLsHome: elements.jdtLsHomeInput.value.trim(),
+      jdtLsJavaHome: elements.jdtLsJavaHomeInput.value.trim(),
+      aiEnabled: elements.aiEnabledInput.checked,
+      aiProtocol: elements.aiProtocolSelect.value,
+      aiEndpoint: elements.aiEndpointInput.value.trim(),
+      aiModel: elements.aiModelInput.value.trim(),
+      aiApiKey: elements.aiApiKeyInput.value.trim(),
+      clearAiApiKey: elements.clearAiApiKeyInput.checked
+    };
+    const jdkPromise = javaHome
+      ? api('/api/settings/jdk', {
+        method: 'PUT',
+        body: JSON.stringify({ javaHome })
+      })
+      : Promise.resolve(state.jdkSettings);
+    const [jdkResult, developmentResult] = await Promise.allSettled([
+      jdkPromise,
+      window.jarPatch.saveDevelopmentSettings(developmentRequest)
+    ]);
+    const failures = [];
+    if (jdkResult.status === 'fulfilled') {
+      state.jdkSettings = jdkResult.value;
+      renderJdkSettings(jdkResult.value, MESSAGE_DEVELOPMENT_SETTINGS_SUMMARY);
+    } else {
+      failures.push(`${MESSAGE_COMPILE_JDK_LABEL}：${jdkResult.reason.message}`);
+    }
+    if (developmentResult.status === 'fulfilled') {
+      state.developmentSettings = developmentResult.value;
+      renderDevelopmentSettings(developmentResult.value);
+      if (state.currentProject) {
+        await startLanguageIntelligence(state.currentProject);
+      }
+    } else {
+      failures.push(`${MESSAGE_DEVELOPMENT_SETTINGS_LABEL}：${developmentResult.reason.message}`);
+    }
+    if (failures.length) {
+      notify(`${MESSAGE_DEVELOPMENT_SETTINGS_PARTIAL}：${failures.join('；')}`, NOTICE_TYPE_ERROR);
+      return;
+    }
+    notify(`${MESSAGE_SETTINGS_SAVE_SUCCESS}；${MESSAGE_DEVELOPMENT_SETTINGS_SAVE_SUCCESS}`, NOTICE_TYPE_SUCCESS);
     closeSettingsDialog();
   } catch (error) {
     notify(`${MESSAGE_SETTINGS_SAVE_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
@@ -1062,6 +1279,7 @@ async function selectProject(project) {
   state.currentFileOriginalContent = null;
   state.currentTree = null;
   state.expandedPaths = new Set(['']);
+  elements.editor.closeDocument();
   elements.currentProjectName.textContent = project.name;
   elements.currentProjectMeta.textContent = `${project.packageType} · ${project.workspacePath}`;
   restoreWorkspaceControls();
@@ -1069,13 +1287,13 @@ async function selectProject(project) {
   elements.searchBtn.disabled = false;
   elements.saveBtn.disabled = true;
   closeUnicodePreview();
-  elements.editor.value = '';
   elements.editor.disabled = true;
   elements.activeFileName.textContent = '未选择文件';
   elements.activeFileKind.textContent = '请选择左侧可编辑文件';
   resetAnalysisPanel();
   await loadTree(project.id);
   await loadProjects();
+  await startLanguageIntelligence(project);
 }
 
 async function deleteProjectHistory(project) {
@@ -1131,12 +1349,16 @@ function resetCurrentProject() {
   elements.fileTree.classList.add('empty');
   elements.fileTree.textContent = MESSAGE_FILE_TREE_EMPTY;
   closeUnicodePreview();
-  elements.editor.value = '';
+  elements.editor.closeDocument();
   elements.editor.disabled = true;
   elements.activeFileName.textContent = MESSAGE_ACTIVE_FILE_EMPTY;
   elements.activeFileKind.textContent = MESSAGE_ACTIVE_FILE_TIP;
   elements.activeFileKind.dataset.kind = '';
   elements.saveBtn.classList.remove('busy');
+  elements.editor.stopLanguageServer().catch((error) => {
+    handleLanguageStatus({ state: 'error', message: `${MESSAGE_LANGUAGE_SERVER_UNAVAILABLE}：${error.message}` });
+  });
+  handleLanguageStatus({ state: 'idle', message: MESSAGE_LANGUAGE_SERVER_NOT_CONFIGURED });
   resetAnalysisPanel();
 }
 
@@ -1250,7 +1472,13 @@ async function openFile(node, encoding = null) {
     closeUnicodePreview();
     state.currentFilePath = node.path;
     elements.editor.disabled = false;
-    elements.editor.value = contentView.content;
+    const normalizedWorkspacePath = state.currentProject.workspacePath.replace(/[\\/]$/, '');
+    elements.editor.openDocument({
+      content: contentView.content,
+      path: node.path,
+      absolutePath: `${normalizedWorkspacePath}/${node.path}`,
+      language: window.jarPatchEditor.detectLanguage(node.path)
+    });
     state.currentFileOriginalContent = elements.editor.value;
     state.currentFileHash = contentView.contentHash;
     state.currentFileEncoding = contentView.encoding;
@@ -1262,6 +1490,7 @@ async function openFile(node, encoding = null) {
     elements.activeFileKind.textContent = node.kind;
     elements.activeFileKind.dataset.kind = node.kind;
     updateDirtyIndicator();
+    updateEditorActionButtons();
   } catch (error) {
     notify(`${MESSAGE_FILE_OPEN_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
   }
@@ -1437,10 +1666,185 @@ async function saveCurrentFile() {
     state.currentFileEncoding = contentView.encoding;
     elements.fileEncodingSelect.value = contentView.encoding;
     updateDirtyIndicator();
+    elements.editor.didSave();
     notify(`${MESSAGE_SAVE_SUCCESS}：${state.currentFilePath}`, NOTICE_TYPE_SUCCESS);
   } catch (error) {
     notify(`${MESSAGE_SAVE_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
   }
+}
+
+/**
+ * 由 Monaco 显式 AI 行内补全 Provider 调用，自动输入过程不会访问网络。
+ *
+ * @param context 光标前后代码上下文
+ * @return AI 补全结果
+ */
+async function provideAiInlineCompletion(context) {
+  if (!state.developmentSettings || !state.developmentSettings.aiEnabled) {
+    notify(MESSAGE_AI_NOT_CONFIGURED, NOTICE_TYPE_INFO);
+    return null;
+  }
+  try {
+    return await window.jarPatch.aiAssist({
+      action: AI_ACTION_COMPLETE,
+      instruction: '',
+      path: state.currentFilePath,
+      language: context.language,
+      source: '',
+      selection: '',
+      prefix: context.prefix,
+      suffix: context.suffix,
+      diagnostics: elements.editor.getDiagnostics()
+    });
+  } catch (error) {
+    notify(`${MESSAGE_AI_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+    return null;
+  }
+}
+
+/**
+ * 打开 AI 助手并冻结本次请求对应的原始选区和源码快照。
+ */
+function openAiAssistantDialog() {
+  if (!state.currentFilePath) {
+    notify(MESSAGE_AI_NO_FILE, NOTICE_TYPE_INFO);
+    return;
+  }
+  if (!state.developmentSettings || !state.developmentSettings.aiEnabled) {
+    notify(MESSAGE_AI_NOT_CONFIGURED, NOTICE_TYPE_INFO);
+    return;
+  }
+  const context = elements.editor.getSelectionContext();
+  state.aiRequestContext = {
+    originalSource: context.source,
+    source: context.source.length <= AI_CONTEXT_MAX_SOURCE_CHARACTERS ? context.source : '',
+    selection: context.text,
+    range: context.range
+  };
+  state.aiResult = null;
+  const scopeText = context.text
+    ? `${MESSAGE_AI_CONTEXT_SELECTION}：${context.text.length} ${MESSAGE_AI_CONTEXT_SUFFIX}`
+    : `${MESSAGE_AI_CONTEXT_FILE}：${context.source.length} ${MESSAGE_AI_CONTEXT_SUFFIX}`;
+  elements.aiContextSummary.textContent = `${state.currentFilePath} · ${scopeText}`;
+  elements.aiResultSummary.textContent = MESSAGE_AI_PREVIEW_DEFAULT;
+  elements.aiResultOutput.value = '';
+  elements.applyAiResultBtn.disabled = true;
+  elements.aiAssistantDialog.classList.add('open');
+  elements.aiAssistantDialog.setAttribute('aria-hidden', 'false');
+}
+
+/**
+ * 关闭 AI 助手弹窗，不改变编辑器内容。
+ */
+function closeAiAssistantDialog() {
+  elements.aiAssistantDialog.classList.remove('open');
+  elements.aiAssistantDialog.setAttribute('aria-hidden', 'true');
+}
+
+/**
+ * 设置 AI 助手执行期间的控件状态。
+ *
+ * @param busy 是否正在等待模型响应
+ */
+function setAiAssistantBusy(busy) {
+  elements.aiActionSelect.disabled = busy;
+  elements.aiInstructionInput.disabled = busy;
+  elements.closeAiAssistantBtn.disabled = busy;
+  elements.runAiAssistantBtn.disabled = busy;
+  elements.runAiAssistantBtn.textContent = busy ? BUTTON_TEXT_AI_RUNNING : BUTTON_TEXT_AI_RUN;
+  if (busy) {
+    elements.applyAiResultBtn.disabled = true;
+  }
+}
+
+/**
+ * 提交解释、修复或重构请求，并只把结构化结果放入预览区。
+ */
+async function runAiAssistant() {
+  if (!state.aiRequestContext || !state.currentFilePath) {
+    notify(MESSAGE_AI_NO_FILE, NOTICE_TYPE_INFO);
+    return;
+  }
+  setAiAssistantBusy(true);
+  elements.aiResultSummary.textContent = MESSAGE_AI_RUNNING;
+  try {
+    const result = await window.jarPatch.aiAssist({
+      action: elements.aiActionSelect.value,
+      instruction: elements.aiInstructionInput.value.trim(),
+      path: state.currentFilePath,
+      language: window.jarPatchEditor.detectLanguage(state.currentFilePath),
+      source: state.aiRequestContext.source,
+      selection: state.aiRequestContext.selection,
+      prefix: '',
+      suffix: '',
+      diagnostics: elements.editor.getDiagnostics()
+    });
+    state.aiResult = result;
+    elements.aiResultOutput.value = result.content;
+    const replacement = result.resultType === AI_RESULT_TYPE_REPLACEMENT;
+    elements.aiResultSummary.textContent = `${result.summary} · ${replacement
+      ? MESSAGE_AI_RESULT_REPLACEMENT : MESSAGE_AI_RESULT_EXPLANATION}`;
+    elements.applyAiResultBtn.disabled = !replacement;
+  } catch (error) {
+    state.aiResult = null;
+    elements.aiResultSummary.textContent = `${MESSAGE_AI_FAILED}：${error.message}`;
+    notify(`${MESSAGE_AI_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  } finally {
+    setAiAssistantBusy(false);
+    elements.applyAiResultBtn.disabled = !state.aiResult
+      || state.aiResult.resultType !== AI_RESULT_TYPE_REPLACEMENT;
+  }
+}
+
+/**
+ * 在确认源码未变化后应用 AI 替换；解释类结果永远不能写入编辑器。
+ */
+function applyAiResult() {
+  if (!state.aiRequestContext || !state.aiResult
+      || state.aiResult.resultType !== AI_RESULT_TYPE_REPLACEMENT) {
+    return;
+  }
+  if (elements.editor.value !== state.aiRequestContext.originalSource) {
+    notify(MESSAGE_AI_STALE_RESULT, NOTICE_TYPE_ERROR);
+    elements.applyAiResultBtn.disabled = true;
+    return;
+  }
+  elements.editor.applyAiReplacement(state.aiRequestContext.range, state.aiResult.content);
+  updateDirtyIndicator();
+  notify(MESSAGE_AI_APPLIED, NOTICE_TYPE_SUCCESS);
+  closeAiAssistantDialog();
+}
+
+/**
+ * 打开语言服务器提供的标准快速修复菜单。
+ */
+async function showQuickFix() {
+  await elements.editor.showQuickFix();
+}
+
+/**
+ * 请求 JDT LS 整理 import，并把编辑保留在未保存状态供用户检查。
+ */
+async function organizeImports() {
+  try {
+    const applied = await elements.editor.organizeImports();
+    notify(applied ? MESSAGE_ORGANIZE_IMPORTS_SUCCESS : MESSAGE_ORGANIZE_IMPORTS_EMPTY,
+      applied ? NOTICE_TYPE_SUCCESS : NOTICE_TYPE_INFO);
+  } catch (error) {
+    notify(`${MESSAGE_LANGUAGE_SERVER_UNAVAILABLE}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
+}
+
+/**
+ * 显式触发一次 AI 行内补全；模型返回后由 Monaco 以灰字展示，用户按 Tab 接受。
+ */
+async function triggerAiInlineCompletion() {
+  if (!state.developmentSettings || !state.developmentSettings.aiEnabled) {
+    notify(MESSAGE_AI_NOT_CONFIGURED, NOTICE_TYPE_INFO);
+    return;
+  }
+  notify(MESSAGE_AI_INLINE_REQUESTED, NOTICE_TYPE_INFO);
+  await elements.editor.triggerAiCompletion();
 }
 
 async function importArchive() {
@@ -1896,6 +2300,10 @@ function escapeHtml(value) {
 elements.openArchiveBtn.addEventListener('click', importArchive);
 elements.unicodePreviewBtn.addEventListener('click', toggleUnicodePreview);
 elements.saveBtn.addEventListener('click', saveCurrentFile);
+elements.quickFixBtn.addEventListener('click', showQuickFix);
+elements.organizeImportsBtn.addEventListener('click', organizeImports);
+elements.aiInlineBtn.addEventListener('click', triggerAiInlineCompletion);
+elements.aiAssistantBtn.addEventListener('click', openAiAssistantDialog);
 elements.fileEncodingSelect.addEventListener('change', reopenCurrentFileWithEncoding);
 elements.analyzeBtn.addEventListener('click', analyzeProject);
 elements.diffBtn.addEventListener('click', openDiffDialog);
@@ -1911,6 +2319,8 @@ elements.diagnosticBtn.addEventListener('click', exportDiagnostics);
 elements.searchBtn.addEventListener('click', searchProject);
 elements.cancelTaskBtn.addEventListener('click', cancelCurrentTask);
 elements.browseJdkBtn.addEventListener('click', pickJdkHomeDirectory);
+elements.browseJdtLsBtn.addEventListener('click', pickJdtLsHomeDirectory);
+elements.browseJdtLsJavaBtn.addEventListener('click', pickJdtLsJavaHomeDirectory);
 elements.closeSettingsBtn.addEventListener('click', closeSettingsDialog);
 elements.saveJdkSettingsBtn.addEventListener('click', saveJdkSettings);
 elements.browseExportDirectoryBtn.addEventListener('click', pickExportDirectory);
@@ -1918,6 +2328,9 @@ elements.closeProjectSettingsBtn.addEventListener('click', closeProjectSettingsD
 elements.saveProjectSettingsBtn.addEventListener('click', saveProjectSettings);
 elements.closeErrorGuideBtn.addEventListener('click', closeErrorGuideDialog);
 elements.closeDiffBtn.addEventListener('click', closeDiffDialog);
+elements.closeAiAssistantBtn.addEventListener('click', closeAiAssistantDialog);
+elements.runAiAssistantBtn.addEventListener('click', runAiAssistant);
+elements.applyAiResultBtn.addEventListener('click', applyAiResult);
 elements.treeResizeHandle.addEventListener('pointerdown', beginTreeResize);
 elements.analysisToggleBtn.addEventListener('click', () => setAnalysisPanelOpen(!state.analysisOpen));
 elements.analysisCloseBtn.addEventListener('click', () => setAnalysisPanelOpen(false));
@@ -1938,6 +2351,11 @@ elements.searchInput.addEventListener('keydown', (event) => {
 async function initializeApplication() {
   const connection = await window.jarPatch.getBackendConnection();
   window.jarPatchApiClient.configure(connection);
+  elements.editor.onLanguageStatus(handleLanguageStatus);
+  elements.editor.setAiCompletionProvider(provideAiInlineCompletion);
+  state.developmentSettings = await window.jarPatch.getDevelopmentSettings();
+  renderDevelopmentSettings(state.developmentSettings);
+  handleLanguageStatus({ state: 'idle', message: MESSAGE_LANGUAGE_SERVER_NOT_CONFIGURED });
   initializeTreePanelWidth();
   restoreWorkspaceControls();
   await loadProjects();
@@ -1960,6 +2378,11 @@ elements.projectHistoryDialog.addEventListener('click', (event) => {
 elements.errorGuideDialog.addEventListener('click', (event) => {
   if (event.target === elements.errorGuideDialog) {
     closeErrorGuideDialog();
+  }
+});
+elements.aiAssistantDialog.addEventListener('click', (event) => {
+  if (event.target === elements.aiAssistantDialog) {
+    closeAiAssistantDialog();
   }
 });
 elements.editor.addEventListener('input', updateDirtyIndicator);

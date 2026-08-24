@@ -3,10 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src http://127.0.0.1:18765 ws://127.0.0.1:18765; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src http://127.0.0.1:18765 ws://127.0.0.1:18765; img-src 'self' data:; object-src 'none'; base-uri 'none'">
   <title>JarPatch Studio</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="styles-settings.css">
+  <link rel="stylesheet" href="generated/editor-bridge.css">
 </head>
 <body>
   <div id="notificationArea" class="notification-area" aria-live="polite"></div>
@@ -63,8 +64,8 @@
     <section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settingsDialogTitle">
       <header class="modal-header">
         <div>
-          <h2 id="settingsDialogTitle">JDK 配置</h2>
-          <p id="settingsDialogSummary">保存后编译服务会优先使用这里配置的 JDK 路径</p>
+          <h2 id="settingsDialogTitle">开发能力配置</h2>
+          <p id="settingsDialogSummary">分别配置项目编译 JDK、Java 语言服务器和 AI 代码助手</p>
         </div>
       </header>
       <div class="settings-grid">
@@ -80,10 +81,87 @@
           <div class="section-header">当前状态</div>
           <div id="jdkSettingsStatus" class="settings-status"></div>
         </section>
+        <section class="settings-card development-card">
+          <label class="settings-switch">
+            <input id="languageServerEnabledInput" type="checkbox">
+            <span>启用 Java 代码智能（Eclipse JDT LS）</span>
+          </label>
+          <p class="settings-tip">提供实时错误、语义补全、悬浮文档、跳转、快速修复和整理 import。当前 JDT LS 运行时至少需要 Java 21，不影响项目自身 Java 8/17 编译目标。</p>
+          <label class="field-label">JDT LS 解压目录
+            <span class="settings-row">
+              <input id="jdtLsHomeInput" type="text" placeholder="包含 plugins 和 config_win 等目录">
+              <button id="browseJdtLsBtn" class="tool-btn" type="button">浏览</button>
+            </span>
+          </label>
+          <label class="field-label">JDT LS 运行 JDK
+            <span class="settings-row">
+              <input id="jdtLsJavaHomeInput" type="text" placeholder="Java 21 或更高版本的 JDK 目录">
+              <button id="browseJdtLsJavaBtn" class="tool-btn" type="button">浏览</button>
+            </span>
+          </label>
+        </section>
+        <section class="settings-card development-card">
+          <label class="settings-switch">
+            <input id="aiEnabledInput" type="checkbox">
+            <span>启用 AI 代码助手</span>
+          </label>
+          <p class="settings-tip">AI 操作会把你明确选择的代码或当前文件发送到下面的端点。API Key 仅由 Electron 主进程使用系统安全存储加密。</p>
+          <div class="development-settings-grid">
+            <label class="field-label">接口协议
+              <select id="aiProtocolSelect">
+                <option value="responses">OpenAI Responses API</option>
+                <option value="chat-completions">OpenAI 兼容 Chat Completions</option>
+              </select>
+            </label>
+            <label class="field-label">模型
+              <input id="aiModelInput" type="text" placeholder="填写端点实际支持的模型 ID">
+            </label>
+            <label class="field-label field-wide">完整接口地址
+              <input id="aiEndpointInput" type="url" placeholder="例如：https://api.openai.com/v1/responses">
+            </label>
+            <label class="field-label field-wide">API Key
+              <input id="aiApiKeyInput" type="password" autocomplete="new-password" placeholder="留空表示保留已保存密钥；本机无鉴权端点可不填">
+            </label>
+          </div>
+          <label class="settings-switch compact-switch">
+            <input id="clearAiApiKeyInput" type="checkbox">
+            <span>清除已保存的 API Key</span>
+          </label>
+          <div id="developmentSettingsStatus" class="settings-tip"></div>
+        </section>
       </div>
       <footer class="modal-footer">
         <button id="closeSettingsBtn" class="tool-btn" type="button">取消</button>
         <button id="saveJdkSettingsBtn" class="primary-action modal-primary" type="button">保存并校验</button>
+      </footer>
+    </section>
+  </div>
+  <div id="aiAssistantDialog" class="modal-backdrop" aria-hidden="true">
+    <section class="modal-panel ai-panel" role="dialog" aria-modal="true" aria-labelledby="aiAssistantDialogTitle">
+      <header class="modal-header">
+        <div>
+          <h2 id="aiAssistantDialogTitle">AI 代码助手</h2>
+          <p id="aiContextSummary">先打开文件，再选择要解释或修改的代码</p>
+        </div>
+      </header>
+      <div class="ai-controls">
+        <label class="field-label">操作
+          <select id="aiActionSelect">
+            <option value="EXPLAIN">解释代码</option>
+            <option value="FIX">根据诊断修复</option>
+            <option value="REFACTOR">按要求重构</option>
+          </select>
+        </label>
+        <label class="field-label field-wide">补充要求
+          <textarea id="aiInstructionInput" rows="3" placeholder="可选：说明希望重点处理的内容"></textarea>
+        </label>
+      </div>
+      <div id="aiResultSummary" class="ai-result-summary">AI 结果会先在这里预览，不会自动覆盖源码。</div>
+      <textarea id="aiResultOutput" class="ai-result-output" aria-label="AI 结果预览" spellcheck="false" readonly></textarea>
+      <footer class="modal-footer">
+        <button id="closeAiAssistantBtn" class="tool-btn" type="button">关闭</button>
+        <button id="applyAiResultBtn" class="tool-btn" type="button" disabled>应用修改</button>
+        <button id="runAiAssistantBtn" class="primary-action modal-primary" type="button">运行 AI</button>
       </footer>
     </section>
   </div>
@@ -177,7 +255,7 @@
           <button id="orphanWorkspacesBtn" class="tool-btn" type="button">孤立工作区</button>
           <button id="errorGuideBtn" class="tool-btn" type="button">排错向导</button>
           <button id="diagnosticBtn" class="tool-btn" type="button">导出诊断</button>
-          <button id="settingsBtn" class="tool-btn" type="button">⚙ JDK</button>
+          <button id="settingsBtn" class="tool-btn" type="button">⚙ 开发能力</button>
         </div>
       </header>
 
@@ -209,6 +287,10 @@
               <div id="activeFileKind" class="file-kind">可编辑 Java 与文本资源</div>
             </div>
             <div class="editor-actions">
+              <button id="quickFixBtn" class="tool-btn" type="button" disabled>快速修复</button>
+              <button id="organizeImportsBtn" class="tool-btn" type="button" disabled>整理 import</button>
+              <button id="aiInlineBtn" class="tool-btn" type="button" disabled>AI 补全</button>
+              <button id="aiAssistantBtn" class="tool-btn" type="button" disabled>AI 助手</button>
               <label class="editor-encoding">文件编码
                 <select id="fileEncodingSelect" disabled>
                   <option value="UTF-8">UTF-8</option>
@@ -222,7 +304,8 @@
               <button id="saveBtn" class="tool-btn" disabled>保存</button>
             </div>
           </div>
-          <textarea id="editor" spellcheck="false" wrap="off" disabled></textarea>
+          <div id="editorIntelligenceStatus" class="editor-intelligence-status" data-state="idle">Monaco 编辑器正在初始化</div>
+          <div id="editor" class="monaco-editor-host disabled" aria-label="代码编辑器"></div>
           <textarea id="unicodePreview" aria-label="中文 Unicode 转义只读预览" spellcheck="false" wrap="off" readonly hidden></textarea>
         </section>
 
@@ -247,6 +330,7 @@
     </main>
   </div>
 
+  <script src="generated/editor-bridge.js"></script>
   <script src="api-client.js"></script>
   <script src="renderer.js"></script>
 </body>
