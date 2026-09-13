@@ -84,7 +84,8 @@ public class TaskService {
      * 复用前端预先创建的任务，或者在未传入 taskId 时现场创建任务。
      * <p>
      * 入口在控制器，实际执行点仍然是任务仓储和广播服务；这让前端可以先拿到 taskId，
-     * 再连接 WebSocket 并发起长请求，从而真正看到实时日志。
+     * 再连接 WebSocket 并发起长请求，从而真正看到实时日志。复用已结束、类型不符或归属
+     * 其他项目的任务会被拒绝，避免长操作全程拿不到状态更新却静默执行。
      * </p>
      *
      * @param taskId   预创建任务 ID，可为空
@@ -97,8 +98,29 @@ public class TaskService {
         if (taskId == null || taskId.trim().isEmpty()) {
             return create(projectId, taskType, message);
         }
-        return findById(taskId)
+        TaskRecord record = findById(taskId)
                 .orElseThrow(() -> new IllegalArgumentException(JarPatchConstants.MESSAGE_TASK_NOT_FOUND));
+        validateReusableTask(record, projectId, taskType);
+        return record;
+    }
+
+    /**
+     * 校验传入 taskId 引用的任务可以承接本次长操作。
+     *
+     * @param record   已存在的任务记录
+     * @param projectId 操作所属项目 ID，可为空
+     * @param taskType  操作的任务类型
+     */
+    private void validateReusableTask(TaskRecord record, String projectId, String taskType) {
+        if (!TaskStatus.RUNNING.getCode().equals(record.getStatus())) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_TASK_STATE_INVALID);
+        }
+        if (taskType != null && !taskType.equals(record.getTaskType())) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_TASK_TYPE_MISMATCH);
+        }
+        if (record.getProjectId() != null && !record.getProjectId().equals(projectId)) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_TASK_PROJECT_MISMATCH);
+        }
     }
 
     /**

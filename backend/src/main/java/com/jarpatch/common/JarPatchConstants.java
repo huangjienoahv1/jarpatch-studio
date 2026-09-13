@@ -69,6 +69,9 @@ public final class JarPatchConstants {
     public static final String MESSAGE_FAILED = "操作失败";
     public static final String MESSAGE_PROJECT_NOT_FOUND = "项目不存在";
     public static final String MESSAGE_TASK_NOT_FOUND = "任务不存在";
+    public static final String MESSAGE_TASK_STATE_INVALID = "任务已结束，不能复用该任务标识";
+    public static final String MESSAGE_TASK_TYPE_MISMATCH = "任务类型与当前操作不一致";
+    public static final String MESSAGE_TASK_PROJECT_MISMATCH = "任务不属于当前项目";
     public static final String MESSAGE_TASK_CANCELLED = "任务已取消";
     public static final String MESSAGE_PROJECT_OPERATION_IN_PROGRESS = "当前项目已有编译或导出操作正在执行，请等待完成后再试";
     public static final String MESSAGE_TASK_TYPE_EMPTY = "任务类型不能为空";
