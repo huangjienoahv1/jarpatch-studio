@@ -19,7 +19,7 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 
 /**
@@ -134,31 +134,22 @@ public class ArchiveService {
      * <p>
      * 编译入口来自 CompileService，实际写入点是 extracted 中的原嵌套 Jar。该方法重建 Jar：
      * 先复制原有条目并跳过同名 class，再追加 compiledDir 中的新 class，结果覆盖原 Jar 文件。
+     * 原条目属性通过中央目录读取并保留：若被重建的嵌套 Jar 本身是 Spring Boot fat jar，
+     * 其内部 BOOT-INF/lib 下的 Jar 必须保持 STORED，否则该包独立运行时启动器无法读取。
      * </p>
      *
      * @param jarFile     extracted 目录内的嵌套 Jar
      * @param compiledDir 当前嵌套 Jar 对应的编译输出目录
-     * @throws IOException 读取或写入 Jar 失败时抛出
-     */
-    public void replaceClassesInJar(Path jarFile, Path compiledDir) throws IOException {
-        replaceClassesInJar(jarFile, compiledDir, () -> false);
-    }
-
-    /**
-     * 将编译后的 class 文件替换回指定嵌套 Jar，并支持任务取消检查。
-     *
-     * @param jarFile         extracted 目录内的嵌套 Jar
-     * @param compiledDir     当前嵌套 Jar 对应的编译输出目录
-     * @param cancelRequested  取消检查回调
+     * @param cancelRequested 取消检查回调
      * @throws IOException 读取或写入 Jar 失败时抛出
      */
     public void replaceClassesInJar(Path jarFile, Path compiledDir, BooleanSupplier cancelRequested) throws IOException {
         Path tempFile = Files.createTempFile(jarFile.getParent(), jarFile.getFileName().toString(), ".tmp");
         Set<String> replacementEntries = collectClassEntries(compiledDir);
         try {
-            try (ZipInputStream zipInputStream = new ZipInputStream(new BufferedInputStream(Files.newInputStream(jarFile)));
+            try (ZipFile originalJar = new ZipFile(jarFile.toFile());
                  ZipOutputStream zipOutputStream = new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(tempFile)))) {
-                copyOriginalEntries(zipInputStream, zipOutputStream, replacementEntries, cancelRequested);
+                copyOriginalEntries(originalJar, zipOutputStream, replacementEntries, cancelRequested);
                 addReplacementClasses(compiledDir, zipOutputStream, cancelRequested);
             }
             try {
@@ -225,30 +216,39 @@ public class ArchiveService {
     }
 
     /**
-     * 复制原 Jar 中不被替换的条目。
+     * 复制原 Jar 中不被替换的条目，并保留原始压缩方法、大小、CRC 和时间戳。
      *
-     * @param zipInputStream     原 Jar 输入流
-     * @param zipOutputStream    新 Jar 输出流
+     * @param originalJar       原 Jar 中央目录
+     * @param zipOutputStream   新 Jar 输出流
      * @param replacementEntries 需要被新 class 覆盖的条目名称
      * @param cancelRequested    取消检查回调
      * @throws IOException 复制失败时抛出
      */
-    private void copyOriginalEntries(ZipInputStream zipInputStream,
+    private void copyOriginalEntries(ZipFile originalJar,
                                      ZipOutputStream zipOutputStream,
                                      Set<String> replacementEntries,
                                      BooleanSupplier cancelRequested) throws IOException {
-        ZipEntry entry;
-        while ((entry = zipInputStream.getNextEntry()) != null) {
+        var entries = originalJar.entries();
+        while (entries.hasMoreElements()) {
             ensureNotCancelled(cancelRequested);
-            if (!replacementEntries.contains(entry.getName())) {
-                ZipEntry newEntry = new ZipEntry(entry.getName());
-                zipOutputStream.putNextEntry(newEntry);
-                if (!entry.isDirectory()) {
-                    copy(zipInputStream, zipOutputStream, cancelRequested);
-                }
-                zipOutputStream.closeEntry();
+            ZipEntry entry = entries.nextElement();
+            if (replacementEntries.contains(entry.getName())) {
+                continue;
             }
-            zipInputStream.closeEntry();
+            ZipEntry newEntry = new ZipEntry(entry.getName());
+            newEntry.setTime(entry.getTime());
+            newEntry.setMethod(entry.getMethod());
+            if (entry.getMethod() == ZipEntry.STORED) {
+                // STORED 条目必须在写入前声明大小和 CRC，否则 ZipOutputStream 无法校验内容。
+                newEntry.setSize(entry.getSize());
+                newEntry.setCompressedSize(entry.getSize());
+                newEntry.setCrc(entry.getCrc());
+            }
+            zipOutputStream.putNextEntry(newEntry);
+            if (!entry.isDirectory()) {
+                copy(originalJar.getInputStream(entry), zipOutputStream, cancelRequested);
+            }
+            zipOutputStream.closeEntry();
         }
     }
 
