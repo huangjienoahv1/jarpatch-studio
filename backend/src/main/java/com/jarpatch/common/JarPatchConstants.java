@@ -91,6 +91,7 @@ public final class JarPatchConstants {
     public static final String MESSAGE_FILE_CHANGED_EXTERNALLY = "文件已在其他位置发生变化，请重新打开后再保存";
     public static final String MESSAGE_FILE_ENCODING_UNSUPPORTED = "文件编码不受支持，请在项目设置或文件工具栏明确选择编码";
     public static final String MESSAGE_FILE_ENCODING_CONFLICT = "显式编码与文件 BOM 不一致，请选择与 BOM 相同的编码";
+    public static final String MESSAGE_JAVA_SOURCE_UTF8_ONLY = "Java 源码必须使用 UTF-8 编码保存，否则重新编译后中文字符串会乱码";
     public static final String MESSAGE_PROJECT_SETTING_ENCODING_INVALID = "项目默认编码仅支持 UTF-8、UTF-16LE、UTF-16BE、GBK 或 GB18030";
     public static final String MESSAGE_FILE_MIXED_LINE_ENDINGS = "文件包含混合换行格式，修改前请先统一换行格式";
     public static final String MESSAGE_UNSUPPORTED_PACKAGE = "仅支持 jar 和 war 文件";

@@ -165,6 +165,10 @@ public class FileContentService {
 
     /**
      * 使用打开文件时确认的编码校验原始哈希并原子保存真实修改。
+     * <p>
+     * Java 源码强制按 UTF-8 保存，与编译服务的 {@code -encoding UTF-8} 保持一致；
+     * 其他文本文件按原编码、BOM 和换行格式保真写回。
+     * </p>
      *
      * @param project      项目记录
      * @param relativePath 文件树相对路径
@@ -184,6 +188,12 @@ public class FileContentService {
         String selectedEncoding = encoding == null || encoding.isBlank()
                 ? projectSettingsService.defaultEncoding(project.getId())
                 : normalizeEncoding(encoding);
+        // 编译固定以 UTF-8 读取 sources 源码，Java 文件若按 GBK 等编码保存，重新编译后中文字符串会乱码，
+        // 因此在保存入口直接阻止非 UTF-8 的 Java 源码写盘。
+        FileKind kind = fileKindService.detect(path);
+        if (kind == FileKind.JAVA && !JarPatchConstants.UTF_8.equalsIgnoreCase(selectedEncoding)) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_JAVA_SOURCE_UTF8_ONLY);
+        }
         TextSnapshot original = readSnapshot(path, selectedEncoding, encoding != null && !encoding.isBlank());
         if (expectedHash == null || !expectedHash.equals(original.hash)) {
             throw new IllegalStateException(JarPatchConstants.MESSAGE_FILE_CHANGED_EXTERNALLY);
@@ -195,7 +205,6 @@ public class FileContentService {
         }
 
         atomicWrite(path, updatedBytes);
-        FileKind kind = fileKindService.detect(path);
         if (kind == FileKind.JAVA) {
             compiledArtifactRepository.clear(project.getId());
         }
