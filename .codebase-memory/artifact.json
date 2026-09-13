@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "b54368840af0becbf125efb1a563a2348a168314",
-    "indexed_at": "2026-09-13T13:08:32Z",
+    "commit": "5e17e80cd59f16d1598842a42a247d841c6897ed",
+    "indexed_at": "2026-09-13T13:36:56Z",
     "project": "C-code-mynew-jarpatch-studio",
-    "nodes": 3391,
-    "edges": 8561,
+    "nodes": 3392,
+    "edges": 8576,
     "original_size": 10420224,
-    "compressed_size": 1707290,
+    "compressed_size": 1711054,
     "compression_level": 3
 }
