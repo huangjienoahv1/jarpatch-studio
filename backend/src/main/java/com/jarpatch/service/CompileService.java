@@ -79,6 +79,7 @@ public class CompileService {
     private final ClockService clockService;
     private final CompileProcessRunner compileProcessRunner;
     private final CompileArtifactCommitter compileArtifactCommitter;
+    private final ProjectOperationLockService projectOperationLockService;
 
     /**
      * 创建严格编译服务。
@@ -92,6 +93,7 @@ public class CompileService {
      * @param clockService         时间服务
      * @param compileProcessRunner javac 子进程执行器
      * @param compileArtifactCommitter 编译产物提交与恢复服务
+     * @param projectOperationLockService 项目级长操作互斥锁服务
      */
     public CompileService(WorkspaceService workspaceService,
                           FileChangeRepository fileChangeRepository,
@@ -101,7 +103,8 @@ public class CompileService {
                           CompiledArtifactRepository compiledArtifactRepository,
                           ClockService clockService,
                           CompileProcessRunner compileProcessRunner,
-                          CompileArtifactCommitter compileArtifactCommitter) {
+                          CompileArtifactCommitter compileArtifactCommitter,
+                          ProjectOperationLockService projectOperationLockService) {
         this.workspaceService = workspaceService;
         this.fileChangeRepository = fileChangeRepository;
         this.taskService = taskService;
@@ -111,6 +114,7 @@ public class CompileService {
         this.clockService = clockService;
         this.compileProcessRunner = compileProcessRunner;
         this.compileArtifactCommitter = compileArtifactCommitter;
+        this.projectOperationLockService = projectOperationLockService;
     }
 
     /**
@@ -127,6 +131,9 @@ public class CompileService {
 
     /**
      * 编译已修改 Java 文件并以可回滚提交阶段统一写回。
+     * <p>
+     * 同一项目的编译和导出通过项目互斥锁串行执行，已有操作未结束时直接返回业务错误。
+     * </p>
      *
      * @param project 项目记录
      * @param taskId  预创建任务 ID，可为空
@@ -135,6 +142,20 @@ public class CompileService {
      * @throws InterruptedException javac 被中断时抛出
      */
     public OperationResult compile(ProjectRecord project, String taskId) throws IOException, InterruptedException {
+        return projectOperationLockService.runExclusive(project.getId(), () -> compileWithinLock(project, taskId));
+    }
+
+    /**
+     * 在项目互斥锁保护内执行编译流程，实际执行点覆盖定位 javac、分目标编译、备份与统一写回。
+     *
+     * @param project 项目记录
+     * @param taskId  预创建任务 ID，可为空
+     * @return 编译结果
+     * @throws IOException          文件读写失败时抛出
+     * @throws InterruptedException javac 被中断时抛出
+     */
+    private OperationResult compileWithinLock(ProjectRecord project, String taskId)
+            throws IOException, InterruptedException {
         TaskRecord task = taskService.prepare(taskId, project.getId(), TASK_TYPE_COMPILE, MESSAGE_COMPILE_START);
         Path compileRunDir = null;
         CompileArtifactCommitter.CompileCommit compileCommit = null;

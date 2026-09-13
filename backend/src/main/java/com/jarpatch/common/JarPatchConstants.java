@@ -70,6 +70,7 @@ public final class JarPatchConstants {
     public static final String MESSAGE_PROJECT_NOT_FOUND = "项目不存在";
     public static final String MESSAGE_TASK_NOT_FOUND = "任务不存在";
     public static final String MESSAGE_TASK_CANCELLED = "任务已取消";
+    public static final String MESSAGE_PROJECT_OPERATION_IN_PROGRESS = "当前项目已有编译或导出操作正在执行，请等待完成后再试";
     public static final String MESSAGE_TASK_TYPE_EMPTY = "任务类型不能为空";
     public static final String MESSAGE_TASK_INTERRUPTED = "后端进程异常中断，任务已自动标记为失败";
     public static final String MESSAGE_JDK_HOME_REQUIRED = "请输入 JDK 安装目录";

@@ -66,6 +66,7 @@ public class ExportService {
     private final ExportValidationService exportValidationService;
     private final ExportValidationRepository exportValidationRepository;
     private final ProjectSettingsService projectSettingsService;
+    private final ProjectOperationLockService projectOperationLockService;
 
     /**
      * 创建导出服务。
@@ -83,6 +84,7 @@ public class ExportService {
      * @param exportValidationService 导出结构校验服务
      * @param exportValidationRepository 导出校验仓储
      * @param projectSettingsService 项目设置服务
+     * @param projectOperationLockService 项目级长操作互斥锁服务
      */
     public ExportService(WorkspaceService workspaceService,
                          ArchiveService archiveService,
@@ -110,6 +112,7 @@ public class ExportService {
         this.exportValidationService = exportValidationService;
         this.exportValidationRepository = exportValidationRepository;
         this.projectSettingsService = projectSettingsService;
+        this.projectOperationLockService = projectOperationLockService;
     }
 
     /**
@@ -143,6 +146,9 @@ public class ExportService {
 
     /**
      * 按明确签名策略导出修改后的 Jar 或 War。
+     * <p>
+     * 同一项目的编译和导出通过项目互斥锁串行执行，已有操作未结束时直接返回业务错误。
+     * </p>
      *
      * @param project         项目记录
      * @param outputPath      用户指定输出路径，可为空
@@ -155,6 +161,24 @@ public class ExportService {
                                   String outputPath,
                                   String taskId,
                                   String signaturePolicy) throws IOException {
+        return projectOperationLockService.runExclusive(project.getId(),
+                () -> exportWithinLock(project, outputPath, taskId, signaturePolicy));
+    }
+
+    /**
+     * 在项目互斥锁保护内执行导出流程，实际执行点覆盖结构分析、打包、校验和原子发布。
+     *
+     * @param project         项目记录
+     * @param outputPath      用户指定输出路径，可为空
+     * @param taskId          预创建任务 ID，可为空
+     * @param signaturePolicy 签名策略码
+     * @return 导出结果
+     * @throws IOException 打包或分析失败时抛出
+     */
+    private OperationResult exportWithinLock(ProjectRecord project,
+                                             String outputPath,
+                                             String taskId,
+                                             String signaturePolicy) throws IOException {
         TaskRecord task = taskService.prepare(taskId, project.getId(), TASK_TYPE_EXPORT, MESSAGE_EXPORT_START);
         Path temporaryFile = null;
         try {
