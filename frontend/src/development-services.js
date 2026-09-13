@@ -6,6 +6,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const DEVELOPMENT_SETTINGS_FILE_NAME = 'development-settings.json';
+const DEVELOPMENT_SETTINGS_CORRUPTED_SUFFIX = '.corrupted';
 const LANGUAGE_SERVER_DATA_DIRECTORY = 'jdtls-workspaces';
 const LANGUAGE_SERVER_MINIMUM_JAVA_VERSION = 21;
 const LANGUAGE_SERVER_MAX_MESSAGE_BYTES = 10 * 1024 * 1024;
@@ -743,6 +744,10 @@ class DevelopmentServices {
 
   /**
    * 读取磁盘配置；文件不存在时返回明确的关闭状态。
+   * <p>
+   * 配置文件损坏时不再让设置读写入口持续失败：把损坏文件改名为 .corrupted 留档并在
+   * 主进程日志说明，然后按默认关闭状态恢复，用户可以在界面重新配置。
+   * </p>
    *
    * @returns {object} 完整内部配置
    */
@@ -751,8 +756,15 @@ class DevelopmentServices {
     if (!fs.existsSync(settingsPath)) {
       return { ...EMPTY_SETTINGS };
     }
-    const parsed = JSON.parse(fs.readFileSync(settingsPath, SETTINGS_TEXT_ENCODING));
-    return { ...EMPTY_SETTINGS, ...parsed };
+    try {
+      const parsed = JSON.parse(fs.readFileSync(settingsPath, SETTINGS_TEXT_ENCODING));
+      return { ...EMPTY_SETTINGS, ...parsed };
+    } catch (error) {
+      const corruptedPath = `${settingsPath}${DEVELOPMENT_SETTINGS_CORRUPTED_SUFFIX}`;
+      fs.renameSync(settingsPath, corruptedPath);
+      console.error(`开发能力配置文件解析失败，已留档到 ${corruptedPath}：${error.message}`);
+      return { ...EMPTY_SETTINGS };
+    }
   }
 
   /**
