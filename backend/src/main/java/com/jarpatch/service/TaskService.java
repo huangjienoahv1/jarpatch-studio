@@ -244,6 +244,28 @@ public class TaskService {
     }
 
     /**
+     * 把被项目互斥锁拒绝的长操作预创建任务标记为失败。
+     * <p>
+     * 锁拒绝发生在 prepare 之前，前端预创建的任务仍处于运行中；若不终结，任务会一直
+     * 悬挂为运行中并阻止该项目的工作区清理。仅当任务存在、属于当前项目且仍在运行时才
+     * 更新，避免改写其他任务或已终结任务的状态。
+     * </p>
+     *
+     * @param taskId    预创建任务 ID，可为空
+     * @param projectId 操作所属项目 ID
+     * @param message   失败原因
+     */
+    public void failRejectedTask(String taskId, String projectId, String message) {
+        if (taskId == null || taskId.isBlank()) {
+            return;
+        }
+        findById(taskId)
+                .filter(record -> TaskStatus.RUNNING.getCode().equals(record.getStatus()))
+                .filter(record -> record.getProjectId() == null || record.getProjectId().equals(projectId))
+                .ifPresent(record -> failed(record, message));
+    }
+
+    /**
      * 读取任务记录，不存在时抛出业务异常。
      *
      * @param taskId 任务 ID

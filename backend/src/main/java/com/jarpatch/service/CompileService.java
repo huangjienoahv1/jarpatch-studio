@@ -142,7 +142,16 @@ public class CompileService {
      * @throws InterruptedException javac 被中断时抛出
      */
     public OperationResult compile(ProjectRecord project, String taskId) throws IOException, InterruptedException {
-        return projectOperationLockService.runExclusive(project.getId(), () -> compileWithinLock(project, taskId));
+        try {
+            return projectOperationLockService.runExclusive(project.getId(), () -> compileWithinLock(project, taskId));
+        } catch (IllegalStateException exception) {
+            // 锁拒绝发生在 prepare 之前，前端预创建任务仍是运行中；只有锁拒绝需要在此终结任务，
+            // 操作内部的失败已在 compileWithinLock 的 catch 中标记，避免留下悬挂的运行中任务。
+            if (JarPatchConstants.MESSAGE_PROJECT_OPERATION_IN_PROGRESS.equals(exception.getMessage())) {
+                taskService.failRejectedTask(taskId, project.getId(), exception.getMessage());
+            }
+            throw exception;
+        }
     }
 
     /**

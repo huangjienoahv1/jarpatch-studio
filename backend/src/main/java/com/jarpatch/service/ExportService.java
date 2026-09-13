@@ -166,8 +166,17 @@ public class ExportService {
                                   String outputPath,
                                   String taskId,
                                   String signaturePolicy) throws IOException, InterruptedException {
-        return projectOperationLockService.runExclusive(project.getId(),
-                () -> exportWithinLock(project, outputPath, taskId, signaturePolicy));
+        try {
+            return projectOperationLockService.runExclusive(project.getId(),
+                    () -> exportWithinLock(project, outputPath, taskId, signaturePolicy));
+        } catch (IllegalStateException exception) {
+            // 锁拒绝发生在 prepare 之前，前端预创建任务仍是运行中；只有锁拒绝需要在此终结任务，
+            // 操作内部的失败已在 exportWithinLock 的 catch 中标记，避免留下悬挂的运行中任务。
+            if (JarPatchConstants.MESSAGE_PROJECT_OPERATION_IN_PROGRESS.equals(exception.getMessage())) {
+                taskService.failRejectedTask(taskId, project.getId(), exception.getMessage());
+            }
+            throw exception;
+        }
     }
 
     /**
