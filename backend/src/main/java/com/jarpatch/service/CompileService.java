@@ -41,6 +41,9 @@ public class CompileService {
     private static final String JAVAC_ARGUMENT_FILE_NAME = "javac-arguments.txt";
     private static final String JAVAC_ARGUMENT_FILE_PREFIX = "@";
     private static final String JAVAC_RELEASE_ARGUMENT = "--release";
+    // javac 诊断输出和参数文件读取都跟随 javac 自身 JVM 的默认编码；中文 Windows 的 JDK 17 默认 GBK，
+    // 会把 UTF-8 参数文件里的中文路径读错、把中文错误信息写乱，因此必须在命令行强制 UTF-8（-J 参数不能写进参数文件）。
+    private static final String JAVAC_FILE_ENCODING_ARGUMENT = "-J-Dfile.encoding=UTF-8";
     private static final String NESTED_JAR_SOURCE_PREFIX = JarPatchConstants.SOURCE_NESTED_JAR_DIR
             + JarPatchConstants.ZIP_SEPARATOR;
     private static final String NESTED_JAR_SOURCE_MARKER = "." + JarPatchConstants.JAR_EXTENSION
@@ -259,7 +262,8 @@ public class CompileService {
                                       int releaseVersion) throws IOException {
         Path argumentFile = compiledDir.resolve(JAVAC_ARGUMENT_FILE_NAME);
         writeArgumentFile(project, compiledDir, javaPaths, releaseVersion, argumentFile);
-        return List.of(javac.toString(), JAVAC_ARGUMENT_FILE_PREFIX + argumentFile);
+        return List.of(javac.toString(), JAVAC_FILE_ENCODING_ARGUMENT,
+                JAVAC_ARGUMENT_FILE_PREFIX + argumentFile);
     }
 
     /**
