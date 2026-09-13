@@ -38,6 +38,8 @@
 .settings-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 12px;
   min-height: 0;
   overflow: auto;
@@ -201,6 +203,8 @@
 
 .project-history-content {
   display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 14px;
   min-height: 0;
   overflow: auto;
@@ -235,6 +239,8 @@
 .product-settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 14px;
   overflow: auto;
 }
