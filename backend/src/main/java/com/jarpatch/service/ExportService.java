@@ -263,7 +263,11 @@ public class ExportService {
     }
 
     /**
-     * 校验导出目标不会覆盖输入原包或工作区原包。
+     * 校验导出目标不会覆盖输入原包、工作区原包，也不会写进工作区内部目录。
+     * <p>
+     * exports 目录是默认输出位置，允许写入；写进 extracted 等其他目录的导出包会被后续
+     * 编译 classpath 收录并被打进下一次导出包，因此必须拒绝。
+     * </p>
      *
      * @param project    项目记录
      * @param outputFile 规范化导出路径
@@ -272,10 +276,14 @@ public class ExportService {
     private void validateOutputPath(ProjectRecord project, Path outputFile) throws IOException {
         Path normalizedOutput = outputFile.toAbsolutePath().normalize();
         Path inputArchive = Paths.get(project.getOriginalPath()).toAbsolutePath().normalize();
-        Path workspaceOriginalDir = workspaceService.projectRoot(project)
-                .resolve(JarPatchConstants.WORKSPACE_ORIGINAL_DIR).toAbsolutePath().normalize();
+        Path projectRoot = workspaceService.projectRoot(project).toAbsolutePath().normalize();
+        Path workspaceOriginalDir = projectRoot.resolve(JarPatchConstants.WORKSPACE_ORIGINAL_DIR);
         if (sameFile(normalizedOutput, inputArchive) || normalizedOutput.startsWith(workspaceOriginalDir)) {
             throw new IllegalArgumentException(JarPatchConstants.MESSAGE_EXPORT_OVERWRITE_ORIGINAL);
+        }
+        Path exportsDir = workspaceService.exportDir(project);
+        if (normalizedOutput.startsWith(projectRoot) && !normalizedOutput.startsWith(exportsDir)) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_EXPORT_PATH_IN_WORKSPACE);
         }
     }
 

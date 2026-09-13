@@ -108,6 +108,7 @@ public final class JarPatchConstants {
     public static final String MESSAGE_ANALYSIS_HISTORY_CORRUPTED = "分析历史数据无法解析";
     public static final String MESSAGE_FILE_TOO_LARGE_TO_EDIT = "文件超过项目设置的可编辑大小限制";
     public static final String MESSAGE_EXPORT_OVERWRITE_ORIGINAL = "导出路径不能覆盖输入原包或工作区原包";
+    public static final String MESSAGE_EXPORT_PATH_IN_WORKSPACE = "导出路径不能位于项目工作区内部，请选择工作区以外的目录";
     public static final String MESSAGE_EXPORT_ATOMIC_MOVE_REQUIRED = "当前文件系统不支持原子发布导出文件，请选择同一文件系统内的其他目录";
     public static final String MESSAGE_WORKSPACE_ATOMIC_MOVE_REQUIRED = "工作区文件系统不支持原子提交，已停止本次操作";
     public static final String MESSAGE_WORKSPACE_IMPORT_STATE_INVALID = "工作区导入状态无效";
