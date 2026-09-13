@@ -363,11 +363,13 @@ public class ProjectController {
      * @param projectId 项目 ID
      * @param request   导出请求
      * @return 导出结果
-     * @throws IOException 导出失败时抛出
+     * @throws IOException          导出失败时抛出
+     * @throws InterruptedException 项目互斥锁执行链路被中断时抛出
      */
     @PostMapping("/{projectId}/export")
     public ApiResponse<OperationResult> export(@PathVariable("projectId") String projectId,
-                                               @RequestBody(required = false) ExportProjectRequest request) throws IOException {
+                                               @RequestBody(required = false) ExportProjectRequest request)
+            throws IOException, InterruptedException {
         ProjectRecord project = requireProject(projectId);
         String outputPath = request == null ? null : request.getOutputPath();
         String taskId = request == null ? null : request.getTaskId();

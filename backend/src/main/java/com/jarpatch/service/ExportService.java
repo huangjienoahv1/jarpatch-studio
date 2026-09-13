@@ -98,7 +98,8 @@ public class ExportService {
                          CompiledArtifactRepository compiledArtifactRepository,
                          ExportValidationService exportValidationService,
                          ExportValidationRepository exportValidationRepository,
-                         ProjectSettingsService projectSettingsService) {
+                         ProjectSettingsService projectSettingsService,
+                         ProjectOperationLockService projectOperationLockService) {
         this.workspaceService = workspaceService;
         this.archiveService = archiveService;
         this.fileChangeRepository = fileChangeRepository;
@@ -121,9 +122,10 @@ public class ExportService {
      * @param project    项目记录
      * @param outputPath 用户指定输出路径，可为空
      * @return 导出结果
-     * @throws IOException 打包失败时抛出
+     * @throws IOException          打包失败时抛出
+     * @throws InterruptedException 项目互斥锁执行链路被中断时抛出
      */
-    public OperationResult export(ProjectRecord project, String outputPath) throws IOException {
+    public OperationResult export(ProjectRecord project, String outputPath) throws IOException, InterruptedException {
         return export(project, outputPath, null);
     }
 
@@ -138,9 +140,11 @@ public class ExportService {
      * @param outputPath 用户指定输出路径，可为空
      * @param taskId     预创建任务 ID，可为空
      * @return 导出结果
-     * @throws IOException 打包失败时抛出
+     * @throws IOException          打包失败时抛出
+     * @throws InterruptedException 项目互斥锁执行链路被中断时抛出
      */
-    public OperationResult export(ProjectRecord project, String outputPath, String taskId) throws IOException {
+    public OperationResult export(ProjectRecord project, String outputPath, String taskId)
+            throws IOException, InterruptedException {
         return export(project, outputPath, taskId, null);
     }
 
@@ -155,12 +159,13 @@ public class ExportService {
      * @param taskId          预创建任务 ID，可为空
      * @param signaturePolicy 签名策略码
      * @return 导出结果
-     * @throws IOException 打包或分析失败时抛出
+     * @throws IOException          打包或分析失败时抛出
+     * @throws InterruptedException 项目互斥锁执行链路被中断时抛出
      */
     public OperationResult export(ProjectRecord project,
                                   String outputPath,
                                   String taskId,
-                                  String signaturePolicy) throws IOException {
+                                  String signaturePolicy) throws IOException, InterruptedException {
         return projectOperationLockService.runExclusive(project.getId(),
                 () -> exportWithinLock(project, outputPath, taskId, signaturePolicy));
     }
