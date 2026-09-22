@@ -24,6 +24,7 @@ import java.util.stream.Stream;
  * <p>
  * 分析接口调用该服务扫描 extracted 和 sources 目录，识别入口类、依赖、签名文件、
  * 嵌套 Jar、多版本目录和混淆迹象，并把分析任务进度写入 SQLite 与 WebSocket。
+ * 独立分析与保存、编译、导出、清理共享项目互斥边界，确保整个扫描期间工作区快照稳定。
  * </p>
  *
  * @author 黄杰
@@ -55,6 +56,7 @@ public class AnalysisService {
     private final TaskService taskService;
     private final AnalysisReportRepository analysisReportRepository;
     private final ClockService clockService;
+    private final ProjectOperationLockService projectOperationLockService;
 
     /**
      * 创建分析服务。
@@ -64,17 +66,20 @@ public class AnalysisService {
      * @param taskService          任务服务
      * @param analysisReportRepository 分析报告仓储
      * @param clockService         时间服务
+     * @param projectOperationLockService 项目操作互斥服务
      */
     public AnalysisService(WorkspaceService workspaceService,
                            FileChangeRepository fileChangeRepository,
                            TaskService taskService,
                            AnalysisReportRepository analysisReportRepository,
-                           ClockService clockService) {
+                           ClockService clockService,
+                           ProjectOperationLockService projectOperationLockService) {
         this.workspaceService = workspaceService;
         this.fileChangeRepository = fileChangeRepository;
         this.taskService = taskService;
         this.analysisReportRepository = analysisReportRepository;
         this.clockService = clockService;
+        this.projectOperationLockService = projectOperationLockService;
     }
 
     /**
@@ -101,6 +106,28 @@ public class AnalysisService {
      * @throws IOException 读取工作区失败时抛出
      */
     public AnalysisReport analyze(ProjectRecord project, String taskId) throws IOException {
+        try {
+            return projectOperationLockService.runExclusiveIo(project.getId(),
+                    () -> analyzeWithinLock(project, taskId));
+        } catch (IllegalStateException exception) {
+            // 锁拒绝发生在 prepare 之前，前端预创建任务仍是运行中；只有锁拒绝需要在此终结任务，
+            // 操作内部的失败已在 analyzeWithinLock 的 catch 中标记，避免留下悬挂的运行中任务。
+            if (JarPatchConstants.MESSAGE_PROJECT_OPERATION_IN_PROGRESS.equals(exception.getMessage())) {
+                taskService.failRejectedTask(taskId, project.getId(), exception.getMessage());
+            }
+            throw exception;
+        }
+    }
+
+    /**
+     * 在项目互斥锁内扫描工作区并持久化分析报告。
+     *
+     * @param project 项目记录
+     * @param taskId  预创建任务 ID，可为空
+     * @return 分析报告
+     * @throws IOException 读取工作区失败时抛出
+     */
+    private AnalysisReport analyzeWithinLock(ProjectRecord project, String taskId) throws IOException {
         TaskRecord task = taskService.prepare(taskId, project.getId(), TASK_TYPE_ANALYZE, MESSAGE_ANALYSIS_START);
         try {
             Path extractedDir = workspaceService.extractedDir(project);

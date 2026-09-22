@@ -33,6 +33,7 @@ public class WorkspaceCleanupService {
     private final TaskRepository taskRepository;
     private final WorkspaceService workspaceService;
     private final ClockService clockService;
+    private final ProjectOperationLockService projectOperationLockService;
     private final Map<String, CleanupAuthorization> authorizations = new ConcurrentHashMap<>();
 
     /**
@@ -42,15 +43,18 @@ public class WorkspaceCleanupService {
      * @param taskRepository    任务仓储
      * @param workspaceService  工作区服务
      * @param clockService      时间服务
+     * @param projectOperationLockService 项目操作互斥服务
      */
     public WorkspaceCleanupService(ProjectRepository projectRepository,
                                    TaskRepository taskRepository,
                                    WorkspaceService workspaceService,
-                                   ClockService clockService) {
+                                   ClockService clockService,
+                                   ProjectOperationLockService projectOperationLockService) {
         this.projectRepository = projectRepository;
         this.taskRepository = taskRepository;
         this.workspaceService = workspaceService;
         this.clockService = clockService;
+        this.projectOperationLockService = projectOperationLockService;
     }
 
     /**
@@ -93,6 +97,24 @@ public class WorkspaceCleanupService {
      * @throws IOException 删除工作区失败时抛出
      */
     public void clean(String projectId, String confirmationId) throws IOException {
+        projectOperationLockService.runExclusiveIo(projectId, () -> {
+            cleanWithinLock(projectId, confirmationId);
+            return null;
+        });
+    }
+
+    /**
+     * 在项目互斥锁内重新校验任务、授权和工作区快照后执行删除。
+     * <p>
+     * 校验与删除必须处于同一互斥边界，防止检查完成后又启动保存、分析、编译或导出，
+     * 导致正在使用的工作区被删除。
+     * </p>
+     *
+     * @param projectId      项目 ID
+     * @param confirmationId 预览返回的确认标识
+     * @throws IOException 删除工作区失败时抛出
+     */
+    private void cleanWithinLock(String projectId, String confirmationId) throws IOException {
         CleanupAuthorization authorization = authorizations.remove(confirmationId);
         ProjectRecord project = requireProject(projectId);
         ensureWorkspaceAvailable(project);

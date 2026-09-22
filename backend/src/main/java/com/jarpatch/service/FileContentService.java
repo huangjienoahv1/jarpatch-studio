@@ -61,6 +61,7 @@ public class FileContentService {
     private final ClockService clockService;
     private final CompiledArtifactRepository compiledArtifactRepository;
     private final ProjectSettingsService projectSettingsService;
+    private final ProjectOperationLockService projectOperationLockService;
 
     /**
      * 创建保真文件内容服务。
@@ -72,6 +73,7 @@ public class FileContentService {
      * @param clockService         时间服务
      * @param compiledArtifactRepository 编译产物仓储
      * @param projectSettingsService 项目设置服务
+     * @param projectOperationLockService 项目操作互斥服务
      */
     public FileContentService(WorkspaceService workspaceService,
                               FileKindService fileKindService,
@@ -79,7 +81,8 @@ public class FileContentService {
                               ProjectRepository projectRepository,
                               ClockService clockService,
                               CompiledArtifactRepository compiledArtifactRepository,
-                              ProjectSettingsService projectSettingsService) {
+                              ProjectSettingsService projectSettingsService,
+                              ProjectOperationLockService projectOperationLockService) {
         this.workspaceService = workspaceService;
         this.fileKindService = fileKindService;
         this.fileChangeRepository = fileChangeRepository;
@@ -87,6 +90,7 @@ public class FileContentService {
         this.clockService = clockService;
         this.compiledArtifactRepository = compiledArtifactRepository;
         this.projectSettingsService = projectSettingsService;
+        this.projectOperationLockService = projectOperationLockService;
     }
 
     /**
@@ -183,6 +187,30 @@ public class FileContentService {
                                 String content,
                                 String expectedHash,
                                 String encoding) throws IOException {
+        return projectOperationLockService.runExclusiveIo(project.getId(),
+                () -> saveWithinLock(project, relativePath, content, expectedHash, encoding));
+    }
+
+    /**
+     * 在项目互斥锁内完成哈希校验、原子写盘和修改记录更新。
+     * <p>
+     * 锁覆盖文件与 SQLite 记录的整个一致性边界，避免编译、导出或清理在保存中途读取到
+     * 已写盘但尚未完成记录更新的状态。
+     * </p>
+     *
+     * @param project      项目记录
+     * @param relativePath 文件树相对路径
+     * @param content      编辑器内容
+     * @param expectedHash 打开文件时的原始哈希
+     * @param encoding     打开文件时后端返回的编码，可为空
+     * @return 保存后的内容视图
+     * @throws IOException 写入失败时抛出
+     */
+    private FileContentView saveWithinLock(ProjectRecord project,
+                                           String relativePath,
+                                           String content,
+                                           String expectedHash,
+                                           String encoding) throws IOException {
         Path path = resolveEditablePath(project, relativePath);
         ensureWithinEditableLimit(project, Files.size(path));
         String selectedEncoding = encoding == null || encoding.isBlank()

@@ -85,9 +85,10 @@ public class ProjectInspectionService {
         archiveService.validateArchive(archiveFile);
         try (ZipFile zipFile = new ZipFile(archiveFile.toFile())) {
             PackageType packageType = detectPackageType(archiveFile, zipFile);
-            Set<String> pomModules = readPomModules(zipFile);
-            Set<String> applicationPackagePrefixes = findApplicationPackagePrefixes(zipFile, packageType);
-            List<NestedJarCandidate> candidates = findNestedJarCandidates(zipFile, packageType, pomModules, applicationPackagePrefixes);
+            ArchiveEntryIndex entryIndex = indexArchiveEntries(zipFile, packageType);
+            Set<String> pomModules = entryIndex.pomModules();
+            List<NestedJarCandidate> candidates = findNestedJarCandidates(zipFile,
+                    entryIndex.nestedJarEntries(), pomModules, entryIndex.applicationPackagePrefixes());
             ProjectImportInspection inspection = new ProjectImportInspection();
             inspection.setFilePath(archiveFile.toString());
             inspection.setPackageType(packageType.getCode());
@@ -131,21 +132,44 @@ public class ProjectInspectionService {
     }
 
     /**
-     * 读取包内 pom.xml 的模块名和 artifactId。
+     * 一次枚举收集预解析所需的 POM 模块、主 class 包名前缀和嵌套 Jar 条目。
+     * <p>
+     * 大包可能包含数十万条目，因此不为每类信息重复创建 {@code stream().toList()}；POM 内容
+     * 在命中条目时直接读取，嵌套 Jar 则只保留待后续检查的条目引用。
+     * </p>
      *
-     * @param zipFile Zip 文件
-     * @return pom.xml 中可用于匹配嵌套 Jar 的模块名集合
+     * @param zipFile     Zip 文件
+     * @param packageType 包类型
+     * @return 预解析条目索引
      * @throws IOException 读取 pom.xml 失败时抛出
      */
-    private Set<String> readPomModules(ZipFile zipFile) throws IOException {
-        Set<String> modules = new TreeSet<>();
-        for (ZipEntry entry : zipFile.stream().toList()) {
-            if (!entry.isDirectory() && entry.getName().endsWith(POM_FILE_NAME)) {
-                String content = readEntryAsString(zipFile, entry);
-                modules.addAll(readPomModuleValues(content));
+    private ArchiveEntryIndex indexArchiveEntries(ZipFile zipFile, PackageType packageType) throws IOException {
+        String classPrefix = resolveClassPrefix(packageType);
+        String libPrefix = resolveLibPrefix(packageType);
+        Set<String> pomModules = new TreeSet<>();
+        Set<String> applicationPackagePrefixes = new HashSet<>();
+        List<ZipEntry> nestedJarEntries = new ArrayList<>();
+        var entries = zipFile.entries();
+        while (entries.hasMoreElements()) {
+            ZipEntry entry = entries.nextElement();
+            if (entry.isDirectory()) {
+                continue;
+            }
+            String entryName = entry.getName();
+            if (entryName.endsWith(POM_FILE_NAME)) {
+                pomModules.addAll(readPomModuleValues(readEntryAsString(zipFile, entry)));
+            }
+            if (entryName.startsWith(classPrefix) && isNormalClassEntry(entryName)) {
+                String packagePrefix = resolvePackagePrefix(entryName.substring(classPrefix.length()));
+                if (!packagePrefix.isEmpty()) {
+                    applicationPackagePrefixes.add(packagePrefix);
+                }
+            }
+            if (!libPrefix.isEmpty() && entryName.startsWith(libPrefix) && entryName.endsWith(JAR_SUFFIX)) {
+                nestedJarEntries.add(entry);
             }
         }
-        return modules;
+        return new ArchiveEntryIndex(pomModules, applicationPackagePrefixes, nestedJarEntries);
     }
 
     /**
@@ -207,28 +231,6 @@ public class ProjectInspectionService {
     }
 
     /**
-     * 从主 class 条目推导应用包名前缀。
-     *
-     * @param zipFile     Zip 文件
-     * @param packageType 包类型
-     * @return 应用包名前缀集合
-     */
-    private Set<String> findApplicationPackagePrefixes(ZipFile zipFile, PackageType packageType) {
-        String classPrefix = resolveClassPrefix(packageType);
-        Set<String> prefixes = new HashSet<>();
-        for (ZipEntry entry : zipFile.stream().toList()) {
-            String entryName = entry.getName();
-            if (!entry.isDirectory() && entryName.startsWith(classPrefix) && isNormalClassEntry(entryName)) {
-                String packagePrefix = resolvePackagePrefix(entryName.substring(classPrefix.length()));
-                if (!packagePrefix.isEmpty()) {
-                    prefixes.add(packagePrefix);
-                }
-            }
-        }
-        return prefixes;
-    }
-
-    /**
      * 按包类型解析主 class 条目前缀。
      *
      * @param packageType 包类型
@@ -274,26 +276,19 @@ public class ProjectInspectionService {
      * 查找嵌套 Jar 候选项。
      *
      * @param zipFile                    Zip 文件
-     * @param packageType                包类型
+     * @param nestedJarEntries           单次预扫描收集的嵌套 Jar 条目
      * @param pomModules                 pom.xml 模块名集合
      * @param applicationPackagePrefixes 应用包名前缀集合
      * @return 候选项列表
      * @throws IOException 读取嵌套 Jar 失败时抛出
      */
     private List<NestedJarCandidate> findNestedJarCandidates(ZipFile zipFile,
-                                                             PackageType packageType,
+                                                             List<ZipEntry> nestedJarEntries,
                                                              Set<String> pomModules,
                                                              Set<String> applicationPackagePrefixes) throws IOException {
-        String libPrefix = resolveLibPrefix(packageType);
         List<NestedJarCandidate> candidates = new ArrayList<>();
-        if (libPrefix.isEmpty()) {
-            return candidates;
-        }
-        for (ZipEntry entry : zipFile.stream().toList()) {
-            String entryName = entry.getName();
-            if (!entry.isDirectory() && entryName.startsWith(libPrefix) && entryName.endsWith(JAR_SUFFIX)) {
-                candidates.add(buildCandidate(zipFile, entry, pomModules, applicationPackagePrefixes));
-            }
+        for (ZipEntry entry : nestedJarEntries) {
+            candidates.add(buildCandidate(zipFile, entry, pomModules, applicationPackagePrefixes));
         }
         candidates.sort((left, right) -> left.getName().compareToIgnoreCase(right.getName()));
         return candidates;
@@ -400,6 +395,18 @@ public class ProjectInspectionService {
             return REASON_PACKAGE_MATCH;
         }
         return REASON_MANUAL;
+    }
+
+    /**
+     * 单次外层 Zip 枚举形成的预解析索引。
+     *
+     * @param pomModules                pom.xml 模块名集合
+     * @param applicationPackagePrefixes 主 class 推导出的应用包名前缀
+     * @param nestedJarEntries           待检查的嵌套 Jar 条目
+     */
+    private record ArchiveEntryIndex(Set<String> pomModules,
+                                     Set<String> applicationPackagePrefixes,
+                                     List<ZipEntry> nestedJarEntries) {
     }
 
     /**
