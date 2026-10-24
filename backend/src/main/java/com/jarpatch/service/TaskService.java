@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 后台任务服务。
@@ -28,12 +29,20 @@ import java.util.UUID;
 @Transactional
 public class TaskService {
 
+    /** 取消状态缓存窗口（毫秒）；窗口内重复检查不再访问数据库。 */
+    private static final long CANCELLATION_CACHE_MILLIS = 300L;
+
     private final TaskRepository taskRepository;
     private final TaskLogRepository taskLogRepository;
     private final ClockService clockService;
     private final TaskLogBroadcaster broadcaster;
     private final OperationJournalRepository operationJournalRepository;
     private final ProjectRepository projectRepository;
+    /**
+     * 取消状态短缓存。导入、导出等长流程在字节复制循环内高频调用 isCancelled，
+     * 缓存把数据库查询节流到每个窗口最多一次，避免热循环独占唯一连接。
+     */
+    private final ConcurrentHashMap<String, CachedCancellation> cancellationCache = new ConcurrentHashMap<>();
 
     /**
      * 创建任务服务。
@@ -241,14 +250,29 @@ public class TaskService {
 
     /**
      * 判断任务是否已取消。
+     * <p>
+     * 长流程的取消检查回调在字节复制循环内被高频调用，本方法对同一个任务在
+     * {@link #CANCELLATION_CACHE_MILLIS} 窗口内直接返回缓存结果，把数据库查询节流到
+     * 每个窗口最多一次；取消动作因此最多延迟一个缓存窗口生效，不影响取消正确性。
+     * </p>
      *
      * @param taskId 任务 ID
      * @return 已取消时返回 true
      */
     public boolean isCancelled(String taskId) {
-        return findById(taskId)
+        if (taskId == null || taskId.isBlank()) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        CachedCancellation cached = cancellationCache.get(taskId);
+        if (cached != null && cached.expiresAtMillis() > now) {
+            return cached.cancelled();
+        }
+        boolean cancelled = findById(taskId)
                 .map(record -> TaskStatus.CANCELED.getCode().equals(record.getStatus()))
                 .orElse(false);
+        cancellationCache.put(taskId, new CachedCancellation(cancelled, now + CANCELLATION_CACHE_MILLIS));
+        return cancelled;
     }
 
     /**
@@ -308,6 +332,10 @@ public class TaskService {
         record.setProgress(progress);
         record.setMessage(message);
         record.setUpdatedAt(clockService.now());
+        if (status != TaskStatus.RUNNING) {
+            // 终态后清掉取消缓存条目，避免长期使用后残留已结束任务的缓存键。
+            cancellationCache.remove(record.getId());
+        }
         if (taskRepository.updateIfRunning(record) == 0) {
             TaskRecord latest = require(record.getId());
             copyState(record, latest);
@@ -365,5 +393,14 @@ public class TaskService {
         target.setProgress(source.getProgress());
         target.setMessage(source.getMessage());
         target.setUpdatedAt(source.getUpdatedAt());
+    }
+
+    /**
+     * 取消状态缓存条目：查询结果与过期时间戳。
+     *
+     * @param cancelled 查询时刻任务是否已取消
+     * @param expiresAtMillis 缓存过期时刻（System.currentTimeMillis 口径）
+     */
+    private record CachedCancellation(boolean cancelled, long expiresAtMillis) {
     }
 }

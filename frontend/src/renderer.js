@@ -152,6 +152,8 @@ const TREE_PANEL_EDITOR_ANALYSIS_OPEN_MIN_WIDTH = 520;
 const TREE_RESIZER_WIDTH = 8;
 const ANALYSIS_TOGGLE_WIDTH = 56;
 const ANALYSIS_PANEL_WIDTH = 330;
+const UNICODE_PREVIEW_REFRESH_DELAY_MS = 400;
+const LOG_OUTPUT_MAX_CHARS = 128 * 1024;
 const NUMBER_PARSE_RADIX = 10;
 const UNICODE_HEX_RADIX = 16;
 const UNICODE_ESCAPE_HEX_LENGTH = 4;
@@ -204,6 +206,8 @@ const state = {
   fileOpenRequestId: 0,
   documentSessionId: 0,
   editorRevision: 0,
+  savedEditorVersionId: 0,
+  unicodePreviewRefreshTimer: null,
   currentSavePromise: null,
   currentProject: null,
   currentFilePath: null,
@@ -358,13 +362,18 @@ function isTaskCanceledError(error) {
 
 /**
  * 判断当前编辑器内容是否尚未保存。
+ * <p>
+ * 用 Monaco 撤销栈版本号与保存基线比较，是 O(1) 判断；value 取值会整文拷贝，
+ * 不能放在每次按键都会执行的路径上。撤销/重做回到保存基线版本时数值相等，
+ * 与逐字比较的语义一致。
+ * </p>
  *
  * @return 存在未保存内容时返回 true
  */
 function isEditorDirty() {
   return Boolean(state.currentFilePath)
     && state.currentFileOriginalContent !== null
-    && elements.editor.value !== state.currentFileOriginalContent;
+    && elements.editor.alternativeVersionId !== state.savedEditorVersionId;
 }
 
 /**
@@ -387,7 +396,7 @@ function updateDirtyIndicator() {
   const kind = elements.activeFileKind.dataset.kind || '';
   elements.activeFileKind.textContent = dirty ? `${kind} · ${MESSAGE_UNSAVED_CHANGES}` : kind;
   elements.saveBtn.classList.toggle('busy', dirty);
-  updateUnicodePreviewButton();
+  scheduleUnicodePreviewButtonRefresh();
 }
 
 /**
@@ -494,6 +503,21 @@ function decodeChineseUnicodeEscapes(content) {
     index = slashEnd;
   }
   return { content: previewParts.join(''), convertedCount };
+}
+
+/**
+ * 输入路径上的 Unicode 预览按钮刷新按固定间隔合帧；全文转义检查随文件大小线性，
+ * 逐键执行会让大文件输入持续卡顿。打开文件、保存等一次性路径仍直接调用
+ * updateUnicodePreviewButton。
+ */
+function scheduleUnicodePreviewButtonRefresh() {
+  if (state.unicodePreviewRefreshTimer) {
+    return;
+  }
+  state.unicodePreviewRefreshTimer = setTimeout(() => {
+    state.unicodePreviewRefreshTimer = null;
+    updateUnicodePreviewButton();
+  }, UNICODE_PREVIEW_REFRESH_DELAY_MS);
 }
 
 /**
@@ -1541,6 +1565,7 @@ async function openFile(node, encoding = null) {
       language: window.jarPatchEditor.detectLanguage(node.path)
     });
     state.currentFileOriginalContent = elements.editor.value;
+    state.savedEditorVersionId = elements.editor.alternativeVersionId;
     state.currentFileHash = contentView.contentHash;
     state.currentFileEncoding = contentView.encoding;
     elements.fileEncodingSelect.value = contentView.encoding;
@@ -1721,7 +1746,8 @@ async function saveCurrentFile() {
     content: elements.editor.value,
     expectedHash: state.currentFileHash,
     encoding: state.currentFileEncoding,
-    editorRevision: state.editorRevision
+    editorRevision: state.editorRevision,
+    editorVersionId: elements.editor.alternativeVersionId
   };
   const saving = saveFileSnapshot(snapshot);
   state.currentSavePromise = saving;
@@ -1754,13 +1780,20 @@ async function saveFileSnapshot(snapshot) {
         && state.documentSessionId === snapshot.documentSessionId
         && state.currentFilePath === snapshot.path) {
       if (state.editorRevision === snapshot.editorRevision) {
-        elements.editor.value = contentView.content;
+        // 后端返回内容与编辑器一致时跳过整文写回，保留 undo 栈并避免整文重令牌化。
+        if (contentView.content !== elements.editor.value) {
+          elements.editor.value = contentView.content;
+        }
         state.currentFileOriginalContent = elements.editor.value;
+        // setValue 会推进模型版本号，保存基线必须读取写回后的版本。
+        state.savedEditorVersionId = elements.editor.alternativeVersionId;
         elements.editor.didSave();
       } else {
         // 后端仅规范化换行，保存基线沿用提交时编辑器的换行形式。
         const lineEnding = snapshot.content.includes('\r\n') ? '\r\n' : '\n';
         state.currentFileOriginalContent = contentView.content.replace(/\r\n|\r|\n/g, lineEnding);
+        // 保存期间已有新输入时，基线对齐提交时刻的编辑器版本，后续输入仍判为未保存。
+        state.savedEditorVersionId = snapshot.editorVersionId;
       }
       state.currentFileHash = contentView.contentHash;
       state.currentFileEncoding = contentView.encoding;
@@ -2374,8 +2407,13 @@ function notify(message, type = NOTICE_TYPE_INFO) {
 
 function appendLog(message) {
   const time = new Date().toLocaleTimeString(CHINA_LOCALE, LOG_TIME_FORMAT_OPTIONS);
-  elements.logOutput.textContent += `[${time}] ${message}\n`;
-  elements.logOutput.scrollTop = elements.logOutput.scrollHeight;
+  const output = elements.logOutput;
+  // 增量追加避免整段历史二次方拼接；超限后丢弃最早内容，防止长任务日志无界增长。
+  output.insertAdjacentText('beforeend', `[${time}] ${message}\n`);
+  if (output.textContent.length > LOG_OUTPUT_MAX_CHARS) {
+    output.textContent = output.textContent.slice(-LOG_OUTPUT_MAX_CHARS);
+  }
+  output.scrollTop = output.scrollHeight;
 }
 
 function formatProjectTime(value) {

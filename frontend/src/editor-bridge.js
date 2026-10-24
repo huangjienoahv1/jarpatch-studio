@@ -945,6 +945,14 @@ class MonacoEditorFacade {
     }
   }
 
+  /**
+   * 当前模型的撤销栈版本号；内容经撤销/重做回到基线版本时数值相等，
+   * 供渲染层做 O(1) 的未保存判断，避免每次按键全文拷贝比较。
+   */
+  get alternativeVersionId() {
+    return this.model ? this.model.getAlternativeVersionId() : 0;
+  }
+
   get disabled() {
     return this.readOnly;
   }

@@ -12,7 +12,10 @@ spring:
     name: jarpatch-studio-backend
   datasource:
     driver-class-name: org.sqlite.JDBC
-    url: jdbc:sqlite:${user.home}/.jarpatch-studio/jarpatch-studio.db
+    # busy_timeout 通过 URL 参数下发给连接池创建的每一个连接；连接池按生命周期重建
+    # 连接时不会重放 DatabaseInitializer 里的 PRAGMA，缺少该参数的连接遇到库级并发
+    # 会直接抛 SQLITE_BUSY 而不是等待。
+    url: jdbc:sqlite:${user.home}/.jarpatch-studio/jarpatch-studio.db?busy_timeout=5000
     hikari:
       maximum-pool-size: 1
       connection-init-sql: PRAGMA foreign_keys=ON

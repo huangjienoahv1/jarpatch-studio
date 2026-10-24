@@ -69,6 +69,9 @@ public class DatabaseInitializer {
         createDatabaseParent();
         jdbcTemplate.execute("PRAGMA foreign_keys = ON");
         jdbcTemplate.execute("PRAGMA busy_timeout = 5000");
+        // WAL 模式持久化在库文件中，首次启动切换后再次执行幂等；事务提交不再因
+        // journal 文件创建删除而与读操作互相阻塞。
+        jdbcTemplate.execute("PRAGMA journal_mode = WAL");
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS schema_migrations (" +
                 "version INTEGER PRIMARY KEY, " +
                 "name TEXT NOT NULL, " +
