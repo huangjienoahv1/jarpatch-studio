@@ -20,13 +20,63 @@ $RequiredEntries = @(
 $JavaProcessNames = @('java.exe', 'javaw.exe')
 $FullJarPath = [System.IO.Path]::GetFullPath($JarPath)
 $FullProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
+$BuildStampPath = "$FullJarPath.source.json"
 
 <#
 .SYNOPSIS
-检查后端 JAR 是否是包含应用入口和 CFR 依赖的 Spring Boot 可执行包。
+按稳定相对路径汇总 Maven 构建文件、后端源码和资源内容摘要，识别新增、修改和删除文件。
+.OUTPUTS
+System.String。所有构建输入组成的 SHA-256。
+#>
+function Get-BackendSourceFingerprint {
+    $SourceRoot = Join-Path $FullProjectRoot 'backend/src'
+    $Inputs = @(
+        (Join-Path $FullProjectRoot 'pom.xml'),
+        (Join-Path $FullProjectRoot 'backend/pom.xml')
+    ) + @(Get-ChildItem -LiteralPath $SourceRoot -Recurse -File | Select-Object -ExpandProperty FullName)
+    $SourceRows = foreach ($InputPath in ($Inputs | Sort-Object)) {
+        $RelativePath = [System.IO.Path]::GetRelativePath($FullProjectRoot, $InputPath).Replace('\', '/')
+        "$RelativePath`0$((Get-FileHash -LiteralPath $InputPath -Algorithm SHA256).Hash)"
+    }
+    $Digest = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $Bytes = [System.Text.Encoding]::UTF8.GetBytes(($SourceRows -join "`n"))
+        return [System.BitConverter]::ToString($Digest.ComputeHash($Bytes)).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $Digest.Dispose()
+    }
+}
+
+<#
+.SYNOPSIS
+记录已经完成且构建期间输入未变化的后端包与源码摘要；通过同目录临时文件更新记录。
+#>
+function Write-BackendBuildStamp {
+    param([Parameter(Mandatory)][string]$SourceFingerprint)
+    $Stamp = [ordered]@{
+        sourceSha256 = $SourceFingerprint
+        jarSha256 = (Get-FileHash -LiteralPath $FullJarPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $TemporaryStamp = "$BuildStampPath.$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [System.IO.File]::WriteAllText($TemporaryStamp, ($Stamp | ConvertTo-Json),
+            [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::Move($TemporaryStamp, $BuildStampPath, $true)
+    }
+    finally {
+        if (Test-Path -LiteralPath $TemporaryStamp) {
+            Remove-Item -LiteralPath $TemporaryStamp
+        }
+    }
+}
+
+<#
+.SYNOPSIS
+检查后端 JAR 结构及构建记录，确认包内容摘要和当前源码摘要一致。
 
 .OUTPUTS
-System.Boolean。所有必需条目存在时返回 true；文件缺失、损坏或条目不完整时返回 false。
+System.Boolean。结构完整、源码及包内容均与构建记录一致时返回 true。
 #>
 function Test-BackendPackage {
     if (!(Test-Path -LiteralPath $FullJarPath -PathType Leaf)) {
@@ -48,14 +98,24 @@ function Test-BackendPackage {
                 Write-Warning "后端包缺少必需条目：$($MissingEntries -join ', ')"
                 return $false
             }
-            return $true
         }
         finally {
             $Archive.Dispose()
         }
+        if (!(Test-Path -LiteralPath $BuildStampPath -PathType Leaf)) {
+            Write-Warning '后端包没有源码构建记录，需要重新构建一次。'
+            return $false
+        }
+        $Stamp = Get-Content -LiteralPath $BuildStampPath -Raw | ConvertFrom-Json
+        if ($Stamp.sourceSha256 -ne (Get-BackendSourceFingerprint) -or
+            $Stamp.jarSha256 -ne (Get-FileHash -LiteralPath $FullJarPath -Algorithm SHA256).Hash.ToLowerInvariant()) {
+            Write-Warning '后端源码或包内容与构建记录不一致，需要重新构建。'
+            return $false
+        }
+        return $true
     }
     catch {
-        Write-Warning "后端包无法作为 ZIP/JAR 读取：$($_.Exception.Message)"
+        Write-Warning "后端包或构建记录校验失败：$($_.Exception.Message)"
         return $false
     }
 }
@@ -93,6 +153,7 @@ function Build-BackendPackage {
         throw '后端包不完整，且未找到 Maven 命令 mvn.cmd，无法重新构建。'
     }
 
+    $SourceFingerprint = Get-BackendSourceFingerprint
     Stop-ExistingBackendProcesses
     Push-Location $FullProjectRoot
     try {
@@ -100,6 +161,10 @@ function Build-BackendPackage {
         if ($LASTEXITCODE -ne 0) {
             throw "后端重新构建失败，Maven 退出码：$LASTEXITCODE"
         }
+        if ($SourceFingerprint -ne (Get-BackendSourceFingerprint)) {
+            throw '后端构建期间源码发生变化，请重新启动构建。'
+        }
+        Write-BackendBuildStamp -SourceFingerprint $SourceFingerprint
     }
     finally {
         Pop-Location
@@ -114,7 +179,7 @@ if (!$BackendPackageValid) {
     else {
         Build-BackendPackage
         if (!(Test-BackendPackage)) {
-            throw '后端重新构建完成，但生成的 JAR 仍缺少应用入口或 CFR 依赖。'
+            throw '后端重新构建完成，但包结构或源码构建记录复验未通过。'
         }
     }
 }

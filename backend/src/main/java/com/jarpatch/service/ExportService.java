@@ -13,20 +13,26 @@ import com.jarpatch.repository.FileChangeRepository;
 import com.jarpatch.repository.CompiledArtifactRepository;
 import com.jarpatch.repository.ExportValidationRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 项目导出服务。
  * <p>
  * 导出入口来自 /api/projects/{id}/export，实际执行点是 ArchiveService.zipDirectory，结果写入
- * exports 目录或用户指定路径，同时写入 SQLite export_records 表。
+ * exports 目录或用户指定路径。最终发布、export_records 和任务成功状态在同一短事务内执行，
+ * 提交前备份已有目标，发生可捕获的文件或数据库异常时恢复目标；进程突然退出仍须人工核对备份。
  * </p>
  *
  * @author 黄杰
@@ -34,10 +40,15 @@ import java.util.List;
 @Service
 public class ExportService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(ExportService.class);
+
     private static final String TASK_TYPE_EXPORT = "EXPORT";
     private static final String PATCHED_SUFFIX = "-patched";
     private static final String TEMP_FILE_PREFIX = ".";
     private static final String TEMP_FILE_SUFFIX = ".tmp";
+    private static final String BACKUP_FILE_SUFFIX = ".backup";
+    private static final String MESSAGE_EXPORT_ROLLBACK_FAILED = "导出提交失败且目标恢复失败，请核对保留的备份: ";
+    private static final String MESSAGE_EXPORT_BACKUP_CLEANUP_FAILED = "导出目标已确定，但临时备份清理失败: {}";
     private static final String MESSAGE_EXPORT_START = "开始导出修改后的包";
     private static final String MESSAGE_EXPORT_PRECHECK = "执行导出前结构分析和基线差异确认";
     private static final String MESSAGE_EXPORT_PREPARE = "准备导出文件: ";
@@ -67,6 +78,7 @@ public class ExportService {
     private final ExportValidationRepository exportValidationRepository;
     private final ProjectSettingsService projectSettingsService;
     private final ProjectOperationLockService projectOperationLockService;
+    private final TransactionTemplate transactionTemplate;
 
     /**
      * 创建导出服务。
@@ -85,6 +97,7 @@ public class ExportService {
      * @param exportValidationRepository 导出校验仓储
      * @param projectSettingsService 项目设置服务
      * @param projectOperationLockService 项目级长操作互斥锁服务
+     * @param transactionTemplate 最终导出记录与任务状态事务模板
      */
     public ExportService(WorkspaceService workspaceService,
                          ArchiveService archiveService,
@@ -99,7 +112,8 @@ public class ExportService {
                          ExportValidationService exportValidationService,
                          ExportValidationRepository exportValidationRepository,
                          ProjectSettingsService projectSettingsService,
-                         ProjectOperationLockService projectOperationLockService) {
+                         ProjectOperationLockService projectOperationLockService,
+                         TransactionTemplate transactionTemplate) {
         this.workspaceService = workspaceService;
         this.archiveService = archiveService;
         this.fileChangeRepository = fileChangeRepository;
@@ -114,6 +128,7 @@ public class ExportService {
         this.exportValidationRepository = exportValidationRepository;
         this.projectSettingsService = projectSettingsService;
         this.projectOperationLockService = projectOperationLockService;
+        this.transactionTemplate = transactionTemplate;
     }
 
     /**
@@ -241,23 +256,15 @@ public class ExportService {
                         + String.join(JarPatchConstants.MESSAGE_LIST_SEPARATOR, validation.getErrors()));
             }
 
-            // 导出包完整写入后才以原子移动发布目标文件，失败或取消只删除本次临时文件。
-            taskService.running(task, PROGRESS_PUBLISH, MESSAGE_EXPORT_PUBLISH);
-            try {
-                Files.move(temporaryFile, outputFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException exception) {
-                throw new IOException(JarPatchConstants.MESSAGE_EXPORT_ATOMIC_MOVE_REQUIRED, exception);
-            }
+            publishExport(project, task, temporaryFile, outputFile);
             temporaryFile = null;
 
-            exportRecordRepository.insert(project.getId(), outputFile.toString(), clockService.now());
             OperationResult result = new OperationResult();
             result.setTaskId(task.getId());
             result.setOutputPath(outputFile.toString());
             result.setChangedFiles(changedFiles);
             result.setValidation(validation);
             result.setMessage(MESSAGE_EXPORT_COMPLETE);
-            taskService.success(task, MESSAGE_EXPORT_SUCCESS + outputFile);
             return result;
         } catch (IllegalStateException exception) {
             if (JarPatchConstants.MESSAGE_TASK_CANCELLED.equals(exception.getMessage())) {
@@ -274,6 +281,118 @@ public class ExportService {
             if (temporaryFile != null) {
                 Files.deleteIfExists(temporaryFile);
             }
+        }
+    }
+
+    /**
+     * 在短事务内发布导出目标并完成导出记录和任务成功状态；数据库写锁串行化最终提交与取消。
+     * <p>
+     * 压缩和校验已在事务外完成。事务内先条件更新任务，已取消时不会移动文件；更新取得
+     * SQLite 写锁后，取消不能插入文件发布与任务成功之间。任一可捕获异常或事务提交失败
+     * 都恢复原目标；恢复失败保留备份并抛出带路径的错误，不把失败描述为成功。
+     * </p>
+     *
+     * @param project 所属项目
+     * @param task 导出任务
+     * @param temporaryFile 已通过结构校验的临时包
+     * @param outputFile 用户确认的目标路径
+     * @throws IOException 备份、发布或恢复目标失败时抛出
+     */
+    private void publishExport(ProjectRecord project, TaskRecord task, Path temporaryFile, Path outputFile)
+            throws IOException {
+        Path backupFile = createPublicationBackup(outputFile);
+        AtomicBoolean published = new AtomicBoolean(false);
+        boolean completed = false;
+        boolean restored = false;
+        try {
+            transactionTemplate.executeWithoutResult(status -> {
+                taskService.running(task, PROGRESS_PUBLISH, MESSAGE_EXPORT_PUBLISH);
+                try {
+                    Files.move(temporaryFile, outputFile, StandardCopyOption.ATOMIC_MOVE,
+                            StandardCopyOption.REPLACE_EXISTING);
+                } catch (AtomicMoveNotSupportedException exception) {
+                    throw new UncheckedIOException(JarPatchConstants.MESSAGE_EXPORT_ATOMIC_MOVE_REQUIRED, exception);
+                } catch (IOException exception) {
+                    throw new UncheckedIOException(exception);
+                }
+                published.set(true);
+                exportRecordRepository.insert(project.getId(), outputFile.toString(), clockService.now());
+                taskService.success(task, MESSAGE_EXPORT_SUCCESS + outputFile);
+            });
+            completed = true;
+        } catch (RuntimeException exception) {
+            if (published.get()) {
+                try {
+                    restorePublication(outputFile, backupFile);
+                    restored = true;
+                } catch (IOException recoveryException) {
+                    IOException failure = new IOException(MESSAGE_EXPORT_ROLLBACK_FAILED + backupFile,
+                            recoveryException);
+                    failure.addSuppressed(exception);
+                    throw failure;
+                }
+            }
+            if (exception instanceof UncheckedIOException ioException) {
+                throw new IOException(ioException.getMessage(), ioException.getCause());
+            }
+            throw exception;
+        } finally {
+            if (completed || restored || !published.get()) {
+                cleanupPublicationBackup(backupFile);
+            }
+        }
+    }
+
+    /**
+     * 在目标目录备份已有导出文件，确保可原子恢复；目标不存在时不创建备份。
+     *
+     * @param outputFile 导出目标路径
+     * @return 完整备份文件，原目标不存在时返回 null
+     * @throws IOException 创建或复制备份失败时抛出
+     */
+    private Path createPublicationBackup(Path outputFile) throws IOException {
+        if (!Files.exists(outputFile)) {
+            return null;
+        }
+        Path backupFile = Files.createTempFile(outputFile.getParent(),
+                TEMP_FILE_PREFIX + outputFile.getFileName() + TEMP_FILE_PREFIX, BACKUP_FILE_SUFFIX);
+        try {
+            Files.copy(outputFile, backupFile, StandardCopyOption.REPLACE_EXISTING);
+            return backupFile;
+        } catch (IOException exception) {
+            cleanupPublicationBackup(backupFile);
+            throw exception;
+        }
+    }
+
+    /**
+     * 恢复提交前目标；原目标不存在时移除本次已发布文件。
+     *
+     * @param outputFile 本次导出目标
+     * @param backupFile 原目标备份，可为空
+     * @throws IOException 删除或原子恢复失败时抛出，备份由调用方保留
+     */
+    private void restorePublication(Path outputFile, Path backupFile) throws IOException {
+        if (backupFile == null) {
+            Files.deleteIfExists(outputFile);
+        } else {
+            Files.move(backupFile, outputFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    /**
+     * 在目标已成功提交或恢复后清理备份；清理失败记录路径，保留最终提交结果。
+     *
+     * @param backupFile 可安全删除的临时备份，可为空
+     */
+    private void cleanupPublicationBackup(Path backupFile) {
+        if (backupFile == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(backupFile);
+        } catch (IOException exception) {
+            LOGGER.warn(MESSAGE_EXPORT_BACKUP_CLEANUP_FAILED, backupFile, exception);
         }
     }
 

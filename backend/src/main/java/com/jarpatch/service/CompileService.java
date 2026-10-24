@@ -41,6 +41,7 @@ public class CompileService {
     private static final String JAVAC_ARGUMENT_FILE_NAME = "javac-arguments.txt";
     private static final String JAVAC_ARGUMENT_FILE_PREFIX = "@";
     private static final String JAVAC_RELEASE_ARGUMENT = "--release";
+    private static final String JAVAC_DISABLE_PROCESSING_ARGUMENT = "-proc:none";
     // javac 诊断输出和参数文件读取都跟随 javac 自身 JVM 的默认编码；中文 Windows 的 JDK 17 默认 GBK，
     // 会把 UTF-8 参数文件里的中文路径读错、把中文错误信息写乱，因此必须在命令行强制 UTF-8（-J 参数不能写进参数文件）。
     private static final String JAVAC_FILE_ENCODING_ARGUMENT = "-J-Dfile.encoding=UTF-8";
@@ -298,7 +299,7 @@ public class CompileService {
     }
 
     /**
-     * 写入包含 --release、classpath、输出目录和明确源码清单的 javac 参数文件。
+     * 写入禁用注解处理、包含 --release、classpath、输出目录和明确源码清单的 javac 参数文件。
      *
      * @param project        项目记录
      * @param compiledDir    编译输出目录
@@ -313,6 +314,8 @@ public class CompileService {
                                    int releaseVersion,
                                    Path argumentFile) throws IOException {
         List<String> arguments = new ArrayList<>();
+        // 原包依赖只用于解析类型，补丁编译不执行其中自动发现的注解处理器。
+        arguments.add(JAVAC_DISABLE_PROCESSING_ARGUMENT);
         arguments.add(JAVAC_RELEASE_ARGUMENT);
         arguments.add(String.valueOf(releaseVersion));
         arguments.add("-encoding");

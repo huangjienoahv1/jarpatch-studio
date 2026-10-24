@@ -228,14 +228,16 @@ public class ProjectController {
      * 删除左侧项目历史记录。
      * <p>
      * 入口是前端项目历史删除按钮，实际执行点在项目服务和仓储层，结果写入 SQLite；
-     * 该接口只删除历史记录和关联数据库记录，不删除用户本地工作区文件。
+     * 该接口持有项目操作锁并拒绝删除有运行中任务的项目，只删除历史和关联数据库记录，
+     * 不删除用户本地工作区文件。
      * </p>
      *
      * @param projectId 项目 ID
      * @return 删除结果文案
+     * @throws IOException 项目操作锁内的执行链路发生 I/O 异常时抛出
      */
     @DeleteMapping("/{projectId}")
-    public ApiResponse<String> deleteProjectHistory(@PathVariable("projectId") String projectId) {
+    public ApiResponse<String> deleteProjectHistory(@PathVariable("projectId") String projectId) throws IOException {
         projectService.deleteHistory(projectId);
         return ApiResponse.success(JarPatchConstants.MESSAGE_PROJECT_HISTORY_DELETED);
     }

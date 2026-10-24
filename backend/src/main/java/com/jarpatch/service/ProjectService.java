@@ -7,8 +7,9 @@ import com.jarpatch.model.ProjectRecord;
 import com.jarpatch.model.JavaVersionInfo;
 import com.jarpatch.model.TaskRecord;
 import com.jarpatch.repository.ProjectRepository;
+import com.jarpatch.repository.TaskRepository;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -44,6 +45,7 @@ public class ProjectService {
     private static final String MESSAGE_IMPORT_SUCCESS = "导入完成，项目记录已写入 SQLite";
     private static final String MESSAGE_IMPORT_FAILED = "导入失败";
     private static final String MESSAGE_IMPORT_CLEANUP_FAILED = "导入失败后的工作区清理失败";
+    private static final String MESSAGE_HISTORY_TASK_RUNNING = "项目仍有运行中任务，不能删除历史";
     private static final int PROGRESS_CREATE_STAGING = 10;
     private static final int PROGRESS_COPY_ORIGINAL = 20;
     private static final int PROGRESS_UNZIP = 40;
@@ -61,6 +63,9 @@ public class ProjectService {
     private final ClockService clockService;
     private final JavaVersionService javaVersionService;
     private final BaselineService baselineService;
+    private final ProjectOperationLockService projectOperationLockService;
+    private final TaskRepository taskRepository;
+    private final TransactionTemplate transactionTemplate;
 
     /**
      * 创建项目服务。
@@ -74,6 +79,9 @@ public class ProjectService {
      * @param clockService       时间服务
      * @param javaVersionService Java class 目标版本识别服务
      * @param baselineService    导入基线服务
+     * @param projectOperationLockService 项目操作互斥服务
+     * @param taskRepository     运行中任务仓储
+     * @param transactionTemplate 历史删除事务模板
      */
     public ProjectService(ProjectRepository projectRepository,
                           WorkspaceService workspaceService,
@@ -83,7 +91,10 @@ public class ProjectService {
                           TaskService taskService,
                           ClockService clockService,
                           JavaVersionService javaVersionService,
-                          BaselineService baselineService) {
+                          BaselineService baselineService,
+                          ProjectOperationLockService projectOperationLockService,
+                          TaskRepository taskRepository,
+                          TransactionTemplate transactionTemplate) {
         this.projectRepository = projectRepository;
         this.workspaceService = workspaceService;
         this.archiveService = archiveService;
@@ -93,6 +104,9 @@ public class ProjectService {
         this.clockService = clockService;
         this.javaVersionService = javaVersionService;
         this.baselineService = baselineService;
+        this.projectOperationLockService = projectOperationLockService;
+        this.taskRepository = taskRepository;
+        this.transactionTemplate = transactionTemplate;
     }
 
     /**
@@ -238,16 +252,25 @@ public class ProjectService {
      * 删除项目历史记录。
      * <p>
      * 入口在控制器 DELETE 项目接口，实际执行点是项目仓储，删除结果写入 SQLite；
-     * 为避免误删用户文件，本方法只删除历史和关联数据库记录，不删除工作区目录。
+     * 先持有与保存、编译、导出、清理相同的项目锁，再在事务内校验活动任务并删除历史，
+     * 避免删除操作穿过正在执行的工作区操作；不会删除工作区目录。
      * </p>
      *
      * @param projectId 项目 ID
+     * @throws IOException 项目操作锁内的执行链路发生 I/O 异常时抛出
      */
-    @Transactional
-    public void deleteHistory(String projectId) {
-        ProjectRecord project = findById(projectId)
-                .orElseThrow(() -> new IllegalArgumentException(JarPatchConstants.MESSAGE_PROJECT_NOT_FOUND));
-        projectRepository.deleteHistory(project.getId());
+    public void deleteHistory(String projectId) throws IOException {
+        projectOperationLockService.runExclusiveIo(projectId, () -> {
+            transactionTemplate.executeWithoutResult(status -> {
+                ProjectRecord project = findById(projectId)
+                        .orElseThrow(() -> new IllegalArgumentException(JarPatchConstants.MESSAGE_PROJECT_NOT_FOUND));
+                if (taskRepository.countRunningByProject(projectId) > 0) {
+                    throw new IllegalStateException(MESSAGE_HISTORY_TASK_RUNNING);
+                }
+                projectRepository.deleteHistory(project.getId());
+            });
+            return null;
+        });
     }
 
     /**

@@ -16,6 +16,10 @@ import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
@@ -24,7 +28,8 @@ import java.util.zip.ZipInputStream;
  * 导出临时包结构校验服务。
  * <p>
  * 导出服务在原子发布前调用本服务，依次校验压缩包可读性、Manifest、包布局、修改资源、
- * 已编译 class、Spring Boot 嵌套 Jar 存储方式和签名策略；任何错误都会阻止目标文件发布。
+ * 已编译 class、Spring Boot 嵌套 Jar 存储方式和签名策略；同一嵌套 Jar 的 class 批量校验，
+ * 每个嵌套 Jar 流只扫描一次，任何错误都会阻止目标文件发布。
  * </p>
  *
  * @author 黄杰
@@ -178,7 +183,7 @@ public class ExportValidationService {
     }
 
     /**
-     * 校验主包和嵌套 Jar 内的全部编译产物。
+     * 按嵌套 Jar 分组校验全部编译产物，并按原始清单顺序保留逐 class 的失败明细。
      *
      * @param project   项目记录
      * @param zipFile   导出包
@@ -190,14 +195,27 @@ public class ExportValidationService {
                                            ZipFile zipFile,
                                            List<String> artifacts,
                                            ExportValidationResult result) throws IOException {
+        Map<String, Boolean> validations = new LinkedHashMap<>();
+        Map<String, Set<String>> nestedArtifacts = new LinkedHashMap<>();
         for (String artifact : artifacts) {
             int separatorIndex = artifact.indexOf(NESTED_ARTIFACT_SEPARATOR);
-            boolean valid = separatorIndex < 0
-                    ? validateMainArtifact(project, zipFile, artifact)
-                    : validateNestedArtifact(project, zipFile,
-                    artifact.substring(0, separatorIndex),
-                    artifact.substring(separatorIndex + NESTED_ARTIFACT_SEPARATOR.length()));
-            if (!valid) {
+            if (separatorIndex < 0) {
+                validations.put(artifact, validateMainArtifact(project, zipFile, artifact));
+            } else {
+                nestedArtifacts.computeIfAbsent(artifact.substring(0, separatorIndex),
+                                key -> new LinkedHashSet<>())
+                        .add(artifact.substring(separatorIndex + NESTED_ARTIFACT_SEPARATOR.length()));
+            }
+        }
+        for (Map.Entry<String, Set<String>> group : nestedArtifacts.entrySet()) {
+            Set<String> matchingEntries = validateNestedArtifacts(project, zipFile, group.getKey(), group.getValue());
+            for (String innerEntry : group.getValue()) {
+                validations.put(group.getKey() + NESTED_ARTIFACT_SEPARATOR + innerEntry,
+                        matchingEntries.contains(innerEntry));
+            }
+        }
+        for (String artifact : artifacts) {
+            if (!Boolean.TRUE.equals(validations.get(artifact))) {
                 result.getErrors().add(ERROR_COMPILED_PREFIX
                         + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + artifact);
             }
@@ -224,58 +242,46 @@ public class ExportValidationService {
     }
 
     /**
-     * 校验导出包与当前 extracted 嵌套 Jar 内同一 class 内容一致。
+     * 一次扫描导出嵌套 Jar，并与只打开一次的当前嵌套 Jar 比较全部指定 class 的 SHA-256。
      *
      * @param project    项目记录
      * @param exported   导出包
      * @param outerEntry 嵌套 Jar 条目
-     * @param innerEntry 嵌套 class 条目
-     * @return 校验通过时返回 true
+     * @param innerEntries 本组需要校验的嵌套 class 条目
+     * @return 已找到且摘要一致的 class 条目集合；缺失条目不进入集合
      * @throws IOException 读取失败时抛出
      */
-    private boolean validateNestedArtifact(ProjectRecord project,
-                                           ZipFile exported,
-                                           String outerEntry,
-                                           String innerEntry) throws IOException {
+    private Set<String> validateNestedArtifacts(ProjectRecord project,
+                                                ZipFile exported,
+                                                String outerEntry,
+                                                Set<String> innerEntries) throws IOException {
+        Set<String> matchingEntries = new LinkedHashSet<>();
         ZipEntry exportedOuter = exported.getEntry(outerEntry);
         Path currentNestedJar = workspaceService.resolveExtracted(project, outerEntry);
         if (exportedOuter == null || !Files.isRegularFile(currentNestedJar)) {
-            return false;
+            return matchingEntries;
         }
-        byte[] exportedDigest;
-        try (InputStream inputStream = exported.getInputStream(exportedOuter)) {
-            exportedDigest = digestNestedEntry(inputStream, innerEntry);
-        }
-        try (ZipFile currentZip = new ZipFile(currentNestedJar.toFile())) {
-            ZipEntry currentEntry = currentZip.getEntry(innerEntry);
-            if (currentEntry == null || exportedDigest == null) {
-                return false;
-            }
-            try (InputStream inputStream = currentZip.getInputStream(currentEntry)) {
-                return Arrays.equals(exportedDigest, digest(inputStream));
-            }
-        }
-    }
-
-    /**
-     * 从嵌套 Jar 流中查找并计算指定条目摘要。
-     *
-     * @param nestedJarStream 嵌套 Jar 输入流
-     * @param entryName       目标条目
-     * @return SHA-256；不存在时返回 null
-     * @throws IOException 读取失败时抛出
-     */
-    private byte[] digestNestedEntry(InputStream nestedJarStream, String entryName) throws IOException {
-        try (ZipInputStream inputStream = new ZipInputStream(new BufferedInputStream(nestedJarStream))) {
+        Set<String> remaining = new LinkedHashSet<>(innerEntries);
+        try (ZipFile currentZip = new ZipFile(currentNestedJar.toFile());
+             ZipInputStream inputStream = new ZipInputStream(
+                     new BufferedInputStream(exported.getInputStream(exportedOuter)))) {
             ZipEntry entry;
-            while ((entry = inputStream.getNextEntry()) != null) {
-                if (!entry.isDirectory() && entryName.equals(entry.getName())) {
-                    return digest(inputStream);
+            while (!remaining.isEmpty() && (entry = inputStream.getNextEntry()) != null) {
+                if (!entry.isDirectory() && remaining.remove(entry.getName())) {
+                    ZipEntry currentEntry = currentZip.getEntry(entry.getName());
+                    if (currentEntry != null && !currentEntry.isDirectory()) {
+                        byte[] exportedDigest = digest(inputStream);
+                        try (InputStream currentInput = currentZip.getInputStream(currentEntry)) {
+                            if (Arrays.equals(exportedDigest, digest(currentInput))) {
+                                matchingEntries.add(entry.getName());
+                            }
+                        }
+                    }
                 }
                 inputStream.closeEntry();
             }
         }
-        return null;
+        return matchingEntries;
     }
 
     /**

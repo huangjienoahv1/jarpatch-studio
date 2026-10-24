@@ -7,6 +7,7 @@ import com.jarpatch.model.TaskLogRecord;
 import com.jarpatch.repository.TaskLogRepository;
 import com.jarpatch.repository.OperationJournalRepository;
 import com.jarpatch.repository.TaskRepository;
+import com.jarpatch.repository.ProjectRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +33,7 @@ public class TaskService {
     private final ClockService clockService;
     private final TaskLogBroadcaster broadcaster;
     private final OperationJournalRepository operationJournalRepository;
+    private final ProjectRepository projectRepository;
 
     /**
      * 创建任务服务。
@@ -41,21 +43,24 @@ public class TaskService {
      * @param clockService      时间服务
      * @param broadcaster       WebSocket 日志广播服务
      * @param operationJournalRepository 操作时间线仓储
+     * @param projectRepository 创建项目任务时校验归属的项目仓储
      */
     public TaskService(TaskRepository taskRepository,
                        TaskLogRepository taskLogRepository,
                        ClockService clockService,
                        TaskLogBroadcaster broadcaster,
-                       OperationJournalRepository operationJournalRepository) {
+                       OperationJournalRepository operationJournalRepository,
+                       ProjectRepository projectRepository) {
         this.taskRepository = taskRepository;
         this.taskLogRepository = taskLogRepository;
         this.clockService = clockService;
         this.broadcaster = broadcaster;
         this.operationJournalRepository = operationJournalRepository;
+        this.projectRepository = projectRepository;
     }
 
     /**
-     * 创建运行中的任务。
+     * 在事务内校验项目仍存在后创建运行中任务，避免历史删除后写入孤立任务。
      *
      * @param projectId 项目 ID，可为空
      * @param taskType  任务类型
@@ -63,6 +68,9 @@ public class TaskService {
      * @return 任务记录
      */
     public TaskRecord create(String projectId, String taskType, String message) {
+        if (projectId != null && !projectId.isBlank() && projectRepository.findById(projectId).isEmpty()) {
+            throw new IllegalArgumentException(JarPatchConstants.MESSAGE_PROJECT_NOT_FOUND);
+        }
         String now = clockService.now();
         TaskRecord record = new TaskRecord();
         record.setId(UUID.randomUUID().toString());

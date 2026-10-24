@@ -196,7 +196,15 @@ const TASK_LABEL_MAP = {
   EXPORT: MESSAGE_TASK_LABEL_EXPORT
 };
 
+const TASK_STATUS_CANCELED = 'CANCELED';
+const MESSAGE_SAVE_IN_PROGRESS = '文件正在保存，请稍后再保存后续修改';
+
 const state = {
+  projectSessionId: 0,
+  fileOpenRequestId: 0,
+  documentSessionId: 0,
+  editorRevision: 0,
+  currentSavePromise: null,
   currentProject: null,
   currentFilePath: null,
   currentFileHash: null,
@@ -755,22 +763,33 @@ async function executeTaskOperation(taskType, projectId, message, requestRunner)
  * 取消当前执行中的任务。
  */
 async function cancelCurrentTask() {
-  if (!state.currentTask) {
+  if (!state.currentTask || state.currentTaskCancelRequested) {
     return;
   }
   const task = state.currentTask;
+  const controller = state.currentTaskAbortController;
   state.currentTaskCancelRequested = true;
-  updateTaskPanel(`${getTaskLabel(task.taskType)} · ${MESSAGE_TASK_PANEL_CANCELED}`, MESSAGE_TASK_CANCELING, true);
-  elements.cancelTaskBtn.disabled = true;
-  if (state.currentTaskAbortController) {
-    state.currentTaskAbortController.abort();
-  }
+  updateTaskPanel(`${getTaskLabel(task.taskType)} · ${MESSAGE_TASK_PANEL_RUNNING}`, MESSAGE_TASK_CANCELING, true);
   try {
-    await api(`/api/tasks/${task.id}/cancel`, { method: 'POST' });
+    const latest = await api(`/api/tasks/${task.id}/cancel`, { method: 'POST' });
+    if (!state.currentTask || state.currentTask.id !== task.id) {
+      return;
+    }
+    if (latest.status === TASK_STATUS_CANCELED) {
+      if (controller) {
+        controller.abort();
+      }
+    } else {
+      // 最终提交先于取消完成时保留业务响应，由实际结果结束会话。
+      state.currentTaskCancelRequested = false;
+      updateTaskPanel(`${getTaskLabel(task.taskType)} · ${MESSAGE_TASK_PANEL_RUNNING}`, latest.message, true);
+    }
   } catch (error) {
-    state.currentTaskCancelRequested = false;
-    updateTaskPanel(`${getTaskLabel(task.taskType)} · ${MESSAGE_TASK_PANEL_RUNNING}`, `${MESSAGE_TASK_CANCEL_FAILED}：${error.message}`, true);
-    notify(`${MESSAGE_TASK_CANCEL_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+    if (state.currentTask && state.currentTask.id === task.id) {
+      state.currentTaskCancelRequested = false;
+      updateTaskPanel(`${getTaskLabel(task.taskType)} · ${MESSAGE_TASK_PANEL_RUNNING}`, `${MESSAGE_TASK_CANCEL_FAILED}：${error.message}`, true);
+      notify(`${MESSAGE_TASK_CANCEL_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+    }
   }
 }
 
@@ -1270,6 +1289,9 @@ async function selectProject(project) {
   if (project.workspaceCleanedAt || !confirmDiscardUnsavedChanges()) {
     return;
   }
+  const projectSessionId = ++state.projectSessionId;
+  state.fileOpenRequestId++;
+  state.documentSessionId++;
   state.currentProject = project;
   state.projectSettings = null;
   state.diffReport = null;
@@ -1292,8 +1314,13 @@ async function selectProject(project) {
   elements.activeFileKind.textContent = '请选择左侧可编辑文件';
   resetAnalysisPanel();
   await loadTree(project.id);
+  if (state.projectSessionId !== projectSessionId) {
+    return;
+  }
   await loadProjects();
-  await startLanguageIntelligence(project);
+  if (state.projectSessionId === projectSessionId) {
+    await startLanguageIntelligence(project);
+  }
 }
 
 async function deleteProjectHistory(project) {
@@ -1329,6 +1356,9 @@ async function deleteProjectHistory(project) {
 }
 
 function resetCurrentProject() {
+  state.projectSessionId++;
+  state.fileOpenRequestId++;
+  state.documentSessionId++;
   state.currentProject = null;
   state.projectSettings = null;
   state.diffReport = null;
@@ -1363,14 +1393,20 @@ function resetCurrentProject() {
 }
 
 async function loadTree(projectId) {
+  const projectSessionId = state.projectSessionId;
   try {
     elements.fileTree.classList.add('empty');
     elements.fileTree.textContent = MESSAGE_FILE_TREE_LOADING;
     const tree = await api(`/api/projects/${projectId}/tree`);
+    if (state.projectSessionId !== projectSessionId || !state.currentProject || state.currentProject.id !== projectId) {
+      return;
+    }
     state.currentTree = tree;
     renderCurrentTree(false);
   } catch (error) {
-    elements.fileTree.innerHTML = `<div class="empty">文件树加载失败：${escapeHtml(error.message)}</div>`;
+    if (state.projectSessionId === projectSessionId) {
+      elements.fileTree.innerHTML = `<div class="empty">文件树加载失败：${escapeHtml(error.message)}</div>`;
+    }
   }
 }
 
@@ -1412,6 +1448,7 @@ function renderTreeNode(node) {
 }
 
 async function handleTreeClick(node) {
+  const projectSessionId = state.projectSessionId;
   if (node.kind === 'DIRECTORY' && node.hasChildren) {
     if (state.expandedPaths.has(node.path)) {
       state.expandedPaths.delete(node.path);
@@ -1419,6 +1456,9 @@ async function handleTreeClick(node) {
       try {
         if (!node.childrenLoaded) {
           await loadTreeChildren(node);
+          if (state.projectSessionId !== projectSessionId) {
+            return;
+          }
         }
         state.expandedPaths.add(node.path);
       } catch (error) {
@@ -1453,7 +1493,11 @@ async function loadTreeChildren(node) {
   if (!state.currentProject || node.childrenLoaded) {
     return;
   }
+  const projectSessionId = state.projectSessionId;
   const children = await api(`/api/projects/${state.currentProject.id}/tree/children?path=${encodeURIComponent(node.path)}`);
+  if (state.projectSessionId !== projectSessionId) {
+    return;
+  }
   node.children = children;
   node.childrenLoaded = true;
   node.hasChildren = children.length > 0;
@@ -1466,13 +1510,30 @@ async function openFile(node, encoding = null) {
   if (node.path !== state.currentFilePath && !confirmDiscardUnsavedChanges()) {
     return;
   }
+  const project = state.currentProject;
+  const projectSessionId = state.projectSessionId;
+  const requestId = ++state.fileOpenRequestId;
+  const editorRevision = state.editorRevision;
+  const isCurrentRequest = () => state.projectSessionId === projectSessionId
+    && state.fileOpenRequestId === requestId;
   try {
+    if (state.currentSavePromise) {
+      await state.currentSavePromise;
+    }
+    if (!isCurrentRequest()) {
+      return;
+    }
     const encodingQuery = encoding ? `&encoding=${encodeURIComponent(encoding)}` : '';
-    const contentView = await api(`/api/projects/${state.currentProject.id}/files/content?path=${encodeURIComponent(node.path)}${encodingQuery}`);
+    const contentView = await api(`/api/projects/${project.id}/files/content?path=${encodeURIComponent(node.path)}${encodingQuery}`);
+    if (!isCurrentRequest()
+        || (state.editorRevision !== editorRevision && !confirmDiscardUnsavedChanges())) {
+      return;
+    }
     closeUnicodePreview();
+    state.documentSessionId++;
     state.currentFilePath = node.path;
     elements.editor.disabled = false;
-    const normalizedWorkspacePath = state.currentProject.workspacePath.replace(/[\\/]$/, '');
+    const normalizedWorkspacePath = project.workspacePath.replace(/[\\/]$/, '');
     elements.editor.openDocument({
       content: contentView.content,
       path: node.path,
@@ -1484,7 +1545,6 @@ async function openFile(node, encoding = null) {
     state.currentFileEncoding = contentView.encoding;
     elements.fileEncodingSelect.value = contentView.encoding;
     elements.fileEncodingSelect.disabled = false;
-    updateDirtyIndicator();
     elements.saveBtn.disabled = false;
     elements.activeFileName.textContent = node.path;
     elements.activeFileKind.textContent = node.kind;
@@ -1492,7 +1552,9 @@ async function openFile(node, encoding = null) {
     updateDirtyIndicator();
     updateEditorActionButtons();
   } catch (error) {
-    notify(`${MESSAGE_FILE_OPEN_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+    if (isCurrentRequest()) {
+      notify(`${MESSAGE_FILE_OPEN_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+    }
   }
 }
 
@@ -1643,31 +1705,72 @@ async function saveCurrentFile() {
   if (!state.currentProject || !state.currentFilePath) {
     return;
   }
+  if (state.currentSavePromise) {
+    notify(MESSAGE_SAVE_IN_PROGRESS, NOTICE_TYPE_INFO);
+    return state.currentSavePromise;
+  }
   if (elements.editor.value === state.currentFileOriginalContent) {
     notify(MESSAGE_SAVE_UNCHANGED, NOTICE_TYPE_INFO);
     return;
   }
+  const snapshot = {
+    projectId: state.currentProject.id,
+    projectSessionId: state.projectSessionId,
+    documentSessionId: state.documentSessionId,
+    path: state.currentFilePath,
+    content: elements.editor.value,
+    expectedHash: state.currentFileHash,
+    encoding: state.currentFileEncoding,
+    editorRevision: state.editorRevision
+  };
+  const saving = saveFileSnapshot(snapshot);
+  state.currentSavePromise = saving;
   try {
-    const contentView = await api(`/api/projects/${state.currentProject.id}/files/content`, {
+    await saving;
+  } finally {
+    if (state.currentSavePromise === saving) {
+      state.currentSavePromise = null;
+    }
+  }
+}
+
+/**
+ * 保存明确的文档快照；只更新同一文档的保存基线，保留请求期间的新输入。
+ *
+ * @param snapshot 保存时的项目、文档会话、编辑版本和内容
+ */
+async function saveFileSnapshot(snapshot) {
+  try {
+    const contentView = await api(`/api/projects/${snapshot.projectId}/files/content`, {
       method: 'PUT',
       body: JSON.stringify({
-        path: state.currentFilePath,
-        content: elements.editor.value,
-        expectedHash: state.currentFileHash,
-        encoding: state.currentFileEncoding
+        path: snapshot.path,
+        content: snapshot.content,
+        expectedHash: snapshot.expectedHash,
+        encoding: snapshot.encoding
       })
     });
-    elements.editor.value = contentView.content;
-    if (state.unicodePreviewOpen) {
-      elements.unicodePreview.value = decodeChineseUnicodeEscapes(elements.editor.value).content;
+    if (state.projectSessionId === snapshot.projectSessionId
+        && state.documentSessionId === snapshot.documentSessionId
+        && state.currentFilePath === snapshot.path) {
+      if (state.editorRevision === snapshot.editorRevision) {
+        elements.editor.value = contentView.content;
+        state.currentFileOriginalContent = elements.editor.value;
+        elements.editor.didSave();
+      } else {
+        // 后端仅规范化换行，保存基线沿用提交时编辑器的换行形式。
+        const lineEnding = snapshot.content.includes('\r\n') ? '\r\n' : '\n';
+        state.currentFileOriginalContent = contentView.content.replace(/\r\n|\r|\n/g, lineEnding);
+      }
+      state.currentFileHash = contentView.contentHash;
+      state.currentFileEncoding = contentView.encoding;
+      elements.fileEncodingSelect.value = contentView.encoding;
+      if (state.unicodePreviewOpen) {
+        elements.unicodePreview.value = decodeChineseUnicodeEscapes(elements.editor.value).content;
+      }
+      updateDirtyIndicator();
     }
-    state.currentFileOriginalContent = elements.editor.value;
-    state.currentFileHash = contentView.contentHash;
-    state.currentFileEncoding = contentView.encoding;
-    elements.fileEncodingSelect.value = contentView.encoding;
-    updateDirtyIndicator();
-    elements.editor.didSave();
-    notify(`${MESSAGE_SAVE_SUCCESS}：${state.currentFilePath}`, NOTICE_TYPE_SUCCESS);
+    notify(`${MESSAGE_SAVE_SUCCESS}：${snapshot.path}`, NOTICE_TYPE_SUCCESS);
   } catch (error) {
     notify(`${MESSAGE_SAVE_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
   }
@@ -2385,7 +2488,10 @@ elements.aiAssistantDialog.addEventListener('click', (event) => {
     closeAiAssistantDialog();
   }
 });
-elements.editor.addEventListener('input', updateDirtyIndicator);
+elements.editor.addEventListener('input', () => {
+  state.editorRevision++;
+  updateDirtyIndicator();
+});
 document.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault();

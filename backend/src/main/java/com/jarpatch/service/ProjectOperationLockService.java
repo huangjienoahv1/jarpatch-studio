@@ -1,6 +1,7 @@
 package com.jarpatch.service;
 
 import com.jarpatch.common.JarPatchConstants;
+import com.jarpatch.repository.ProjectRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -10,7 +11,7 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * 项目级操作互斥锁服务。
  * <p>
- * 文件保存、结构分析、编译、导出和工作区清理都依赖同一份项目工作区；这些操作并发执行会导致
+ * 文件保存、结构分析、编译、导出、历史删除和工作区清理都依赖同一份项目工作区；这些操作并发执行会导致
  * 分析快照不一致、备份与恢复交错，甚至在文件写入期间删除工作区。该服务按项目 ID 提供非阻塞互斥：
  * 拿不到锁立即抛出业务异常，让前端提示"操作执行中"，而不是排队堆积线程。
  * </p>
@@ -21,6 +22,16 @@ import java.util.concurrent.locks.ReentrantLock;
 public class ProjectOperationLockService {
 
     private final ConcurrentHashMap<String, ReentrantLock> locks = new ConcurrentHashMap<>();
+    private final ProjectRepository projectRepository;
+
+    /**
+     * 创建项目操作锁服务，持锁后重新确认项目仍存在，避免使用删除前读取的旧记录。
+     *
+     * @param projectRepository 项目记录仓储
+     */
+    public ProjectOperationLockService(ProjectRepository projectRepository) {
+        this.projectRepository = projectRepository;
+    }
 
     /**
      * 在项目互斥锁保护下执行长操作；同一项目已有操作未结束时直接失败。
@@ -67,7 +78,7 @@ public class ProjectOperationLockService {
     }
 
     /**
-     * 非阻塞获取指定项目的互斥锁。
+     * 非阻塞获取项目锁并重新确认项目存在；校验失败时立即释放锁。
      *
      * @param projectId 项目 ID
      * @return 已成功持有的项目锁
@@ -78,7 +89,15 @@ public class ProjectOperationLockService {
         if (!lock.tryLock()) {
             throw new IllegalStateException(JarPatchConstants.MESSAGE_PROJECT_OPERATION_IN_PROGRESS);
         }
-        return lock;
+        try {
+            if (projectRepository.findById(projectId).isEmpty()) {
+                throw new IllegalArgumentException(JarPatchConstants.MESSAGE_PROJECT_NOT_FOUND);
+            }
+            return lock;
+        } catch (RuntimeException exception) {
+            lock.unlock();
+            throw exception;
+        }
     }
 
     /**
