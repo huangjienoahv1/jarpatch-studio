@@ -1,6 +1,7 @@
 param(
     [string]$JdkHome = $env:JAVA_HOME,
     [switch]$BundleJdk17,
+    [switch]$Windows7,
     [switch]$RequireSigning,
     [string]$CertificateThumbprint = $env:JARPATCH_WINDOWS_CERT_THUMBPRINT,
     [string]$TimestampUrl = $env:JARPATCH_WINDOWS_TIMESTAMP_URL
@@ -22,6 +23,12 @@ $FrontendDistRoot = Join-Path $FrontendRoot 'dist'
 $ReleaseRoot = Join-Path $ProjectRoot 'release\windows'
 $RootPackage = Get-Content -LiteralPath (Join-Path $ProjectRoot 'package.json') -Raw | ConvertFrom-Json
 $BuildEntry = 'build.ps1'
+$PreviousLegacyWindows = $env:JARPATCH_LEGACY_WINDOWS
+if ($Windows7) {
+    $BundleJdk17 = $true
+    $FrontendDistRoot = Join-Path $FrontendRoot 'dist-win7'
+    $ReleaseRoot = Join-Path $ProjectRoot 'release\windows7'
+}
 
 function Resolve-RequiredCommand {
     param(
@@ -199,12 +206,19 @@ if ($BundleJdk17) {
         throw "内网完整 JDK 包编译器校验失败：$JavacVersionOutput"
     }
 }
+if ($Windows7) {
+    $JdkRelease = Get-Content -LiteralPath (Join-Path $JdkHome 'release') -Raw
+    if ($JdkRelease -notmatch '(?m)^IMPLEMENTOR="BellSoft"') {
+        throw 'Win7 兼容包必须传入 BellSoft Liberica 完整 JDK 17（Windows x64），不能复用现代 Windows 专用运行时。'
+    }
+}
 
 $env:JAVA_HOME = $JdkHome
 $env:Path = "$(Join-Path $JdkHome 'bin');$env:Path"
 
 Push-Location $ProjectRoot
 try {
+    $env:JARPATCH_LEGACY_WINDOWS = if ($Windows7) { '1' } else { $null }
     & $Maven '-Dmaven.test.skip=true' package
     if ($LASTEXITCODE -ne 0) {
         throw "Maven 后端构建失败，退出码：$LASTEXITCODE"
@@ -249,7 +263,14 @@ try {
     }
 
     Remove-BuildDirectory $FrontendDistRoot
-    & $Npm --prefix $FrontendRoot run dist:win
+    if ($Windows7) {
+        & $Npm --prefix $FrontendRoot run dist:win -- '--config.electronVersion=22.3.27' `
+            "--config.directories.output=$FrontendDistRoot" `
+            '--config.win.artifactName=JarPatch-Studio-${version}-Windows7-${arch}.${ext}'
+    }
+    else {
+        & $Npm --prefix $FrontendRoot run dist:win
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Windows 发布包构建失败，退出码：$LASTEXITCODE"
     }
@@ -257,7 +278,7 @@ try {
 
     Remove-ReleaseDirectory
     New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
-    $Artifacts = Get-ChildItem -LiteralPath (Join-Path $FrontendRoot 'dist') -File |
+    $Artifacts = Get-ChildItem -LiteralPath $FrontendDistRoot -File |
         Where-Object { $_.Extension -in @('.exe', '.blockmap') }
     foreach ($Artifact in $Artifacts) {
         Copy-Item -LiteralPath $Artifact.FullName -Destination (Join-Path $ReleaseRoot $Artifact.Name) -Force
@@ -271,8 +292,22 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Windows 发布清单生成失败，退出码：$LASTEXITCODE"
     }
+    if ($Windows7) {
+        $ManifestPath = Join-Path $ReleaseRoot 'release-manifest.json'
+        $Manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+        $Manifest | Add-Member -NotePropertyName 'compatibility' -NotePropertyValue ([ordered]@{
+            target = 'Windows 7 SP1 x64'
+            electronVersion = '22.3.27'
+            chromiumMajor = 108
+            jdkVendor = 'BellSoft Liberica'
+            targetOsVerified = $false
+            note = '构建主机启动检查不能替代真实 Win7 验收；Electron 22 已停止维护。'
+        })
+        $Manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ManifestPath -Encoding utf8
+    }
     Write-Host "Windows 发布包已生成：$ReleaseRoot"
 }
 finally {
+    $env:JARPATCH_LEGACY_WINDOWS = $PreviousLegacyWindows
     Pop-Location
 }

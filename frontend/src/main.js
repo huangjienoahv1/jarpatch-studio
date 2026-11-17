@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const readline = require('readline');
 const { DevelopmentServices } = require('./development-services');
+const fetch = require('./http-fetch');
 
 const BACKEND_PORT = 18765;
 const BACKEND_HOST = '127.0.0.1';

@@ -9,6 +9,7 @@ out/
 **/out/
 frontend/backend/
 frontend/runtime/
+frontend/dist-win7/
 release/
 samples/acceptance/output/
 samples/acceptance/work/

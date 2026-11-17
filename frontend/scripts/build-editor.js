@@ -4,6 +4,7 @@ const path = require('path');
 const frontendRoot = path.resolve(__dirname, '..');
 const sourceRoot = path.join(frontendRoot, 'src');
 const outputRoot = path.join(sourceRoot, 'generated');
+const browserTarget = process.env.JARPATCH_LEGACY_WINDOWS === '1' ? 'chrome108' : 'chrome138';
 
 /**
  * 构建 Monaco 编辑器主线程与 Worker 脚本。
@@ -20,7 +21,7 @@ async function buildEditor() {
     outfile: path.join(outputRoot, 'editor-bridge.js'),
     format: 'iife',
     platform: 'browser',
-    target: ['chrome138'],
+    target: [browserTarget],
     sourcemap: false,
     legalComments: 'none'
   });
@@ -30,7 +31,7 @@ async function buildEditor() {
     outfile: path.join(outputRoot, 'editor-worker.js'),
     format: 'iife',
     platform: 'browser',
-    target: ['chrome138'],
+    target: [browserTarget],
     sourcemap: false,
     legalComments: 'none'
   });

@@ -80,6 +80,7 @@
     "esbuild@0.28.2": true
   },
   "dependencies": {
-    "monaco-editor": "0.53.0"
+    "monaco-editor": "0.53.0",
+    "node-fetch": "2.7.0"
   }
 }

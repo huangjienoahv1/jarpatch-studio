@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const fetch = require('./http-fetch');
 
 const DEVELOPMENT_SETTINGS_FILE_NAME = 'development-settings.json';
 const DEVELOPMENT_SETTINGS_CORRUPTED_SUFFIX = '.corrupted';
