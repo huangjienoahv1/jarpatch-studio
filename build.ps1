@@ -1,5 +1,6 @@
 param(
     [string]$JdkHome = $env:JAVA_HOME,
+    [switch]$BundleJdk17,
     [switch]$RequireSigning,
     [string]$CertificateThumbprint = $env:JARPATCH_WINDOWS_CERT_THUMBPRINT,
     [string]$TimestampUrl = $env:JARPATCH_WINDOWS_TIMESTAMP_URL
@@ -185,6 +186,19 @@ if ($JavaVersionOutput -notmatch 'version "(?<major>\d+)') {
 if ([int]$Matches.major -lt 17) {
     throw "后端构建至少需要 JDK 17，当前版本：$($Matches.major)"
 }
+if ($BundleJdk17) {
+    if ([int]$Matches.major -ne 17) {
+        throw '内网完整 JDK 包必须使用 JDK 17 构建。'
+    }
+    $Javac = Join-Path $JdkHome 'bin\javac.exe'
+    if (!(Test-Path -LiteralPath $Javac -PathType Leaf)) {
+        throw "内网完整 JDK 包缺少 javac.exe：$JdkHome"
+    }
+    $JavacVersionOutput = (& $Javac -version 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $JavacVersionOutput -notmatch '^javac 17\.') {
+        throw "内网完整 JDK 包编译器校验失败：$JavacVersionOutput"
+    }
+}
 
 $env:JAVA_HOME = $JdkHome
 $env:Path = "$(Join-Path $JdkHome 'bin');$env:Path"
@@ -223,9 +237,15 @@ try {
         'jdk.unsupported',
         'jdk.zipfs'
     ) -join ','
-    & $Jlink --add-modules $RuntimeModules --strip-debug --no-header-files --no-man-pages --compress=2 --output $RuntimeResourceRoot
-    if ($LASTEXITCODE -ne 0) {
-        throw "jlink 运行时生成失败，退出码：$LASTEXITCODE"
+    if ($BundleJdk17) {
+        # 保留完整 JDK 和许可证；后端从 java.home 自动定位内置 javac，无需配置系统环境。
+        Copy-Item -LiteralPath $JdkHome -Destination $RuntimeResourceRoot -Recurse
+    }
+    else {
+        & $Jlink --add-modules $RuntimeModules --strip-debug --no-header-files --no-man-pages --compress=2 --output $RuntimeResourceRoot
+        if ($LASTEXITCODE -ne 0) {
+            throw "jlink 运行时生成失败，退出码：$LASTEXITCODE"
+        }
     }
 
     Remove-BuildDirectory $FrontendDistRoot

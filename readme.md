@@ -339,6 +339,10 @@ npm.cmd start
 pwsh.exe -NoLogo -NoProfile -File .\build.ps1
 ```
 
+内网使用时，传入 `-BundleJdk17 -JdkHome '完整 JDK 17 目录'` 构建。该模式将完整 JDK 17（含 `javac`、`jar` 和许可证）内置到免安装 EXE，双击即可使用内置 Java 启动和编译 Java 17 原包，无需在目标电脑安装 JDK 或设置 `JAVA_HOME`。软件中已保存的编译 JDK 配置仍优先，迁移后应确认原配置路径有效。其他 Java 目标版本仍遵循已有编译器版本校验；JDT LS 和 AI 为可选能力，不包含在该离线包中。
+
+Windows 免安装包为每次启动使用独立临时解压目录，防止重复启动时清理正在运行实例的 JDK 和其他资源。应用仍采用单实例运行，第二次启动会激活已有窗口。
+
 产物写入 `release/windows/`，并生成包含环境、Git commit、构建前源码是否干净、构建入口及其 SHA-256、签名状态、产物大小和 SHA-256 的 `release-manifest.json`。三个入口都会对解包应用执行 `--smoke-check`，确认内置 Java 和后端健康检查可用。正式签名所需环境变量、macOS 公证、Linux GPG 和回滚步骤见 `docs/release-runbook.md`；macOS/Linux 必须在对应原生系统执行 `./build-macos.sh` 或 `./build-linux.sh`。
 
 ## 使用流程

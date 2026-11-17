@@ -53,6 +53,9 @@
       ],
       "artifactName": "JarPatch-Studio-${version}-Windows-${arch}.${ext}"
     },
+    "portable": {
+      "unpackDirName": true
+    },
     "mac": {
       "target": [
         "dmg",

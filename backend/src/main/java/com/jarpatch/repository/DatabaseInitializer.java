@@ -29,6 +29,7 @@ import java.util.Map;
 public class DatabaseInitializer {
 
     private static final String SQLITE_PREFIX = "jdbc:sqlite:";
+    private static final char SQLITE_QUERY_SEPARATOR = '?';
     private static final int MIGRATION_BASE_SCHEMA = 1;
     private static final int MIGRATION_RELEASE_DATA = 2;
     private static final int MIGRATION_RUNTIME_STABILITY = 3;
@@ -271,7 +272,7 @@ public class DatabaseInitializer {
     }
 
     /**
-     * 创建 SQLite 数据库父目录。
+     * 根据 SQLite URL 的文件路径创建数据库父目录，连接参数仍交由 JDBC 驱动处理。
      *
      * @throws IOException 目录创建失败时抛出
      */
@@ -279,7 +280,12 @@ public class DatabaseInitializer {
         if (!datasourceUrl.startsWith(SQLITE_PREFIX)) {
             return;
         }
-        Path databasePath = Paths.get(datasourceUrl.substring(SQLITE_PREFIX.length())).toAbsolutePath().normalize();
+        String databaseLocation = datasourceUrl.substring(SQLITE_PREFIX.length());
+        int queryIndex = databaseLocation.indexOf(SQLITE_QUERY_SEPARATOR);
+        if (queryIndex >= 0) {
+            databaseLocation = databaseLocation.substring(0, queryIndex);
+        }
+        Path databasePath = Paths.get(databaseLocation).toAbsolutePath().normalize();
         if (databasePath.getParent() != null) {
             Files.createDirectories(databasePath.getParent());
         }
