@@ -345,15 +345,23 @@ Windows 免安装包为每次启动使用独立临时解压目录，防止重复
 
 ### 构建 Win7 SP1 64 位兼容包
 
+在开发电脑上双击仓库根目录的 `build-win7.cmd` 即可打包。脚本优先使用命令参数指定的 JDK，其次读取 `JARPATCH_WIN7_JDK_HOME`，未配置时使用 `%TEMP%\jarpatch-win7-dependencies\jdk-21` 中的 Liberica JDK。也可以从 PowerShell 7 指定 JDK 目录：
+
 ```powershell
-pwsh.exe -NoLogo -NoProfile -File .\build.ps1 -Windows7 -JdkHome 'C:\Tools\LibericaJDK17'
+.\build-win7.cmd 'C:\Tools\LibericaJDK21'
 ```
 
-兼容模式必须传入 BellSoft Liberica 完整 JDK 17（Windows x64），自动内置编译器和许可证。桌面端使用最后支持 Win7 的 Electron 22.3.27，编辑器构建目标为 Chromium 108；Node 16 缺少原生 `fetch` 时使用固定版本的 `node-fetch` 2。标准构建继续使用原有 Electron 版本。
+底层打包入口也可直接执行：
+
+```powershell
+pwsh.exe -NoLogo -NoProfile -File .\build.ps1 -Windows7 -JdkHome 'C:\Tools\LibericaJDK21'
+```
+
+兼容模式使用 BellSoft Liberica 完整 JDK 21（Windows x64）构建并运行后端，发布包包含同一套 JDK、编译器和许可证。后端字节码目标仍为 Java 17，补丁编译按原始 class 版本指定 `--release`，可处理 Java 8、11、17 原包。桌面端使用最后支持 Win7 的 Electron 22.3.27，编辑器构建目标为 Chromium 108；Node 16 缺少原生 `fetch` 时使用固定版本的 `node-fetch` 2。标准构建继续使用原有 Electron 版本。
 
 产物独立写入 `release/windows7/`，文件名含 `Windows7`，不覆盖 `release/windows/`。构建需要在支持当前 Node.js/npm 工具链的较新 Windows 上执行，内网目标电脑无需安装 Node.js、Maven 或 JDK。目标最低为 **Windows 7 SP1 x64**，不支持未安装 SP1 的 Win7 或 32 位系统。
 
-[Electron 22 已停止维护](https://releases.electronjs.org/release/v22.3.27)，该包用于确有旧系统约束的环境；[Liberica 平台要求](https://bell-sw.com/pages/supported-configurations/)列出 Win7 SP1。构建主机上的启动、编译验收不能代替真实 Win7 验收，发布清单明确标记 `targetOsVerified: false`。基础编辑和编译不依赖可选 JDT LS 或 AI；JDT LS 自身要求 Java 21+，不作为 Win7 兼容范围的一部分。
+[Electron 22 已停止维护](https://releases.electronjs.org/release/v22.3.27)，该包用于确有旧系统约束的环境；[Liberica 平台要求](https://bell-sw.com/pages/supported-configurations/)列出 Win7 SP1。构建主机上的启动、编译验收不能代替真实 Win7 验收，发布清单明确标记 `targetOsVerified: false`。发布包附带 [Eclipse JDT LS 1.55.0](https://github.com/eclipse-jdtls/eclipse.jdt.ls/tree/v1.55.0) 并共用内置 JDK 21。构建机首次打包会下载 Eclipse 官方发布包并校验 SHA-256，后续可复用缓存。基础编辑、补丁编译和 Java 代码智能可离线使用。
 
 标准 Windows 包写入 `release/windows/`，并生成包含环境、Git commit、构建前源码是否干净、构建入口及其 SHA-256、签名状态、产物大小和 SHA-256 的 `release-manifest.json`。三个平台入口都会对解包应用执行 `--smoke-check`，确认内置 Java 和后端健康检查可用。正式签名所需环境变量、macOS 公证、Linux GPG 和回滚步骤见 `docs/release-runbook.md`；macOS/Linux 必须在对应原生系统执行 `./build-macos.sh` 或 `./build-linux.sh`。
 
@@ -362,7 +370,7 @@ pwsh.exe -NoLogo -NoProfile -File .\build.ps1 -Windows7 -JdkHome 'C:\Tools\Liber
 1. 打开 JarPatch Studio。
 2. 点击右上角“开发能力”：
    - 编译 JDK 沿用原有配置。
-   - 如需传统 Java 智能，下载 Eclipse JDT LS，填写其目录和专用于启动 JDT LS 的 Java 21+ 目录后启用。该运行时只启动语言服务器，不改变项目编译 JDK。
+   - 如需 Java 代码智能，在 Win7 免安装包里勾选启用并保存，两项路径留空即使用内置 JDT LS 和 JDK 21。需要覆盖内置组件时可手动填写对应路径。其他版本请自行配置 JDT LS 和运行它的 JDK。
    - 如需 AI 能力，选择协议并填写端点、模型和 API Key；远程端点强制 HTTPS，API Key 使用系统安全存储加密，渲染页面不会读取明文密钥。
 3. 点击“打开 Jar/War”。
 4. 选择本地 Jar 或 War。

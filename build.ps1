@@ -23,9 +23,10 @@ $FrontendDistRoot = Join-Path $FrontendRoot 'dist'
 $ReleaseRoot = Join-Path $ProjectRoot 'release\windows'
 $RootPackage = Get-Content -LiteralPath (Join-Path $ProjectRoot 'package.json') -Raw | ConvertFrom-Json
 $BuildEntry = 'build.ps1'
+$JdtLsVersion = '1.55.0'
 $PreviousLegacyWindows = $env:JARPATCH_LEGACY_WINDOWS
+$BundledJdkMajor = if ($Windows7) { 21 } elseif ($BundleJdk17) { 17 }
 if ($Windows7) {
-    $BundleJdk17 = $true
     $FrontendDistRoot = Join-Path $FrontendRoot 'dist-win7'
     $ReleaseRoot = Join-Path $ProjectRoot 'release\windows7'
 }
@@ -41,6 +42,39 @@ function Resolve-RequiredCommand {
         throw "未找到必需命令：$Name"
     }
     return $Command.Source
+}
+
+function Install-BundledLanguageServer {
+    # 固定支持 JDK 21 的 Eclipse 版本，构建时校验官方发布包的 SHA-256。
+    $ArchiveName = "jdt-language-server-$JdtLsVersion-202601131729.tar.gz"
+    $ArchiveSha256 = '90627c9f03704dbb404f37651625d0751c078ab7534246023d53adcea1411b91'
+    $CacheRoot = Join-Path $env:TEMP 'jarpatch-win7-dependencies'
+    $ArchivePath = Join-Path $CacheRoot $ArchiveName
+    if (!(Test-Path -LiteralPath $ArchivePath -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash -ne $ArchiveSha256) {
+        New-Item -ItemType Directory -Path $CacheRoot -Force | Out-Null
+        $DownloadFile = New-TemporaryFile
+        try {
+            Invoke-WebRequest -Uri "https://download.eclipse.org/jdtls/milestones/$JdtLsVersion/$ArchiveName" `
+                -OutFile $DownloadFile.FullName -TimeoutSec 120
+            if ((Get-FileHash -LiteralPath $DownloadFile.FullName -Algorithm SHA256).Hash -ne $ArchiveSha256) {
+                throw 'Eclipse JDT LS 下载包的 SHA-256 不匹配。'
+            }
+            Move-Item -LiteralPath $DownloadFile.FullName -Destination $ArchivePath -Force
+        }
+        finally {
+            if (Test-Path -LiteralPath $DownloadFile.FullName) {
+                Remove-Item -LiteralPath $DownloadFile.FullName -Force
+            }
+        }
+    }
+    $LanguageServerRoot = Join-Path $RuntimeResourceRoot 'jdtls'
+    New-Item -ItemType Directory -Path $LanguageServerRoot | Out-Null
+    $Tar = Resolve-RequiredCommand 'tar.exe'
+    & $Tar -xzf $ArchivePath -C $LanguageServerRoot
+    if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath (Join-Path $LanguageServerRoot 'config_win\config.ini') -PathType Leaf)) {
+        throw '无法解压 Eclipse JDT LS Windows 配置。'
+    }
 }
 
 function Remove-BuildDirectory {
@@ -190,26 +224,30 @@ $JavaVersionOutput = (& $Java -version 2>&1 | Out-String)
 if ($JavaVersionOutput -notmatch 'version "(?<major>\d+)') {
     throw "无法识别 JDK 版本：$JavaVersionOutput"
 }
-if ([int]$Matches.major -lt 17) {
-    throw "后端构建至少需要 JDK 17，当前版本：$($Matches.major)"
+$JavaMajor = [int]$Matches.major
+if ($JavaMajor -lt 17) {
+    throw "后端构建至少需要 JDK 17，当前版本：$JavaMajor"
 }
-if ($BundleJdk17) {
-    if ([int]$Matches.major -ne 17) {
-        throw '内网完整 JDK 包必须使用 JDK 17 构建。'
+if ($null -ne $BundledJdkMajor) {
+    if ($JavaMajor -ne $BundledJdkMajor) {
+        throw "当前完整 JDK 打包模式需要 JDK $BundledJdkMajor，实际版本：$JavaMajor"
     }
     $Javac = Join-Path $JdkHome 'bin\javac.exe'
     if (!(Test-Path -LiteralPath $Javac -PathType Leaf)) {
         throw "内网完整 JDK 包缺少 javac.exe：$JdkHome"
     }
     $JavacVersionOutput = (& $Javac -version 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $JavacVersionOutput -notmatch '^javac 17\.') {
+    $JavacVersionPattern = "^javac $BundledJdkMajor(?:[.\-+]|$)"
+    if ($LASTEXITCODE -ne 0 -or $JavacVersionOutput -notmatch $JavacVersionPattern) {
         throw "内网完整 JDK 包编译器校验失败：$JavacVersionOutput"
     }
 }
 if ($Windows7) {
     $JdkRelease = Get-Content -LiteralPath (Join-Path $JdkHome 'release') -Raw
-    if ($JdkRelease -notmatch '(?m)^IMPLEMENTOR="BellSoft"') {
-        throw 'Win7 兼容包必须传入 BellSoft Liberica 完整 JDK 17（Windows x64），不能复用现代 Windows 专用运行时。'
+    if ($JdkRelease -notmatch '(?m)^IMPLEMENTOR="BellSoft"\r?$' -or
+            $JdkRelease -notmatch '(?m)^OS_NAME="Windows"\r?$' -or
+            $JdkRelease -notmatch '(?m)^OS_ARCH="x86_64"\r?$') {
+        throw "Win7 兼容包必须传入 BellSoft Liberica 完整 JDK $BundledJdkMajor（Windows x64）。"
     }
 }
 
@@ -251,7 +289,7 @@ try {
         'jdk.unsupported',
         'jdk.zipfs'
     ) -join ','
-    if ($BundleJdk17) {
+    if ($null -ne $BundledJdkMajor) {
         # 保留完整 JDK 和许可证；后端从 java.home 自动定位内置 javac，无需配置系统环境。
         Copy-Item -LiteralPath $JdkHome -Destination $RuntimeResourceRoot -Recurse
     }
@@ -264,6 +302,7 @@ try {
 
     Remove-BuildDirectory $FrontendDistRoot
     if ($Windows7) {
+        Install-BundledLanguageServer
         & $Npm --prefix $FrontendRoot run dist:win -- '--config.electronVersion=22.3.27' `
             "--config.directories.output=$FrontendDistRoot" `
             '--config.win.artifactName=JarPatch-Studio-${version}-Windows7-${arch}.${ext}'
@@ -300,6 +339,7 @@ try {
             electronVersion = '22.3.27'
             chromiumMajor = 108
             jdkVendor = 'BellSoft Liberica'
+            jdtLsVersion = $JdtLsVersion
             targetOsVerified = $false
             note = '构建主机启动检查不能替代真实 Win7 验收；Electron 22 已停止维护。'
         })

@@ -910,6 +910,12 @@ function renderDevelopmentSettings(settings) {
   elements.languageServerEnabledInput.checked = view.languageServerEnabled;
   elements.jdtLsHomeInput.value = view.jdtLsHome || '';
   elements.jdtLsJavaHomeInput.value = view.jdtLsJavaHome || '';
+  elements.jdtLsHomeInput.placeholder = view.bundledLanguageServerAvailable
+    ? '留空使用内置 Eclipse JDT LS'
+    : '包含 plugins 和 config_win 等目录';
+  elements.jdtLsJavaHomeInput.placeholder = view.bundledLanguageServerAvailable
+    ? '留空使用内置 JDK 21'
+    : 'Java 21 或更高版本的 JDK 目录';
   elements.aiEnabledInput.checked = view.aiEnabled;
   elements.aiProtocolSelect.value = view.aiProtocol || 'responses';
   elements.aiEndpointInput.value = view.aiEndpoint || '';

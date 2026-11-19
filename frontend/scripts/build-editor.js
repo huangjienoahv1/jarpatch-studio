@@ -22,6 +22,7 @@ async function buildEditor() {
     format: 'iife',
     platform: 'browser',
     target: [browserTarget],
+    loader: { '.ttf': 'file' },
     sourcemap: false,
     legalComments: 'none'
   });

@@ -1,4 +1,5 @@
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
+import 'monaco-editor/esm/vs/editor/contrib/suggest/browser/suggestController.js';
 import 'monaco-editor/esm/vs/basic-languages/java/java.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/xml/xml.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/ini/ini.contribution.js';
@@ -197,12 +198,14 @@ class JavaLanguageClient {
     if (!this.initialized) {
       return;
     }
+    clearTimeout(this.changeTimer);
+    this.changeTimer = null;
     const nextUri = model.uri.toString();
     if (this.documentUri && this.documentUri !== nextUri) {
       this.notify('textDocument/didClose', { textDocument: { uri: this.documentUri } });
     }
     this.documentUri = nextUri;
-    this.documentVersion = 1;
+    this.documentVersion = model.getVersionId();
     this.notify('textDocument/didOpen', {
       textDocument: {
         uri: nextUri,
@@ -222,17 +225,34 @@ class JavaLanguageClient {
     if (!this.initialized || model.uri.toString() !== this.documentUri) {
       return;
     }
-    if (this.changeTimer) {
-      clearTimeout(this.changeTimer);
-    }
+    clearTimeout(this.changeTimer);
     this.changeTimer = setTimeout(() => {
       this.changeTimer = null;
-      this.documentVersion++;
-      this.notify('textDocument/didChange', {
-        textDocument: { uri: this.documentUri, version: this.documentVersion },
-        contentChanges: [{ text: model.getValue() }]
-      });
+      this.syncDocumentChange(model);
     }, LANGUAGE_SERVER_CHANGE_DELAY_MS);
+  }
+
+  /**
+   * 发送当前模型的新版本，确保语义补全读取到尚在防抖窗口内的输入。
+   * @param {monaco.editor.ITextModel} model 当前模型
+   * @returns {Promise<void>|undefined} 变更写入语言服务器的结果
+   */
+  syncDocumentChange(model) {
+    const uri = model.uri.toString();
+    if (!this.initialized || model !== this.facade.model || uri !== this.documentUri) {
+      return;
+    }
+    const version = model.getVersionId();
+    if (version === this.documentVersion) {
+      return;
+    }
+    clearTimeout(this.changeTimer);
+    this.changeTimer = null;
+    this.documentVersion = version;
+    return this.notify('textDocument/didChange', {
+      textDocument: { uri, version },
+      contentChanges: [{ text: model.getValue() }]
+    });
   }
 
   /**
@@ -276,14 +296,22 @@ class JavaLanguageClient {
   registerProviders() {
     this.disposables.push(monaco.languages.registerCompletionItemProvider('java', {
       triggerCharacters: ['.', '@', '#'],
-      provideCompletionItems: async (model, position) => {
+      provideCompletionItems: async (model, position, context, token) => {
+        await this.syncDocumentChange(model);
+        if (token.isCancellationRequested) {
+          return { suggestions: [] };
+        }
         const response = await this.request('textDocument/completion', {
           textDocument: { uri: model.uri.toString() },
           position: toLspPosition(position),
-          context: { triggerKind: 1 }
+          // Monaco 的触发类型从 0 开始，LSP 从 1 开始。
+          context: { triggerKind: context.triggerKind + 1, triggerCharacter: context.triggerCharacter }
         });
         const items = Array.isArray(response) ? response : (response && response.items) || [];
-        return { suggestions: items.map((item) => toMonacoCompletion(item, model, position)) };
+        return {
+          suggestions: items.map((item) => toMonacoCompletion(item, model, position)),
+          incomplete: response?.isIncomplete === true
+        };
       },
       resolveCompletionItem: async (item) => {
         if (!item._lspItem) {
@@ -458,7 +486,7 @@ class JavaLanguageClient {
     if (params !== undefined) {
       message.params = params;
     }
-    window.jarPatch.sendLanguageServerMessage(message).catch((error) => {
+    return window.jarPatch.sendLanguageServerMessage(message).catch((error) => {
       this.statusListener({ state: 'error', message: `${MESSAGE_JAVA_COMMUNICATION_FAILED_PREFIX}${error.message}` });
     });
   }

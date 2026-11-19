@@ -40,7 +40,8 @@ const MESSAGE = Object.freeze({
   aiResponseTooLarge: 'AI 响应超过允许大小。',
   invalidAiJson: 'AI 端点没有返回有效 JSON。',
   aiTimeout: 'AI 请求超时，未修改当前代码。',
-  missingJdtLsHome: 'JDT LS 目录不存在。',
+  missingJdtLsHome: '请填写有效的 JDT LS 解压目录。',
+  missingJdtLsJavaHome: '请填写 JDT LS 运行 JDK 目录。',
   missingJdtLsConfigurationPrefix: 'JDT LS 缺少当前平台配置目录：',
   missingJdtLsJavaPrefix: 'JDT LS 运行 JDK 缺少 java：',
   minimumJdtLsJavaPrefix: '当前 JDT LS 至少需要 Java ',
@@ -386,19 +387,41 @@ class DevelopmentServices {
   }
 
   /**
+   * 从本次便携包解压目录定位 JDT LS 和共用的 Java 运行时。
+   * @returns {{home: string, javaHome: string}|null} 随包组件路径，仅在当前进程内使用
+   */
+  bundledLanguageServer() {
+    if (!app.isPackaged) {
+      return null;
+    }
+    const javaHome = path.join(process.resourcesPath, 'runtime');
+    const home = path.join(javaHome, 'jdtls');
+    const configFile = path.join(home, this.platformConfigurationDirectory(), 'config.ini');
+    return fs.existsSync(configFile) ? { home, javaHome } : null;
+  }
+
+  /**
    * 校验 JDT LS 目录、平台配置目录和 Java 21+ 运行时。
    *
    * @param {object} settings 保存配置
    * @returns {Promise<object>} 可直接启动的路径和版本
    */
   async validateLanguageServerSettings(settings) {
-    const jdtLsHome = path.resolve(normalizeText(settings.jdtLsHome));
-    const jdtLsJavaHome = path.resolve(normalizeText(settings.jdtLsJavaHome));
-    const javaExecutable = path.join(jdtLsJavaHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
-    const configurationDirectory = path.join(jdtLsHome, this.platformConfigurationDirectory());
+    const bundled = this.bundledLanguageServer();
+    const configuredHome = normalizeText(settings.jdtLsHome) || bundled?.home;
+    const configuredJavaHome = normalizeText(settings.jdtLsJavaHome) || bundled?.javaHome;
+    if (!configuredHome) {
+      throw new Error(MESSAGE.missingJdtLsHome);
+    }
+    const jdtLsHome = path.resolve(configuredHome);
     if (!fs.statSync(jdtLsHome, { throwIfNoEntry: false })?.isDirectory()) {
       throw new Error(MESSAGE.missingJdtLsHome);
     }
+    if (!configuredJavaHome) {
+      throw new Error(MESSAGE.missingJdtLsJavaHome);
+    }
+    const javaExecutable = path.resolve(configuredJavaHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
+    const configurationDirectory = path.join(jdtLsHome, this.platformConfigurationDirectory());
     if (!fs.statSync(configurationDirectory, { throwIfNoEntry: false })?.isDirectory()) {
       throw new Error(`${MESSAGE.missingJdtLsConfigurationPrefix}${configurationDirectory}`);
     }
@@ -800,6 +823,7 @@ class DevelopmentServices {
       languageServerEnabled: settings.languageServerEnabled === true,
       jdtLsHome: settings.jdtLsHome || '',
       jdtLsJavaHome: settings.jdtLsJavaHome || '',
+      bundledLanguageServerAvailable: Boolean(this.bundledLanguageServer()),
       aiEnabled: settings.aiEnabled === true,
       aiProtocol: settings.aiProtocol || AI_PROTOCOL_RESPONSES,
       aiEndpoint: settings.aiEndpoint || '',
