@@ -16,7 +16,14 @@ const LANGUAGE_SERVER_LOG_METHOD = 'jarpatch/languageServerLog';
 const LANGUAGE_SERVER_EXIT_METHOD = 'jarpatch/languageServerExit';
 const AI_PROTOCOL_RESPONSES = 'responses';
 const AI_PROTOCOL_CHAT_COMPLETIONS = 'chat-completions';
-const AI_SUPPORTED_PROTOCOLS = new Set([AI_PROTOCOL_RESPONSES, AI_PROTOCOL_CHAT_COMPLETIONS]);
+const AI_PROTOCOL_ANTHROPIC_MESSAGES = 'anthropic-messages';
+const AI_ANTHROPIC_VERSION = '2023-06-01';
+const AI_MESSAGES_AUTH_API_KEY = 'x-api-key';
+const AI_MESSAGES_AUTH_BEARER = 'bearer';
+const AI_SUPPORTED_MESSAGES_AUTH = new Set([AI_MESSAGES_AUTH_API_KEY, AI_MESSAGES_AUTH_BEARER]);
+const AI_SUPPORTED_PROTOCOLS = new Set([
+  AI_PROTOCOL_RESPONSES, AI_PROTOCOL_CHAT_COMPLETIONS, AI_PROTOCOL_ANTHROPIC_MESSAGES
+]);
 const AI_REQUEST_TIMEOUT_MS = 90000;
 const AI_MAX_CONTEXT_CHARACTERS = 60000;
 const AI_MAX_EDIT_SCOPE_CHARACTERS = 30000;
@@ -53,6 +60,7 @@ const MESSAGE = Object.freeze({
   missingSourcesDirectory: '项目工作区缺少 sources 目录。',
   aiDisabled: 'AI 代码助手尚未启用，请先在开发能力配置中启用。',
   unsupportedAiProtocol: 'AI 协议不受支持。',
+  unsupportedAiMessagesAuth: 'Messages 鉴权方式不受支持。',
   missingAiModel: 'AI 模型不能为空。',
   invalidAiEndpoint: 'AI 端点不是有效 URL。',
   insecureRemoteAiEndpoint: '远程 AI 端点必须使用 HTTPS；HTTP 只允许本机回环地址。',
@@ -66,6 +74,10 @@ const MESSAGE = Object.freeze({
   aiEditScopeTooLong: 'AI 修改范围过大，请先选择需要修改的代码。',
   missingResponsesOutput: 'Responses API 没有返回 output_text。',
   missingChatCompletionsOutput: 'Chat Completions API 没有返回文本内容。',
+  missingAnthropicOutput: 'Anthropic Messages API 没有返回文本内容。',
+  anthropicRefusal: '模型拒绝了本次请求，未修改当前代码。',
+  anthropicOutputTokenLimit: '模型响应达到输出长度上限，请缩小操作范围后重试。',
+  incompleteAnthropicOutput: '模型响应提前结束，未修改当前代码。',
   invalidAiStructuredJson: 'AI 模型没有遵守结构化输出契约，未修改当前代码。',
   invalidAiStructuredFields: 'AI 结构化输出字段不符合契约，未修改当前代码。',
   mismatchedAiResultType: 'AI 返回类型与请求动作不一致，未修改当前代码。',
@@ -79,6 +91,7 @@ const EMPTY_SETTINGS = Object.freeze({
   jdtLsJavaHome: '',
   aiEnabled: false,
   aiProtocol: AI_PROTOCOL_RESPONSES,
+  aiMessagesAuth: AI_MESSAGES_AUTH_API_KEY,
   aiEndpoint: '',
   aiModel: '',
   aiApiKeyEncrypted: ''
@@ -99,6 +112,11 @@ const AI_SYSTEM_INSTRUCTION = [
   'EXPLAIN 只解释代码并返回 explanation；FIX 和 REFACTOR 返回 replacement；COMPLETE 只返回光标处应插入的 completion。',
   'replacement 必须是所给选区或全文的完整替换文本，保留原编码可表达的字符和原有换行风格。',
   '不要返回 Markdown 代码围栏，不要猜测未提供的项目事实。'
+].join('\n');
+const AI_MESSAGES_SYSTEM_INSTRUCTION = [
+  AI_SYSTEM_INSTRUCTION,
+  '仅返回一个符合以下 JSON Schema 的 JSON 对象。summary 放简短说明，content 放完整结果。',
+  JSON.stringify(AI_RESULT_SCHEMA)
 ].join('\n');
 
 /**
@@ -152,6 +170,7 @@ class DevelopmentServices {
       jdtLsJavaHome: normalizeText(input.jdtLsJavaHome),
       aiEnabled: input.aiEnabled === true,
       aiProtocol: normalizeText(input.aiProtocol) || AI_PROTOCOL_RESPONSES,
+      aiMessagesAuth: normalizeText(input.aiMessagesAuth) || previous.aiMessagesAuth,
       aiEndpoint: normalizeText(input.aiEndpoint),
       aiModel: normalizeText(input.aiModel),
       aiApiKeyEncrypted: previous.aiApiKeyEncrypted || ''
@@ -280,15 +299,25 @@ class DevelopmentServices {
     this.validateAiSettings(settings);
     const context = this.validateAiRequest(request);
     const apiKey = settings.aiApiKeyEncrypted ? this.decryptSecret(settings.aiApiKeyEncrypted) : '';
+    const isAnthropic = settings.aiProtocol === AI_PROTOCOL_ANTHROPIC_MESSAGES;
+    const headers = { 'Content-Type': 'application/json' };
+    if (isAnthropic) {
+      headers['anthropic-version'] = AI_ANTHROPIC_VERSION;
+    }
+    if (apiKey) {
+      if (isAnthropic && settings.aiMessagesAuth === AI_MESSAGES_AUTH_API_KEY) {
+        headers[AI_MESSAGES_AUTH_API_KEY] = apiKey;
+      } else {
+        headers.Authorization = `Bearer ${apiKey}`;
+      }
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
     try {
       const response = await fetch(settings.aiEndpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
-        },
+        headers,
+        redirect: isAnthropic ? 'error' : 'follow',
         body: JSON.stringify(this.createAiRequestBody(settings, context)),
         signal: controller.signal
       });
@@ -539,6 +568,10 @@ class DevelopmentServices {
     if (!AI_SUPPORTED_PROTOCOLS.has(settings.aiProtocol)) {
       throw new Error(MESSAGE.unsupportedAiProtocol);
     }
+    if (settings.aiProtocol === AI_PROTOCOL_ANTHROPIC_MESSAGES
+        && !AI_SUPPORTED_MESSAGES_AUTH.has(settings.aiMessagesAuth)) {
+      throw new Error(MESSAGE.unsupportedAiMessagesAuth);
+    }
     if (!settings.aiModel) {
       throw new Error(MESSAGE.missingAiModel);
     }
@@ -607,7 +640,7 @@ class DevelopmentServices {
   }
 
   /**
-   * 按所选协议构造带严格 JSON Schema 的模型请求。
+   * 构造所选协议的模型请求，并指定结构化结果契约。
    *
    * @param {object} settings AI 配置
    * @param {object} context 已校验上下文
@@ -642,6 +675,14 @@ class DevelopmentServices {
             schema: AI_RESULT_SCHEMA
           }
         }
+      };
+    }
+    if (settings.aiProtocol === AI_PROTOCOL_ANTHROPIC_MESSAGES) {
+      return {
+        model: settings.aiModel,
+        system: AI_MESSAGES_SYSTEM_INSTRUCTION,
+        messages: [{ role: 'user', content: input }],
+        max_tokens: AI_MAX_OUTPUT_TOKENS
       };
     }
     return {
@@ -682,6 +723,25 @@ class DevelopmentServices {
       }
       throw new Error(MESSAGE.missingResponsesOutput);
     }
+    if (protocol === AI_PROTOCOL_ANTHROPIC_MESSAGES) {
+      const stopReason = body?.stop_reason;
+      if (stopReason === 'refusal') {
+        throw new Error(MESSAGE.anthropicRefusal);
+      }
+      if (stopReason === 'max_tokens') {
+        throw new Error(MESSAGE.anthropicOutputTokenLimit);
+      }
+      if (stopReason && stopReason !== 'end_turn') {
+        throw new Error(MESSAGE.incompleteAnthropicOutput);
+      }
+      const blocks = Array.isArray(body?.content) ? body.content : [];
+      const text = blocks.filter((block) => block?.type === 'text' && typeof block.text === 'string')
+        .map((block) => block.text).join('');
+      if (!text.trim()) {
+        throw new Error(MESSAGE.missingAnthropicOutput);
+      }
+      return text;
+    }
     const content = body.choices && body.choices[0] && body.choices[0].message
       ? body.choices[0].message.content : null;
     if (typeof content !== 'string') {
@@ -704,7 +764,7 @@ class DevelopmentServices {
     } catch (error) {
       throw new Error(MESSAGE.invalidAiStructuredJson);
     }
-    const keys = Object.keys(result).sort().join(',');
+    const keys = Object.keys(result ?? {}).sort().join(',');
     if (keys !== 'content,resultType,summary'
         || typeof result.content !== 'string'
         || typeof result.summary !== 'string') {
@@ -826,6 +886,7 @@ class DevelopmentServices {
       bundledLanguageServerAvailable: Boolean(this.bundledLanguageServer()),
       aiEnabled: settings.aiEnabled === true,
       aiProtocol: settings.aiProtocol || AI_PROTOCOL_RESPONSES,
+      aiMessagesAuth: settings.aiMessagesAuth || AI_MESSAGES_AUTH_API_KEY,
       aiEndpoint: settings.aiEndpoint || '',
       aiModel: settings.aiModel || '',
       hasAiApiKey: Boolean(settings.aiApiKeyEncrypted)

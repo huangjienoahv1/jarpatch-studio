@@ -23,7 +23,7 @@ const MESSAGE_ANALYZE_SUCCESS = '分析完成';
 const MESSAGE_ANALYZE_FAILED = '分析失败';
 const MESSAGE_DIFF_LOAD_FAILED = '读取差异失败';
 const MESSAGE_DIFF_EMPTY = '当前工作区与导入基线一致，且没有已提交编译产物';
-const MESSAGE_DIFF_EXPORT_CONFIRM = '请确认已查看源码、资源和 class 差异。是否继续选择导出路径？';
+const MESSAGE_DIFF_METADATA_ONLY = '文本内容一致，文件字节有变化（例如 BOM 或换行符）。';
 const MESSAGE_SIGNATURE_POLICY_CONFIRM = '是否移除原包中会因修改而失效的签名文件？\n\n选择“确定”：移除失效签名并导出未签名包。\n选择“取消”：保留签名；若包已有修改，后端会阻止导出。';
 const MESSAGE_COMPILE_SUCCESS = '编译完成';
 const MESSAGE_COMPILE_FAILED = '编译失败';
@@ -115,6 +115,8 @@ const MESSAGE_TASK_LABEL_COMPILE = '编译';
 const MESSAGE_TASK_LABEL_EXPORT = '导出';
 const MESSAGE_SETTINGS_SUMMARY = '保存后编译服务会优先使用这里配置的 JDK 路径';
 const MESSAGE_SETTINGS_TIP = '请选择 JDK 安装目录，保存时会校验 bin 目录下的 javac。';
+const MESSAGE_BUNDLED_JDK_NOT_INCLUDED = '未内置编译 JDK';
+const MESSAGE_BUNDLED_JDK_LOAD_FAILED = '无法读取内置 JDK 版本';
 const MESSAGE_SETTINGS_PLACEHOLDER = '例如：C:\\Program Files\\Java\\jdk-17';
 const TASK_TYPE_IMPORT = 'IMPORT';
 const TASK_TYPE_ANALYZE = 'ANALYZE';
@@ -217,7 +219,7 @@ const state = {
   unicodePreviewOpen: false,
   analysisOpen: false,
   analysisReport: null,
-  diffReport: null,
+  diffRequestId: 0,
   currentInspection: null,
   currentTree: null,
   currentTask: null,
@@ -235,6 +237,9 @@ const state = {
 };
 
 const elements = {
+  appShell: document.querySelector('.app-shell'),
+  sidebarToggleBtn: document.getElementById('sidebarToggleBtn'),
+  sidebarContent: document.getElementById('sidebarContent'),
   openArchiveBtn: document.getElementById('openArchiveBtn'),
   projectList: document.getElementById('projectList'),
   currentProjectName: document.getElementById('currentProjectName'),
@@ -250,11 +255,15 @@ const elements = {
   orphanWorkspacesBtn: document.getElementById('orphanWorkspacesBtn'),
   errorGuideBtn: document.getElementById('errorGuideBtn'),
   diagnosticBtn: document.getElementById('diagnosticBtn'),
+  helpBtn: document.getElementById('helpBtn'),
+  helpDialog: document.getElementById('helpDialog'),
+  helpNavigation: document.getElementById('helpNavigation'),
   settingsDialog: document.getElementById('settingsDialog'),
   settingsDialogSummary: document.getElementById('settingsDialogSummary'),
   jdkHomeInput: document.getElementById('jdkHomeInput'),
   browseJdkBtn: document.getElementById('browseJdkBtn'),
   jdkSettingsTip: document.getElementById('jdkSettingsTip'),
+  bundledJdkVersion: document.getElementById('bundledJdkVersion'),
   jdkSettingsStatus: document.getElementById('jdkSettingsStatus'),
   closeSettingsBtn: document.getElementById('closeSettingsBtn'),
   saveJdkSettingsBtn: document.getElementById('saveJdkSettingsBtn'),
@@ -265,6 +274,8 @@ const elements = {
   browseJdtLsJavaBtn: document.getElementById('browseJdtLsJavaBtn'),
   aiEnabledInput: document.getElementById('aiEnabledInput'),
   aiProtocolSelect: document.getElementById('aiProtocolSelect'),
+  aiMessagesAuthField: document.getElementById('aiMessagesAuthField'),
+  aiMessagesAuthSelect: document.getElementById('aiMessagesAuthSelect'),
   aiEndpointInput: document.getElementById('aiEndpointInput'),
   aiModelInput: document.getElementById('aiModelInput'),
   aiApiKeyInput: document.getElementById('aiApiKeyInput'),
@@ -327,7 +338,7 @@ const elements = {
   diffDialog: document.getElementById('diffDialog'),
   diffDialogSummary: document.getElementById('diffDialogSummary'),
   diffContent: document.getElementById('diffContent'),
-  closeDiffBtn: document.getElementById('closeDiffBtn'),
+  continueExportBtn: document.getElementById('continueExportBtn'),
   decompileDialogMeta: document.getElementById('decompileDialogMeta'),
   decompileDialogSummary: document.getElementById('decompileDialogSummary'),
   decompileCandidateList: document.getElementById('decompileCandidateList'),
@@ -824,6 +835,7 @@ async function openSettingsDialog() {
   elements.settingsDialog.classList.add('open');
   elements.settingsDialog.setAttribute('aria-hidden', 'false');
   renderJdkSettings(null, MESSAGE_SETTINGS_LOADING);
+  void loadBundledJdkVersion();
   try {
     const [jdkSettings, developmentSettings] = await Promise.all([
       api('/api/settings/jdk'),
@@ -837,6 +849,20 @@ async function openSettingsDialog() {
   } catch (error) {
     renderJdkSettings(null, MESSAGE_SETTINGS_LOADING);
     notify(`${MESSAGE_DEVELOPMENT_SETTINGS_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
+}
+
+/**
+ * 读取并显示随发布包分发的编译 JDK 版本。
+ */
+async function loadBundledJdkVersion() {
+  elements.bundledJdkVersion.textContent = MESSAGE_SETTINGS_LOADING;
+  try {
+    const version = await window.jarPatch.getBundledJdkVersion();
+    elements.bundledJdkVersion.textContent = version || MESSAGE_BUNDLED_JDK_NOT_INCLUDED;
+  } catch (error) {
+    console.error(MESSAGE_BUNDLED_JDK_LOAD_FAILED, error);
+    elements.bundledJdkVersion.textContent = MESSAGE_BUNDLED_JDK_LOAD_FAILED;
   }
 }
 
@@ -903,6 +929,7 @@ function renderDevelopmentSettings(settings) {
     jdtLsJavaHome: '',
     aiEnabled: false,
     aiProtocol: 'responses',
+    aiMessagesAuth: 'x-api-key',
     aiEndpoint: '',
     aiModel: '',
     hasAiApiKey: false
@@ -918,6 +945,8 @@ function renderDevelopmentSettings(settings) {
     : 'Java 21 或更高版本的 JDK 目录';
   elements.aiEnabledInput.checked = view.aiEnabled;
   elements.aiProtocolSelect.value = view.aiProtocol || 'responses';
+  elements.aiMessagesAuthSelect.value = view.aiMessagesAuth || 'x-api-key';
+  updateAiProtocolFields();
   elements.aiEndpointInput.value = view.aiEndpoint || '';
   elements.aiModelInput.value = view.aiModel || '';
   elements.aiApiKeyInput.value = '';
@@ -925,6 +954,16 @@ function renderDevelopmentSettings(settings) {
   elements.developmentSettingsStatus.textContent = view.hasAiApiKey
     ? MESSAGE_AI_KEY_SAVED
     : MESSAGE_AI_KEY_EMPTY;
+}
+
+/**
+ * 根据所选 AI 协议展示地址示例和适用的鉴权选项。
+ */
+function updateAiProtocolFields() {
+  const option = elements.aiProtocolSelect.selectedOptions[0];
+  const example = option?.dataset.endpointExample;
+  elements.aiEndpointInput.placeholder = example ? `例如：${example}` : '';
+  elements.aiMessagesAuthField.hidden = option?.value !== 'anthropic-messages';
 }
 
 /**
@@ -944,6 +983,7 @@ function setSettingsDialogBusy(busy) {
   elements.browseJdtLsJavaBtn.disabled = busy;
   elements.aiEnabledInput.disabled = busy;
   elements.aiProtocolSelect.disabled = busy;
+  elements.aiMessagesAuthSelect.disabled = busy;
   elements.aiEndpointInput.disabled = busy;
   elements.aiModelInput.disabled = busy;
   elements.aiApiKeyInput.disabled = busy;
@@ -1004,6 +1044,7 @@ async function saveJdkSettings() {
       jdtLsJavaHome: elements.jdtLsJavaHomeInput.value.trim(),
       aiEnabled: elements.aiEnabledInput.checked,
       aiProtocol: elements.aiProtocolSelect.value,
+      aiMessagesAuth: elements.aiMessagesAuthSelect.value,
       aiEndpoint: elements.aiEndpointInput.value.trim(),
       aiModel: elements.aiModelInput.value.trim(),
       aiApiKey: elements.aiApiKeyInput.value.trim(),
@@ -1324,7 +1365,6 @@ async function selectProject(project) {
   state.documentSessionId++;
   state.currentProject = project;
   state.projectSettings = null;
-  state.diffReport = null;
   state.currentFilePath = null;
   state.currentFileHash = null;
   state.currentFileEncoding = null;
@@ -1391,7 +1431,6 @@ function resetCurrentProject() {
   state.documentSessionId++;
   state.currentProject = null;
   state.projectSettings = null;
-  state.diffReport = null;
   state.currentFilePath = null;
   state.currentFileHash = null;
   state.currentFileEncoding = null;
@@ -2213,19 +2252,11 @@ async function compileProject() {
   }
 }
 
-async function loadDiffReport() {
-  if (!state.currentProject) {
-    return null;
-  }
-  const report = await api(`/api/projects/${state.currentProject.id}/diff`);
-  state.diffReport = report;
-  return report;
-}
-
 function renderDiffReport(report) {
   const sourceDiffs = report.sourceDiffs || [];
   const resourceDiffs = report.resourceDiffs || [];
   const artifacts = report.compiledArtifacts || [];
+  const diffViews = new Map();
   elements.diffDialogSummary.textContent = `源码 ${sourceDiffs.length} 项 · 资源 ${resourceDiffs.length} 项 · class ${artifacts.length} 项`;
   elements.diffContent.replaceChildren();
 
@@ -2237,15 +2268,37 @@ function renderDiffReport(report) {
     summary.textContent = `${diff.status} · ${diff.path}`;
     details.appendChild(summary);
 
-    const columns = document.createElement('div');
-    columns.className = 'diff-columns';
-    const original = document.createElement('pre');
-    original.textContent = `导入基线\n${diff.originalContent == null ? '（不存在）' : diff.originalContent}`;
-    const current = document.createElement('pre');
-    current.textContent = `当前内容\n${diff.currentContent == null ? '（不存在）' : diff.currentContent}`;
-    columns.appendChild(original);
-    columns.appendChild(current);
-    details.appendChild(columns);
+    const labels = document.createElement('div');
+    labels.className = 'diff-side-labels';
+    for (const [title, content] of [['导入基线', diff.originalContent], ['当前内容', diff.currentContent]]) {
+      const label = document.createElement('span');
+      label.textContent = content == null ? `${title}（文件不存在）` : title;
+      labels.appendChild(label);
+    }
+    details.appendChild(labels);
+
+    if (diff.originalContent != null && diff.currentContent != null
+        && diff.originalContent.replace(/\r\n?/g, '\n') === diff.currentContent.replace(/\r\n?/g, '\n')) {
+      const note = document.createElement('p');
+      note.className = 'diff-note';
+      note.textContent = MESSAGE_DIFF_METADATA_ONLY;
+      details.appendChild(note);
+    }
+
+    const editorHost = document.createElement('div');
+    editorHost.className = 'diff-editor-host';
+    details.appendChild(editorHost);
+    details.addEventListener('toggle', () => {
+      const view = diffViews.get(details);
+      if (details.open && elements.diffDialog.open && details.isConnected) {
+        if (!view) {
+          diffViews.set(details, window.jarPatchEditor.createDiffView(editorHost, diff));
+        }
+      } else if (view) {
+        view.dispose();
+        diffViews.delete(details);
+      }
+    });
     elements.diffContent.appendChild(details);
   }
 
@@ -2267,25 +2320,44 @@ function renderDiffReport(report) {
     empty.textContent = MESSAGE_DIFF_EMPTY;
     elements.diffContent.appendChild(empty);
   }
+  return diffViews;
 }
 
-async function openDiffDialog() {
-  try {
-    const report = await loadDiffReport();
-    if (!report) {
-      return;
-    }
-    renderDiffReport(report);
-    elements.diffDialog.classList.add('open');
-    elements.diffDialog.setAttribute('aria-hidden', 'false');
-  } catch (error) {
-    notify(`${MESSAGE_DIFF_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+async function openDiffDialog(forExport = false) {
+  const project = state.currentProject;
+  if (!project || elements.diffContent.hasChildNodes()) {
+    return false;
   }
-}
+  const projectSessionId = state.projectSessionId;
+  const requestId = ++state.diffRequestId;
+  let report;
+  try {
+    report = await api(`/api/projects/${project.id}/diff`);
+  } catch (error) {
+    if (projectSessionId === state.projectSessionId && requestId === state.diffRequestId) {
+      notify(`${MESSAGE_DIFF_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+    }
+    return false;
+  }
+  if (projectSessionId !== state.projectSessionId || requestId !== state.diffRequestId) {
+    return false;
+  }
 
-function closeDiffDialog() {
-  elements.diffDialog.classList.remove('open');
-  elements.diffDialog.setAttribute('aria-hidden', 'true');
+  const diffViews = renderDiffReport(report);
+  const dialog = elements.diffDialog;
+  elements.continueExportBtn.hidden = !forExport;
+  dialog.returnValue = '';
+  dialog.showModal();
+  return new Promise((resolve) => {
+    dialog.addEventListener('close', () => {
+      for (const view of diffViews.values()) {
+        view.dispose();
+      }
+      diffViews.clear();
+      elements.diffContent.replaceChildren();
+      resolve(forExport && dialog.returnValue === elements.continueExportBtn.value);
+    }, { once: true });
+  });
 }
 
 async function exportProject() {
@@ -2296,21 +2368,15 @@ async function exportProject() {
     notify(MESSAGE_UNSAVED_CHANGES_BLOCK_ACTION, NOTICE_TYPE_INFO);
     return;
   }
-  let diffReport;
-  try {
-    diffReport = await loadDiffReport();
-  } catch (error) {
-    notify(`${MESSAGE_DIFF_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  const projectSessionId = state.projectSessionId;
+  const confirmed = await openDiffDialog(true);
+  if (!confirmed || projectSessionId !== state.projectSessionId) {
     return;
   }
-  renderDiffReport(diffReport);
-  elements.diffDialog.classList.add('open');
-  elements.diffDialog.setAttribute('aria-hidden', 'false');
-  if (!window.confirm(MESSAGE_DIFF_EXPORT_CONFIRM)) {
-    closeDiffDialog();
+  if (isEditorDirty()) {
+    notify(MESSAGE_UNSAVED_CHANGES_BLOCK_ACTION, NOTICE_TYPE_INFO);
     return;
   }
-  closeDiffDialog();
   const removeSignatures = window.confirm(MESSAGE_SIGNATURE_POLICY_CONFIRM);
   const settings = state.projectSettings || await api(`/api/projects/${state.currentProject.id}/settings`);
   state.projectSettings = settings;
@@ -2352,6 +2418,16 @@ function setActionButtonRunning(button, runningText) {
 
 function restoreProjectActionButtons() {
   restoreWorkspaceControls();
+}
+
+function toggleSidebar() {
+  const collapsed = elements.appShell.classList.toggle('sidebar-collapsed');
+  const label = collapsed ? '展开项目栏' : '收起项目栏';
+  elements.sidebarContent.hidden = collapsed;
+  elements.sidebarToggleBtn.setAttribute('aria-expanded', String(!collapsed));
+  elements.sidebarToggleBtn.setAttribute('aria-label', label);
+  elements.sidebarToggleBtn.title = label;
+  setTreePanelWidth(state.treePanelWidth, false);
 }
 
 function initializeTreePanelWidth() {
@@ -2444,6 +2520,7 @@ function escapeHtml(value) {
     .replace(/'/g, '&#039;');
 }
 
+elements.sidebarToggleBtn.addEventListener('click', toggleSidebar);
 elements.openArchiveBtn.addEventListener('click', importArchive);
 elements.unicodePreviewBtn.addEventListener('click', toggleUnicodePreview);
 elements.saveBtn.addEventListener('click', saveCurrentFile);
@@ -2453,7 +2530,7 @@ elements.aiInlineBtn.addEventListener('click', triggerAiInlineCompletion);
 elements.aiAssistantBtn.addEventListener('click', openAiAssistantDialog);
 elements.fileEncodingSelect.addEventListener('change', reopenCurrentFileWithEncoding);
 elements.analyzeBtn.addEventListener('click', analyzeProject);
-elements.diffBtn.addEventListener('click', openDiffDialog);
+elements.diffBtn.addEventListener('click', () => openDiffDialog());
 elements.compileBtn.addEventListener('click', compileProject);
 elements.exportBtn.addEventListener('click', exportProject);
 elements.settingsBtn.addEventListener('click', openSettingsDialog);
@@ -2463,6 +2540,17 @@ elements.cleanupWorkspaceBtn.addEventListener('click', cleanupCurrentWorkspace);
 elements.orphanWorkspacesBtn.addEventListener('click', cleanupOrphanWorkspaces);
 elements.errorGuideBtn.addEventListener('click', openErrorGuideDialog);
 elements.diagnosticBtn.addEventListener('click', exportDiagnostics);
+elements.helpBtn.addEventListener('click', () => elements.helpDialog.showModal());
+elements.helpNavigation.addEventListener('click', (event) => {
+  const link = event.target.closest('a');
+  if (!link) {
+    return;
+  }
+  event.preventDefault();
+  const heading = document.getElementById(link.hash.slice(1));
+  heading.focus({ preventScroll: true });
+  heading.scrollIntoView({ block: 'start' });
+});
 elements.searchBtn.addEventListener('click', searchProject);
 elements.cancelTaskBtn.addEventListener('click', cancelCurrentTask);
 elements.browseJdkBtn.addEventListener('click', pickJdkHomeDirectory);
@@ -2470,11 +2558,11 @@ elements.browseJdtLsBtn.addEventListener('click', pickJdtLsHomeDirectory);
 elements.browseJdtLsJavaBtn.addEventListener('click', pickJdtLsJavaHomeDirectory);
 elements.closeSettingsBtn.addEventListener('click', closeSettingsDialog);
 elements.saveJdkSettingsBtn.addEventListener('click', saveJdkSettings);
+elements.aiProtocolSelect.addEventListener('change', updateAiProtocolFields);
 elements.browseExportDirectoryBtn.addEventListener('click', pickExportDirectory);
 elements.closeProjectSettingsBtn.addEventListener('click', closeProjectSettingsDialog);
 elements.saveProjectSettingsBtn.addEventListener('click', saveProjectSettings);
 elements.closeErrorGuideBtn.addEventListener('click', closeErrorGuideDialog);
-elements.closeDiffBtn.addEventListener('click', closeDiffDialog);
 elements.closeAiAssistantBtn.addEventListener('click', closeAiAssistantDialog);
 elements.runAiAssistantBtn.addEventListener('click', runAiAssistant);
 elements.applyAiResultBtn.addEventListener('click', applyAiResult);
@@ -2539,7 +2627,9 @@ elements.editor.addEventListener('input', () => {
 document.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault();
-    saveCurrentFile();
+    if (!elements.diffDialog.open && !elements.helpDialog.open) {
+      saveCurrentFile();
+    }
   }
 });
 window.addEventListener('beforeunload', (event) => {
@@ -2550,6 +2640,6 @@ window.addEventListener('beforeunload', (event) => {
 });
 elements.diffDialog.addEventListener('click', (event) => {
   if (event.target === elements.diffDialog) {
-    closeDiffDialog();
+    elements.diffDialog.close();
   }
 });

@@ -322,6 +322,15 @@ try {
     foreach ($Artifact in $Artifacts) {
         Copy-Item -LiteralPath $Artifact.FullName -Destination (Join-Path $ReleaseRoot $Artifact.Name) -Force
     }
+    $ApplicationExecutables = @(Get-ChildItem -LiteralPath $ReleaseRoot -Filter '*.exe' -File)
+    if ($ApplicationExecutables.Count -ne 1) {
+        throw '无法唯一确定需要诊断的应用 EXE。'
+    }
+    $DiagnosticTarget = if ($Windows7) { 'windows7' } else { 'windows' }
+    & $Node (Join-Path $ProjectRoot 'scripts\build-startup-diagnostics.js') $ReleaseRoot $ApplicationExecutables[0].Name $DiagnosticTarget
+    if ($LASTEXITCODE -ne 0) {
+        throw "独立启动诊断器构建失败，退出码：$LASTEXITCODE"
+    }
     $ReleaseExecutables = @(Get-ChildItem -LiteralPath $ReleaseRoot -Filter '*.exe' -File)
     Invoke-CodeSigning -Executables $ReleaseExecutables
     $SigningStatus = if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) { 'NOT_SIGNED' } else { 'VALID' }

@@ -25,7 +25,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%APP_ROOT%scripts\ensure-backend-package.ps1" -JarPath "%BACKEND_JAR%" -ProjectRoot "%APP_ROOT%"
+rem Keep the quoted project directory from ending in a backslash.
+pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%APP_ROOT%scripts\ensure-backend-package.ps1" -JarPath "%BACKEND_JAR%" -ProjectRoot "%APP_ROOT%."
 if errorlevel 1 (
     echo Backend package validation or rebuild failed.
     pause

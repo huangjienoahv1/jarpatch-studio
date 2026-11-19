@@ -7,12 +7,212 @@
   <title>JarPatch Studio</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="styles-settings.css">
+  <link rel="stylesheet" href="styles-help.css">
   <link rel="stylesheet" href="generated/editor-bridge.css">
 </head>
 <body>
   <div id="notificationArea" class="notification-area" aria-live="polite"></div>
-  <div id="diffDialog" class="modal-backdrop" aria-hidden="true">
-    <section class="modal-panel diff-panel" role="dialog" aria-modal="true" aria-labelledby="diffDialogTitle">
+  <dialog id="helpDialog" class="help-dialog" aria-labelledby="helpDialogTitle">
+    <header class="help-header">
+      <h2 id="helpDialogTitle">JarPatch Studio 使用手册</h2>
+      <form method="dialog">
+        <button class="tool-btn" type="submit" autofocus>关闭</button>
+      </form>
+    </header>
+    <div class="help-body">
+      <nav id="helpNavigation" class="help-navigation" aria-label="手册目录">
+        <h3>入门</h3>
+        <a href="#help-start">快速入门</a>
+        <a href="#help-workbench">认识工作台</a>
+        <a href="#help-import">打开 Jar/War</a>
+        <a href="#help-editor">文件树与编辑器</a>
+        <h3>顶部操作</h3>
+        <a href="#help-analyze">分析</a>
+        <a href="#help-diff">差异</a>
+        <a href="#help-compile">编译</a>
+        <a href="#help-export">导出</a>
+        <a href="#help-project-settings">项目设置</a>
+        <a href="#help-history">项目历史</a>
+        <a href="#help-cleanup">清理工作区</a>
+        <a href="#help-orphans">孤立工作区</a>
+        <a href="#help-error-guide">排错向导</a>
+        <a href="#help-diagnostics">导出诊断</a>
+        <a href="#help-development">开发能力</a>
+        <h3>查看结果</h3>
+        <a href="#help-tasks">任务状态与日志</a>
+      </nav>
+      <div class="help-content" role="region" aria-label="手册正文">
+        <section>
+          <h3 id="help-start" tabindex="-1">快速入门</h3>
+          <p>JarPatch Studio 将 Jar 或 War 导入本地工作区。你可以查看包结构、编辑反编译后的 Java 和文本资源，再导出一个新包。导入后先点「分析」查看包类型和签名风险。</p>
+          <figure>
+            <figcaption>只改 YAML、properties 等资源文件</figcaption>
+            <ol class="help-flow" role="list">
+              <li>打开包</li><li>编辑并保存</li><li>确认差异</li><li>导出新包</li>
+            </ol>
+          </figure>
+          <figure>
+            <figcaption>修改 Java 源码</figcaption>
+            <ol class="help-flow" role="list">
+              <li>打开包</li><li>编辑并保存</li><li>编译</li><li>确认差异</li><li>导出新包</li>
+            </ol>
+          </figure>
+          <p class="help-note">例如修改 Spring Boot 的 <code>application-dev.yaml</code>，可从 <code>extracted/BOOT-INF/classes</code> 找到文件。保存后在「差异」展开该文件检查变更，再导出到新路径。只修改资源文件时，编译步骤可跳过。</p>
+        </section>
+
+        <section>
+          <h3 id="help-workbench" tabindex="-1">认识工作台</h3>
+          <figure>
+            <figcaption>工作台区域示意图</figcaption>
+            <div class="help-map" aria-hidden="true">
+              <div class="help-map-projects">项目栏</div>
+              <div class="help-map-toolbar">项目名称与顶部操作栏</div>
+              <div class="help-map-task">任务状态 · 取消任务</div>
+              <div class="help-map-tree">文件树</div>
+              <div class="help-map-editor">编辑器</div>
+              <div class="help-map-analysis">分析与风险</div>
+              <div class="help-map-logs">执行日志</div>
+            </div>
+          </figure>
+          <ul>
+            <li><strong>左侧项目栏</strong>用于导入包或切换历史项目。可用收起按钮给编辑器腾出空间。</li>
+            <li><strong>顶部操作栏</strong>针对当前项目执行分析、编译、导出等操作。项目名称下方显示包类型和工作区路径。「帮助」也可以在打开包之前使用。</li>
+            <li><strong>中间文件树与编辑器</strong>用于定位和修改文件。拖动两者之间的分隔条可调整文件树宽度。</li>
+            <li><strong>右侧分析与风险</strong>用于展开包结构、依赖数量和风险项。底部「执行日志」显示本次操作的进度和错误。</li>
+          </ul>
+        </section>
+
+        <section>
+          <h3 id="help-import" tabindex="-1">打开 Jar/War</h3>
+          <ol>
+            <li>点击左侧「打开 Jar/War」，选择普通 JAR、Spring Boot JAR 或 WAR 文件。</li>
+            <li>遇到嵌套 Jar 选择弹窗时，可点「推荐选择」使用按模块和应用包名推断的范围，也可以手动勾选、全选或清空。各业务模块可能位于 <code>BOOT-INF/lib</code> 或 <code>WEB-INF/lib</code>。</li>
+            <li>点「开始导入」，等待解压和反编译。完成后从文件树查看 Java、配置和其他资源。</li>
+          </ol>
+          <p class="help-note">只想改主包配置时可缩小嵌套 Jar 的反编译范围。看不到某个业务模块源码时，检查它是否属于嵌套 Jar，并在导入时勾选对应模块。</p>
+        </section>
+
+        <section>
+          <h3 id="help-editor" tabindex="-1">文件树与编辑器</h3>
+          <dl>
+            <dt>sources</dt>
+            <dd>反编译得到的 Java。主包源码一般按 Java 包名展开，选中的嵌套 Jar 源码在 <code>sources/nested-jars</code> 下。修改并保存后点击「编译」，生成包实际使用的 <code>.class</code>。</dd>
+            <dt>extracted</dt>
+            <dd>解压后的实际包内容。常见的配置和文本资源可以直接编辑保存。二进制和签名文件以只读方式处理。</dd>
+            <dt>搜索</dt>
+            <dd>在文件树上方输入类名、文件名或内容关键字，点击「搜索」或按 <kbd>Enter</kbd>。点击结果打开对应文件。</dd>
+            <dt>文件编码与中文预览</dt>
+            <dd>资源文件出现乱码时，先按实际编码重新打开，例如 GBK 或 GB18030。Java 源码使用 UTF-8。「中文预览」将 <code>\uXXXX</code> 转义显示为可读中文，预览区域只读，点「返回原文」可继续编辑。</dd>
+            <dt>保存</dt>
+            <dd>点击「保存」或按 <kbd>Ctrl+S</kbd>（macOS 为 <kbd>⌘S</kbd>）把修改写到工作区。切换文件或项目时留意未保存提示。资源文件保存会按所选编码写入，并保留原有的换行和 BOM。</dd>
+            <dt>快速修复与整理 import</dt>
+            <dd>在「开发能力」启用 Java 代码智能后，将光标放在有诊断的位置并点「快速修复」查看可用操作。「整理 import」按 Java 语义整理导入语句。检查编辑结果后保存。</dd>
+            <dt>AI 补全与 AI 助手</dt>
+            <dd>配置 AI 后，点「AI 补全」获取当前光标处的建议。通过「AI 助手」可解释代码、按诊断修复或按要求重构。运行前可选中目标代码，结果先显示在预览区。需要写入时，点「应用修改」，检查编辑器内容后再保存。</dd>
+          </dl>
+        </section>
+
+        <section>
+          <h3 id="help-analyze" tabindex="-1">分析</h3>
+          <p>点击「分析」刷新当前项目的结构报告。展开右侧「分析与风险」，可查看包类型、入口类、Manifest、class 数量、依赖数量和修改文件数量。</p>
+          <ul>
+            <li><strong>存在签名文件</strong>表示更新 class 或资源后，需要在导出环节处理失效签名。</li>
+            <li><strong>存在嵌套 Jar</strong>表示包内包含依赖或业务模块。寻找模块源码时可结合导入时勾选的范围。</li>
+            <li>如果出现多版本目录或混淆提示，编译和发布前应检查涉及的类、目录和运行环境。</li>
+          </ul>
+        </section>
+
+        <section>
+          <h3 id="help-diff" tabindex="-1">差异</h3>
+          <p>比较工作区已保存的内容与导入时的固定基线。对比窗口顶部汇总「源码」「资源」「class」三类数量，展开文件项可以查看导入基线和当前内容。</p>
+          <ul>
+            <li><strong>源码</strong>用于核对本次编辑的 Java，例如类或方法的具体变化。</li>
+            <li><strong>资源</strong>用于核对配置、模板等文件，例如 YAML 参数是否改对。</li>
+            <li><strong>class</strong>显示编译已写回的产物。改过 Java 时，确认最新修改已成功编译，再核对清单并导出。</li>
+          </ul>
+        </section>
+
+        <section>
+          <h3 id="help-compile" tabindex="-1">编译</h3>
+          <ol>
+            <li>保存修改过的 Java，点击「编译」。程序根据原始 class 识别目标 Java 版本，并查找匹配的编译 JDK。</li>
+            <li>等待任务完成。全部目标编译成功后，主包 class 写回主 classes 目录，嵌套模块 class 写回对应的嵌套 Jar。</li>
+            <li>遇到失败时看底部日志中的首条编译错误。找不到 JDK 时检查「开发能力」中的 JDK 目录和 <code>bin/javac</code>。找不到类时核对报错类、包名和依赖。</li>
+          </ol>
+          <p class="help-note">反编译后的 Java 可能需要修正后才能编译。涉及 Lombok、MapStruct 等注解处理生成的代码时，应使用原项目的构建流程。</p>
+        </section>
+
+        <section>
+          <h3 id="help-export" tabindex="-1">导出</h3>
+          <ol>
+            <li>保存改动。修改过 Java 时，先完成编译。</li>
+            <li>点击「导出」，在「导出前差异确认」核对源码、资源和 class。确认无误后点「继续导出」。</li>
+            <li>选择签名处理方式，再选择输出位置。保持与原包对应的 <code>.jar</code> 或 <code>.war</code> 扩展名。</li>
+            <li>等到导出成功，核对提示中的输出路径。可到「项目历史」查看结构校验结果，再到目标环境启动并验证实际功能。</li>
+          </ol>
+          <p class="help-note help-warning"><strong>已修改的签名包</strong>需要选择移除失效签名，导出结果是未签名包。若部署环境要求签名，按其发布流程重新签名。选择保留签名时，程序会阻止导出已修改的签名包。</p>
+        </section>
+
+        <section>
+          <h3 id="help-project-settings" tabindex="-1">项目设置</h3>
+          <p>这些设置只作用于当前项目。修改后点「保存项目设置」。</p>
+          <dl>
+            <dt>目标 Java 版本</dt><dd>由原包的 class 决定，作为检查编译 JDK 的依据。此项只读。</dd>
+            <dt>默认导出目录</dt><dd>使用「浏览」选择常用输出目录，导出时仍可在保存窗口选择具体路径和文件名。</dd>
+            <dt>可编辑单文件上限与无 BOM 文本默认编码</dt><dd>文件太大无法编辑时，按实际需要调整上限。旧文本没有 BOM 时可选择默认编码。单个资源文件也可在编辑器工具栏选择编码。</dd>
+            <dt>推荐嵌套 Jar 与界面偏好</dt><dd>嵌套 Jar 每行填写一个包内相对路径。界面偏好使用 JSON 对象格式。一般修改包时可保留现有设置。</dd>
+          </dl>
+        </section>
+
+        <section>
+          <h3 id="help-history" tabindex="-1">项目历史</h3>
+          <p>顶部「项目历史」查看当前项目的操作时间线、最近分析快照和导出校验。遇到导出失败时，可结合时间和操作 ID 定位同一次任务的结果。</p>
+          <p>左侧「项目历史」用于切换已导入的项目。使用项目旁的「删除」时，可选择只删除记录，或先预览并清理工作区再删除记录。只删除记录后，目录可在「孤立工作区」中查到。</p>
+        </section>
+
+        <section>
+          <h3 id="help-cleanup" tabindex="-1">清理工作区</h3>
+          <p>针对当前项目释放磁盘空间。点击后先预览工作区路径、文件数和占用空间，确认目录无误后才删除。清理完成后项目历史仍可查看。</p>
+          <p class="help-note help-warning"><strong>删除范围</strong>包括工作区里的解压文件、已保存的源码和配置修改、编译产物，以及存放在该目录内的导出包。需要保留的成果应先导出到工作区以外，再确认清理。</p>
+        </section>
+
+        <section>
+          <h3 id="help-orphans" tabindex="-1">孤立工作区</h3>
+          <p>扫描已完成导入、但已无项目记录的工作目录，例如之前选择「只删除历史」留下的目录。预览列出路径、文件数、大小和最后修改时间。</p>
+          <p class="help-note help-warning">确认后会清理本次预览列出的全部目录。先核对每个目录是否还有要保留的文件。预览后目录内容有变化时，需要重新扫描确认。</p>
+        </section>
+
+        <section>
+          <h3 id="help-error-guide" tabindex="-1">排错向导</h3>
+          <p>碰到导入、编译、导出或本地服务异常时，打开「排错向导」，用底部日志中的提示定位对应条目。向导提供 JDK、CFR 反编译、编译、签名、路径和端口等检查步骤。</p>
+          <p>例如遇到「找不到匹配的 JDK」，先对照「项目设置」里的目标版本，再在「开发能力」选择含 <code>bin/javac</code> 的 JDK 根目录并保存校验。</p>
+        </section>
+
+        <section>
+          <h3 id="help-diagnostics" tabindex="-1">导出诊断</h3>
+          <p>点击「导出诊断」并选择保存路径，生成一份脱敏 JSON，供排查软件问题。内容包括软件版本、系统与 Java 环境、近期任务日志和后端日志。反馈问题时可一并附上发生时间、所点按钮和报错表现。</p>
+        </section>
+
+        <section>
+          <h3 id="help-development" tabindex="-1">开发能力</h3>
+          <dl>
+            <dt>编译 JDK</dt><dd>选择包含 <code>bin/javac</code> 的 JDK 根目录，点「保存并校验」。所选目录用于编译补丁，目标 Java 版本以原包为准。</dd>
+            <dt>Java 代码智能（Eclipse JDT LS）</dt><dd>勾选后分别填写 JDT LS 解压目录和用于启动它的 Java 21 或以上 JDK，再保存。编辑器状态行显示连接情况。连接成功后可使用诊断、语义补全、悬停、跳转、快速修复和整理 import。这个 JDK 单独用于启动语言服务器。</dd>
+            <dt>AI 代码助手</dt><dd>勾选后选择与服务对应的协议，填写完整接口地址、服务支持的模型 ID 和所需的 API Key，保存后从编辑器工具栏发起操作。AI 请求会将选中的代码或当前文件发送到所配置的端点。</dd>
+          </dl>
+          <p class="help-note">只查看或修改 YAML、properties 等资源时，使用内置编辑器即可。Java 代码智能和 AI 均可按需启用。</p>
+        </section>
+
+        <section>
+          <h3 id="help-tasks" tabindex="-1">任务状态与日志</h3>
+          <p>导入、分析、编译和导出会显示当前任务、进度及结果。操作耗时较长时，先看任务状态和底部「执行日志」。任务仍在运行时，可通过「取消任务」发出取消请求，随后查看最终状态。</p>
+          <p>出现失败时，先记录失败阶段和首条具体错误。结合「排错向导」进行检查，需要反馈时再用「导出诊断」保存日志。</p>
+        </section>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="diffDialog" class="modal-backdrop diff-dialog" aria-labelledby="diffDialogTitle">
+    <section class="modal-panel diff-panel">
       <header class="modal-header">
         <div>
           <h2 id="diffDialogTitle">导出前差异确认</h2>
@@ -20,11 +220,12 @@
         </div>
       </header>
       <div id="diffContent" class="diff-content"></div>
-      <footer class="modal-footer">
-        <button id="closeDiffBtn" class="primary-action modal-primary" type="button">关闭</button>
-      </footer>
+      <form class="modal-footer" method="dialog">
+        <button class="tool-btn" type="submit" value="close">关闭</button>
+        <button id="continueExportBtn" class="primary-action modal-primary" type="submit" value="export" hidden>继续导出</button>
+      </form>
     </section>
-  </div>
+  </dialog>
   <div id="projectHistoryDialog" class="modal-backdrop" aria-hidden="true">
     <section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="projectHistoryDialogTitle">
       <header class="modal-header">
@@ -76,6 +277,12 @@
             <button id="browseJdkBtn" class="tool-btn" type="button">浏览</button>
           </div>
           <div id="jdkSettingsTip" class="settings-tip"></div>
+          <div class="settings-status">
+            <div class="settings-status-item">
+              <span class="settings-status-label">内置 JDK 版本</span>
+              <span id="bundledJdkVersion" role="status"></span>
+            </div>
+          </div>
         </section>
         <section class="settings-card">
           <div class="section-header">当前状态</div>
@@ -109,16 +316,25 @@
           <div class="development-settings-grid">
             <label class="field-label">接口协议
               <select id="aiProtocolSelect">
-                <option value="responses">OpenAI Responses API</option>
-                <option value="chat-completions">OpenAI 兼容 Chat Completions</option>
+                <option value="responses" data-endpoint-example="https://api.openai.com/v1/responses">OpenAI Responses API</option>
+                <option value="chat-completions" data-endpoint-example="https://api.openai.com/v1/chat/completions">OpenAI 兼容 Chat Completions</option>
+                <option value="anthropic-messages" data-endpoint-example="http://127.0.0.1:8000/v1/messages">Anthropic 兼容 Messages API</option>
               </select>
             </label>
             <label class="field-label">模型
               <input id="aiModelInput" type="text" placeholder="填写端点实际支持的模型 ID">
             </label>
             <label class="field-label field-wide">完整接口地址
-              <input id="aiEndpointInput" type="url" placeholder="例如：https://api.openai.com/v1/responses">
+              <input id="aiEndpointInput" type="url">
             </label>
+            <div id="aiMessagesAuthField" class="field-wide" hidden>
+              <label class="field-label">鉴权方式
+                <select id="aiMessagesAuthSelect">
+                  <option value="x-api-key">x-api-key</option>
+                  <option value="bearer">Authorization Bearer</option>
+                </select>
+              </label>
+            </div>
             <label class="field-label field-wide">API Key
               <input id="aiApiKeyInput" type="password" autocomplete="new-password" placeholder="留空表示保留已保存密钥；本机无鉴权端点可不填">
             </label>
@@ -224,18 +440,21 @@
   </div>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark">J</div>
-        <div>
-          <h1>JarPatch Studio</h1>
-          <p>Jar / Spring Boot / War 修复工作台</p>
+      <button id="sidebarToggleBtn" class="tool-btn sidebar-toggle" type="button" aria-expanded="true" aria-controls="sidebarContent" aria-label="收起项目栏" title="收起项目栏"></button>
+      <div id="sidebarContent" class="sidebar-content">
+        <div class="brand">
+          <div class="brand-mark">J</div>
+          <div>
+            <h1>JarPatch Studio</h1>
+            <p>Jar / Spring Boot / War 修复工作台</p>
+          </div>
         </div>
+        <button id="openArchiveBtn" class="primary-action">打开 Jar/War</button>
+        <section class="panel">
+          <div class="panel-title">项目历史</div>
+          <div id="projectList" class="project-list"></div>
+        </section>
       </div>
-      <button id="openArchiveBtn" class="primary-action">打开 Jar/War</button>
-      <section class="panel">
-        <div class="panel-title">项目历史</div>
-        <div id="projectList" class="project-list"></div>
-      </section>
     </aside>
 
     <main class="workspace">
@@ -256,6 +475,7 @@
           <button id="errorGuideBtn" class="tool-btn" type="button">排错向导</button>
           <button id="diagnosticBtn" class="tool-btn" type="button">导出诊断</button>
           <button id="settingsBtn" class="tool-btn" type="button">⚙ 开发能力</button>
+          <button id="helpBtn" class="tool-btn help-button" type="button" aria-haspopup="dialog" aria-controls="helpDialog">帮助</button>
         </div>
       </header>
 

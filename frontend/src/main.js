@@ -4,6 +4,11 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const readline = require('readline');
+const { createStartupDiagnostics } = require('./startup-diagnostics');
+const startupDiagnostics = createStartupDiagnostics(app.getPath('userData'));
+startupDiagnostics.write('DESKTOP_START', { electron: process.versions.electron, node: process.version,
+  platform: process.platform, resourcesPath: process.resourcesPath });
+process.on('uncaughtExceptionMonitor', (error) => startupDiagnostics.write('UNCAUGHT_EXCEPTION', error.stack || error.message));
 const { DevelopmentServices } = require('./development-services');
 const fetch = require('./http-fetch');
 
@@ -11,6 +16,8 @@ const BACKEND_PORT = 18765;
 const BACKEND_HOST = '127.0.0.1';
 const BACKEND_BASE_URL = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
 const BACKEND_JAR_NAME = 'jarpatch-studio-backend.jar';
+const BUNDLED_RUNTIME_DIRECTORY = 'runtime';
+const JAVAC_EXECUTABLE_NAME = process.platform === 'win32' ? 'javac.exe' : 'javac';
 const BACKEND_READY_TIMEOUT_MS = 20000;
 const BACKEND_POLL_INTERVAL_MS = 250;
 const BACKEND_SHUTDOWN_TIMEOUT_MS = 5000;
@@ -35,6 +42,7 @@ let backendToken = null;
 let backendInstanceId = null;
 let backendLogPath = null;
 let mainWindow = null;
+let backendReady = false;
 const backendLogs = [];
 const developmentServices = new DevelopmentServices();
 
@@ -78,9 +86,12 @@ function startBackend() {
     throw new Error(`未找到后端程序：${backendJar}`);
   }
   backendToken = crypto.randomBytes(32).toString('hex');
+  startupDiagnostics.protectSecret(backendToken);
   backendInstanceId = crypto.randomUUID();
   backendLogPath = resolveBackendLogPath();
   const javaExecutable = resolveJavaExecutable();
+  startupDiagnostics.write('BACKEND_LAUNCH', { javaExecutable, backendJar,
+    bundledJavacExists: fs.existsSync(path.join(path.dirname(javaExecutable), JAVAC_EXECUTABLE_NAME)) });
   backendProcess = spawn(javaExecutable, ['-jar', backendJar], {
     cwd: path.dirname(backendJar),
     env: {
@@ -124,7 +135,7 @@ function resolveBackendJarPath() {
 function resolveJavaExecutable() {
   const javaName = process.platform === 'win32' ? 'java.exe' : 'java';
   if (app.isPackaged) {
-    const bundledJava = path.join(process.resourcesPath, 'runtime', 'bin', javaName);
+    const bundledJava = path.join(process.resourcesPath, BUNDLED_RUNTIME_DIRECTORY, 'bin', javaName);
     if (!fs.existsSync(bundledJava)) {
       throw new Error(`发布包缺少 Java 运行时：${bundledJava}`);
     }
@@ -139,6 +150,27 @@ function resolveJavaExecutable() {
   return javaName;
 }
 
+/**
+ * 从发布包的 Java release 文件读取内置编译 JDK 版本。
+ *
+ * @returns {Promise<string|null>} 完整 JDK 的版本号，未内置编译器时为 null
+ */
+async function getBundledJdkVersion() {
+  if (!app.isPackaged) {
+    return null;
+  }
+  const runtimeHome = path.join(process.resourcesPath, BUNDLED_RUNTIME_DIRECTORY);
+  if (!fs.existsSync(path.join(runtimeHome, 'bin', JAVAC_EXECUTABLE_NAME))) {
+    return null;
+  }
+  const release = await fs.promises.readFile(path.join(runtimeHome, 'release'), 'utf8');
+  const version = release.match(/^JAVA_VERSION="([^"\r\n]+)"$/m)?.[1];
+  if (!version) {
+    throw new Error('内置 JDK 的 release 文件缺少 JAVA_VERSION');
+  }
+  return version;
+}
+
 function captureBackendOutput(stream, channel) {
   if (!stream) {
     return;
@@ -148,6 +180,7 @@ function captureBackendOutput(stream, channel) {
 }
 
 function appendBackendLog(channel, message) {
+  if (!backendReady) startupDiagnostics.write(`BACKEND_${channel}`, message);
   backendLogs.push(`[${channel}] ${message}`);
   if (backendLogs.length > BACKEND_LOG_LIMIT) {
     backendLogs.shift();
@@ -181,7 +214,7 @@ async function waitForBackendReady() {
 
 function formatBackendFailure(message) {
   const details = backendLogs.slice(-20).join('\n');
-  const identity = `实例 ID：${backendInstanceId || '未生成'}\n后端日志：${backendLogPath || '未生成'}`;
+  const identity = `实例 ID：${backendInstanceId || '未生成'}\n启动日志：${startupDiagnostics.filePath}\n后端日志：${backendLogPath || '未生成'}`;
   return details ? `${message}\n${identity}\n\n${details}` : `${message}\n${identity}`;
 }
 
@@ -274,6 +307,7 @@ async function saveDiagnosticFile(_, defaultName, content) {
 }
 
 ipcMain.handle('dialog:saveDiagnostic', saveDiagnosticFile);
+ipcMain.handle('development:getBundledJdkVersion', getBundledJdkVersion);
 
 ipcMain.handle('backend:connection', () => ({
   apiBase: BACKEND_BASE_URL,
@@ -285,6 +319,7 @@ ipcMain.handle('backend:connection', () => ({
 developmentServices.registerIpc(ipcMain);
 
 if (!singleInstanceLockAcquired) {
+  startupDiagnostics.write('EXISTING_INSTANCE', '已通知现有实例；本次不启动后端');
   app.quit();
 } else {
   app.on('second-instance', () => {
@@ -304,6 +339,8 @@ if (!singleInstanceLockAcquired) {
     try {
       startBackend();
       await waitForBackendReady();
+      backendReady = true;
+      startupDiagnostics.write('READY', '后端健康检查通过');
       if (smokeCheckRequested) {
         process.stdout.write(`${JSON.stringify({
           product: PRODUCT_NAME,
@@ -317,6 +354,7 @@ if (!singleInstanceLockAcquired) {
       }
       createWindow();
     } catch (error) {
+      startupDiagnostics.write('STARTUP_FAILED', error.stack || error.message);
       if (smokeCheckRequested) {
         process.stderr.write(`${formatBackendFailure(error.message)}\n`);
       } else {
@@ -327,7 +365,7 @@ if (!singleInstanceLockAcquired) {
         backendProcess.kill();
       }
       applicationQuitAllowed = true;
-      app.quit();
+      app.exit(1);
     }
   });
 }

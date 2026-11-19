@@ -1027,6 +1027,47 @@ function detectLanguage(filePath) {
 }
 
 /**
+ * 创建独立的只读差异视图，关闭时一起释放编辑器和两份文本模型。
+ *
+ * @param {HTMLElement} container 差异视图容器
+ * @param {object} diff 文件差异
+ * @returns {{dispose: function()}} 视图释放入口
+ */
+function createDiffView(container, diff) {
+  const language = detectLanguage(diff.path);
+  const original = monaco.editor.createModel(diff.originalContent ?? '', language);
+  const modified = monaco.editor.createModel(diff.currentContent ?? '', language);
+  const editor = monaco.editor.createDiffEditor(container, {
+    automaticLayout: true,
+    readOnly: true,
+    originalEditable: false,
+    originalAriaLabel: '导入基线',
+    modifiedAriaLabel: '当前内容',
+    renderSideBySide: true,
+    enableSplitViewResizing: false,
+    useInlineViewWhenSpaceIsLimited: false,
+    renderIndicators: true,
+    renderMarginRevertIcon: false,
+    renderGutterMenu: false,
+    ignoreTrimWhitespace: false,
+    diffWordWrap: 'on',
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    fontFamily: 'JetBrains Mono, Consolas, monospace',
+    fontSize: 13
+  });
+  editor.setModel({ original, modified });
+  editor.revealFirstDiff();
+  return {
+    dispose() {
+      editor.dispose();
+      original.dispose();
+      modified.dispose();
+    }
+  };
+}
+
+/**
  * 把 Monaco 位置转为 LSP 零基位置。
  *
  * @param {monaco.Position} position Monaco 位置
@@ -1199,5 +1240,6 @@ function toMonacoWorkspaceEdit(workspaceEdit) {
 
 window.jarPatchEditor = Object.freeze({
   create: (container) => new MonacoEditorFacade(container),
+  createDiffView,
   detectLanguage
 });

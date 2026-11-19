@@ -254,7 +254,7 @@
   font-weight: 700;
 }
 
-.field-label.field-wide {
+.field-wide {
   grid-column: 1 / -1;
 }
 

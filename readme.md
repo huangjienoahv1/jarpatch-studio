@@ -12,7 +12,7 @@ JarPatch Studio 是一个完全开源的跨平台桌面软件，面向普通 Jav
 - 编辑 Java 源码和文本资源文件。
 - 代码编辑区已升级为 Monaco Editor，提供语法高亮、括号匹配、代码折叠、缩略图、查找替换、快捷键和命令面板。
 - 可选接入 Eclipse JDT LS：提供 Java 代码补全、悬停说明、实时错误/警告、跳转定义、快速修复、格式化和整理 import；补全返回的附加编辑会同步写入 import。
-- 可选接入 OpenAI Responses 或兼容 Chat Completions 的 AI 端点：支持显式 AI 补全、解释、修复和重构；解释只读展示，代码修改必须先预览再由用户应用。
+- 可选接入 OpenAI Responses、兼容 Chat Completions 或兼容 Anthropic Messages 的 AI 端点：支持显式 AI 补全、解释、修复和重构；解释只读展示，代码修改必须先预览再由用户应用。
 - 编辑器提供“中文预览”按钮，可将 `\uXXXX` 形式的中文 Unicode 转义显示为正常中文；预览使用独立只读区域，不替换、不保存原始文本。
 - 保存时保留原始编码、BOM 和换行；无 BOM 旧文本通过项目默认编码或文件级编码显式选择读取，不做自动猜测；内容未改变时不写文件，外部内容变化时阻止覆盖。
 - 保存期间可继续编辑，新输入会保留为未保存状态；重复保存会提示等待当前保存完成，后续修改需要再次保存。切换文件或项目时，过期的文件读取和保存响应不会覆盖当前文档。
@@ -38,6 +38,7 @@ JarPatch Studio 是一个完全开源的跨平台桌面软件，面向普通 Jav
 - 工作区清理确认校验路径、大小、修改时间和文件内容摘要，等长修改也会使旧确认失效；预览与确认会读取完整工作区内容，大工作区耗时取决于磁盘与文件体量。
 - 项目历史和执行日志使用中国时区时间显示。
 - 桌面端已移除默认 `File / Edit / View / Window / Help` 菜单栏，后续需要菜单能力时再按功能补回。
+- 左侧项目栏默认展开，可用右上角箭头收起到左侧窄栏，点击箭头再次展开。
 - 主工作区采用代码优先布局，“分析与风险”默认收起为右侧窄按钮，点击后才展开风险详情，避免长期占用代码编辑空间。
 - 顶部操作栏会随窗口宽度自适应：非全屏时项目摘要与操作按钮分行展示，更窄窗口下按钮按完整文案整行换行，不会被压缩成逐字竖排。
 - 任务状态、编辑器工具栏和底部执行日志采用紧凑布局；编辑器工具栏会为文件摘要保留最小宽度，并让操作按钮在自身区域内整组换行，避免长路径逐字竖排后挤走代码正文。
@@ -54,7 +55,7 @@ JarPatch Studio 是一个完全开源的跨平台桌面软件，面向普通 Jav
 
 - 前端：Electron + Monaco Editor。
 - Java 代码智能：可选 Eclipse JDT LS（LSP）。
-- AI 代码助手：可选 OpenAI Responses API 或兼容 Chat Completions 的结构化输出端点。
+- AI 代码助手：支持 OpenAI Responses API、兼容 Chat Completions 和兼容 Anthropic Messages 的端点。
 - 后端：Java 17 + Spring Boot 3。
 - 通信：仅本机 HTTP API + 带令牌握手的 WebSocket 实时日志。
 - 存储：SQLite。
@@ -363,15 +364,27 @@ pwsh.exe -NoLogo -NoProfile -File .\build.ps1 -Windows7 -JdkHome 'C:\Tools\Liber
 
 [Electron 22 已停止维护](https://releases.electronjs.org/release/v22.3.27)，该包用于确有旧系统约束的环境；[Liberica 平台要求](https://bell-sw.com/pages/supported-configurations/)列出 Win7 SP1。构建主机上的启动、编译验收不能代替真实 Win7 验收，发布清单明确标记 `targetOsVerified: false`。发布包附带 [Eclipse JDT LS 1.55.0](https://github.com/eclipse-jdtls/eclipse.jdt.ls/tree/v1.55.0) 并共用内置 JDK 21。构建机首次打包会下载 Eclipse 官方发布包并校验 SHA-256，后续可复用缓存。基础编辑、补丁编译和 Java 代码智能可离线使用。
 
+### 启动失败诊断
+
+Windows 发布目录同时提供小型原生 `JarPatch-Startup-Diagnostics.exe`。将它和同一发布目录的应用 EXE 放在一起，双击诊断器；应用退出或启动失败后，会自动打开诊断报告和日志目录。诊断器不依赖目标机器的 Java、Node.js、.NET 或 PowerShell，不安装软件、不修改系统运行库。
+
+诊断器先检查目标系统与应用文件，再记录原始进程退出码及常见 DLL 缺失、入口点错误、位数错误等说明；启动报告与 Chromium 日志保存在 `%LOCALAPPDATA%\JarPatch Studio\startup-diagnostics\本次诊断目录`。新版应用另写 `desktop-startup.log`，包含内置 Java 路径、编译器是否存在、启动步骤和后端失败输出；敏感鉴权令牌不会写入启动日志。普通启动的桌面日志位于用户数据目录的 `logs/startup.log`，超过 1 MiB 后保留一个轮换备份。
+
+旧包也可由同版本文件名对应的诊断器收集系统退出码和 Chromium 日志，但不会生成新版桌面日志。`/SMOKE /NOOPEN` 参数用于自动检查启动且不打开主窗口或报告；原始进程返回 0 不能单独证明界面启动成功，需结合 `READY` 或 `STARTUP_FAILED` 记录判断。系统在诊断器自身启动前拦截程序时，仍需查看 Windows 系统提示或应用程序事件记录。
+
 标准 Windows 包写入 `release/windows/`，并生成包含环境、Git commit、构建前源码是否干净、构建入口及其 SHA-256、签名状态、产物大小和 SHA-256 的 `release-manifest.json`。三个平台入口都会对解包应用执行 `--smoke-check`，确认内置 Java 和后端健康检查可用。正式签名所需环境变量、macOS 公证、Linux GPG 和回滚步骤见 `docs/release-runbook.md`；macOS/Linux 必须在对应原生系统执行 `./build-macos.sh` 或 `./build-linux.sh`。
 
 ## 使用流程
+
+顶部工具栏的「帮助」可以离线打开图文手册。通过目录查看每个按钮的用途、操作步骤和注意事项，也可以按快速入门的流程图修改配置或 Java 源码。
 
 1. 打开 JarPatch Studio。
 2. 点击右上角“开发能力”：
    - 编译 JDK 沿用原有配置。
    - 如需 Java 代码智能，在 Win7 免安装包里勾选启用并保存，两项路径留空即使用内置 JDT LS 和 JDK 21。需要覆盖内置组件时可手动填写对应路径。其他版本请自行配置 JDT LS 和运行它的 JDK。
    - 如需 AI 能力，选择协议并填写端点、模型和 API Key；远程端点强制 HTTPS，API Key 使用系统安全存储加密，渲染页面不会读取明文密钥。
+   - 自部署的千问、智谱等模型如果提供 Anthropic Messages 接口，选择“Anthropic 兼容 Messages API”，填写部署服务的完整接口地址（本机示例 `http://127.0.0.1:8000/v1/messages`）和服务实际暴露的模型 ID。根据网关要求选择 `x-api-key` 或 `Authorization Bearer`，并填入网关密钥。本机无鉴权服务可以留空密钥。
+   - Messages 协议使用基础请求字段，通过提示要求模型返回 JSON，客户端在展示结果前校验 JSON 字段和操作类型。
 3. 点击“打开 Jar/War”。
 4. 选择本地 Jar 或 War。
 5. 等待后端预解析 `pom.xml` 和嵌套 Jar 候选项。

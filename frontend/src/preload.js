@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('jarPatch', {
   pickDirectory: (defaultPath, title) => ipcRenderer.invoke('dialog:pickDirectory', defaultPath, title),
   getBackendConnection: () => ipcRenderer.invoke('backend:connection'),
   getDevelopmentSettings: () => ipcRenderer.invoke('development:getSettings'),
+  getBundledJdkVersion: () => ipcRenderer.invoke('development:getBundledJdkVersion'),
   saveDevelopmentSettings: (settings) => ipcRenderer.invoke('development:saveSettings', settings),
   startLanguageServer: (request) => ipcRenderer.invoke('development:startLanguageServer', request),
   sendLanguageServerMessage: (message) => ipcRenderer.invoke('development:sendLanguageServerMessage', message),

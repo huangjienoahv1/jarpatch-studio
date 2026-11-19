@@ -1,0 +1,275 @@
+.toolbar-actions .help-button:not(:hover) {
+  border-color: #bfd2f9;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-weight: 700;
+}
+
+.help-dialog {
+  width: min(1080px, calc(100vw - 40px));
+  height: min(790px, calc(100vh - 40px));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+.help-dialog[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.help-dialog::backdrop {
+  background: rgba(17, 29, 49, 0.55);
+}
+
+.help-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.help-header h2 {
+  margin: 0;
+  font-size: 21px;
+}
+
+.help-header .tool-btn {
+  white-space: nowrap;
+}
+
+.help-body {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.help-navigation,
+.help-content {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.help-navigation {
+  padding: 14px 12px;
+  border-right: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.help-navigation h3 {
+  margin: 14px 8px 4px;
+  color: #52627b;
+  font-size: 12px;
+}
+
+.help-navigation h3:first-child {
+  margin-top: 0;
+}
+
+.help-navigation a {
+  display: block;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.help-navigation a:hover {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  text-decoration: underline;
+}
+
+.help-dialog :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.help-content {
+  padding: 0 clamp(16px, 3vw, 40px) 28px;
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.help-content section {
+  padding: 23px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.help-content section:last-child {
+  border-bottom: 0;
+}
+
+.help-content h3 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  scroll-margin-top: 14px;
+}
+
+.help-content p,
+.help-content ol,
+.help-content ul,
+.help-content dl {
+  margin: 8px 0;
+}
+
+.help-content ol,
+.help-content ul {
+  padding-left: 23px;
+}
+
+.help-content li + li {
+  margin-top: 4px;
+}
+
+.help-content dt {
+  font-weight: 700;
+}
+
+.help-content dd {
+  margin: 0 0 8px;
+}
+
+.help-content kbd,
+.help-content code {
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-soft);
+  font-size: 0.92em;
+}
+
+.help-content figure {
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.help-content figcaption {
+  color: #415675;
+  font-weight: 700;
+}
+
+.help-content .help-flow {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.help-flow li {
+  position: relative;
+  padding: 7px;
+  border: 1px solid #c3d4f6;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--accent-dark);
+  text-align: center;
+  font-weight: 700;
+}
+
+.help-flow li + li {
+  margin-top: 0;
+}
+
+.help-flow li + li::before {
+  position: absolute;
+  top: calc(50% - 3px);
+  left: -13px;
+  width: 6px;
+  height: 6px;
+  border-top: 2px solid #7088ad;
+  border-right: 2px solid #7088ad;
+  transform: rotate(45deg);
+  content: '';
+}
+
+.help-map {
+  display: grid;
+  grid-template-columns: 1fr 1fr 2fr 1fr;
+  grid-template-areas:
+    'projects toolbar toolbar toolbar'
+    'projects task task task'
+    'projects tree editor analysis'
+    'projects logs logs logs';
+  gap: 6px;
+}
+
+.help-map div {
+  display: grid;
+  align-content: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  text-align: center;
+  font-weight: 700;
+}
+
+.help-map .help-map-projects { grid-area: projects; }
+.help-map .help-map-toolbar { grid-area: toolbar; background: var(--accent-soft); }
+.help-map .help-map-task { grid-area: task; }
+.help-map .help-map-tree { grid-area: tree; }
+.help-map .help-map-editor { grid-area: editor; min-height: 64px; background: #17263f; color: #fff; }
+.help-map .help-map-analysis { grid-area: analysis; }
+.help-map .help-map-logs { grid-area: logs; }
+
+.help-content .help-note {
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.help-content .help-warning {
+  border-left-color: #b45309;
+  background: #fff4e3;
+}
+
+@media (max-width: 760px) {
+  .help-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .help-navigation {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    align-items: baseline;
+    max-height: 23vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .help-navigation h3 {
+    flex-basis: 100%;
+    margin-top: 8px;
+  }
+
+  .help-content .help-flow {
+    grid-auto-flow: row;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .help-flow li + li::before {
+    top: -11px;
+    left: calc(50% - 4px);
+    transform: rotate(135deg);
+  }
+}
