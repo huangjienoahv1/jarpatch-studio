@@ -382,8 +382,8 @@ Windows 发布目录同时提供小型原生 `JarPatch-Startup-Diagnostics.exe`�
 2. 点击右上角“开发能力”：
    - 编译 JDK 沿用原有配置。
    - 如需 Java 代码智能，在 Win7 免安装包里勾选启用并保存，两项路径留空即使用内置 JDT LS 和 JDK 21。需要覆盖内置组件时可手动填写对应路径。其他版本请自行配置 JDT LS 和运行它的 JDK。
-   - 如需 AI 能力，选择协议并填写端点、模型和 API Key；远程端点强制 HTTPS，API Key 使用系统安全存储加密，渲染页面不会读取明文密钥。
-   - 自部署的千问、智谱等模型如果提供 Anthropic Messages 接口，选择“Anthropic 兼容 Messages API”，填写部署服务的完整接口地址（本机示例 `http://127.0.0.1:8000/v1/messages`）和服务实际暴露的模型 ID。根据网关要求选择 `x-api-key` 或 `Authorization Bearer`，并填入网关密钥。本机无鉴权服务可以留空密钥。
+   - 如需 AI 能力，选择协议并填写端点和模型。HTTP 支持本机回环地址和私有 IPv4 地址（10/8、172.16/12、192.168/16），其他地址须使用 HTTPS 并配置 API Key。HTTP 请求明文传输，保存的 API Key 使用系统安全存储加密。
+   - 所有协议均可填写完整接口地址，或填写以 `/v1` 或 `/v1/` 结尾的基础地址。选择“Anthropic 兼容 Messages API”时，例如填写 `http://192.168.1.10:8000/v1/`，实际请求地址为 `http://192.168.1.10:8000/v1/messages`。如网关有鉴权要求，按需选择 `x-api-key` 或 `Authorization Bearer` 并填入密钥。本机或私有 IPv4 无鉴权服务可留空密钥。如已保存旧密钥，勾选“清除已保存的 API Key”。
    - Messages 协议使用基础请求字段，通过提示要求模型返回 JSON，客户端在展示结果前校验 JSON 字段和操作类型。
 3. 点击“打开 Jar/War”。
 4. 选择本地 Jar 或 War。

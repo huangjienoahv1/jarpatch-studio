@@ -198,7 +198,7 @@
           <dl>
             <dt>编译 JDK</dt><dd>选择包含 <code>bin/javac</code> 的 JDK 根目录，点「保存并校验」。所选目录用于编译补丁，目标 Java 版本以原包为准。</dd>
             <dt>Java 代码智能（Eclipse JDT LS）</dt><dd>勾选后分别填写 JDT LS 解压目录和用于启动它的 Java 21 或以上 JDK，再保存。编辑器状态行显示连接情况。连接成功后可使用诊断、语义补全、悬停、跳转、快速修复和整理 import。这个 JDK 单独用于启动语言服务器。</dd>
-            <dt>AI 代码助手</dt><dd>勾选后选择与服务对应的协议，填写完整接口地址、服务支持的模型 ID 和所需的 API Key，保存后从编辑器工具栏发起操作。AI 请求会将选中的代码或当前文件发送到所配置的端点。</dd>
+            <dt>AI 代码助手</dt><dd>勾选后选择与服务对应的协议，填写接口地址或以 /v1 结尾的基础地址，以及服务支持的模型 ID 和所需的 API Key，保存后从编辑器工具栏发起操作。AI 请求会将选中的代码或当前文件发送到所配置的端点。</dd>
           </dl>
           <p class="help-note">只查看或修改 YAML、properties 等资源时，使用内置编辑器即可。Java 代码智能和 AI 均可按需启用。</p>
         </section>
@@ -312,7 +312,7 @@
             <input id="aiEnabledInput" type="checkbox">
             <span>启用 AI 代码助手</span>
           </label>
-          <p class="settings-tip">AI 操作会把你明确选择的代码或当前文件发送到下面的端点。API Key 仅由 Electron 主进程使用系统安全存储加密。</p>
+          <p class="settings-tip">AI 操作会把你明确选择的代码或当前文件发送到下面的端点。HTTP 明文传输请求，API Key 由系统安全存储加密保存。</p>
           <div class="development-settings-grid">
             <label class="field-label">接口协议
               <select id="aiProtocolSelect">
@@ -324,7 +324,7 @@
             <label class="field-label">模型
               <input id="aiModelInput" type="text" placeholder="填写端点实际支持的模型 ID">
             </label>
-            <label class="field-label field-wide">完整接口地址
+            <label class="field-label field-wide">接口地址（支持以 /v1 结尾的基础地址）
               <input id="aiEndpointInput" type="url">
             </label>
             <div id="aiMessagesAuthField" class="field-wide" hidden>
@@ -336,7 +336,7 @@
               </label>
             </div>
             <label class="field-label field-wide">API Key
-              <input id="aiApiKeyInput" type="password" autocomplete="new-password" placeholder="留空表示保留已保存密钥；本机无鉴权端点可不填">
+              <input id="aiApiKeyInput" type="password" autocomplete="new-password" placeholder="留空保留已有密钥；本机或内网 IPv4 无鉴权时可不填">
             </label>
           </div>
           <label class="settings-switch compact-switch">

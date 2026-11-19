@@ -1,6 +1,7 @@
 const { app, safeStorage } = require('electron');
 const crypto = require('crypto');
 const fs = require('fs');
+const { BlockList, isIPv4 } = require('net');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -21,8 +22,10 @@ const AI_ANTHROPIC_VERSION = '2023-06-01';
 const AI_MESSAGES_AUTH_API_KEY = 'x-api-key';
 const AI_MESSAGES_AUTH_BEARER = 'bearer';
 const AI_SUPPORTED_MESSAGES_AUTH = new Set([AI_MESSAGES_AUTH_API_KEY, AI_MESSAGES_AUTH_BEARER]);
-const AI_SUPPORTED_PROTOCOLS = new Set([
-  AI_PROTOCOL_RESPONSES, AI_PROTOCOL_CHAT_COMPLETIONS, AI_PROTOCOL_ANTHROPIC_MESSAGES
+const AI_PROTOCOL_PATHS = new Map([
+  [AI_PROTOCOL_RESPONSES, 'responses'],
+  [AI_PROTOCOL_CHAT_COMPLETIONS, 'chat/completions'],
+  [AI_PROTOCOL_ANTHROPIC_MESSAGES, 'messages']
 ]);
 const AI_REQUEST_TIMEOUT_MS = 90000;
 const AI_MAX_CONTEXT_CHARACTERS = 60000;
@@ -38,6 +41,10 @@ const AI_ACTIONS = new Set([AI_ACTION_EXPLAIN, AI_ACTION_FIX, AI_ACTION_REFACTOR
 const AI_MAX_DIAGNOSTICS = 200;
 const SETTINGS_TEXT_ENCODING = 'utf8';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+const PRIVATE_IPV4_SUBNETS = new BlockList();
+PRIVATE_IPV4_SUBNETS.addSubnet('10.0.0.0', 8);
+PRIVATE_IPV4_SUBNETS.addSubnet('172.16.0.0', 12);
+PRIVATE_IPV4_SUBNETS.addSubnet('192.168.0.0', 16);
 const MESSAGE = Object.freeze({
   languageServerDisabled: 'Java 语言服务器尚未启用，请先在开发能力配置中启用。',
   invalidProjectId: '项目 ID 不符合语言服务器工作区规则。',
@@ -63,8 +70,8 @@ const MESSAGE = Object.freeze({
   unsupportedAiMessagesAuth: 'Messages 鉴权方式不受支持。',
   missingAiModel: 'AI 模型不能为空。',
   invalidAiEndpoint: 'AI 端点不是有效 URL。',
-  insecureRemoteAiEndpoint: '远程 AI 端点必须使用 HTTPS；HTTP 只允许本机回环地址。',
-  missingRemoteAiKey: '远程 AI 端点必须配置 API Key。',
+  insecureRemoteAiEndpoint: 'HTTP 仅支持本机回环地址和私有 IPv4 地址，其他 AI 端点请使用 HTTPS。',
+  missingRemoteAiKey: '此 AI 端点需要配置 API Key。本机回环地址和私有 IPv4 地址可留空。',
   unsupportedAiAction: 'AI 代码操作类型不受支持。',
   aiInstructionTooLong: 'AI 补充要求过长。',
   aiSourceTooLong: 'AI 源码上下文超过允许大小，请选择更小范围后重试。',
@@ -296,7 +303,7 @@ class DevelopmentServices {
    */
   async aiAssist(request) {
     const settings = this.readSettings();
-    this.validateAiSettings(settings);
+    const endpoint = this.validateAiSettings(settings);
     const context = this.validateAiRequest(request);
     const apiKey = settings.aiApiKeyEncrypted ? this.decryptSecret(settings.aiApiKeyEncrypted) : '';
     const isAnthropic = settings.aiProtocol === AI_PROTOCOL_ANTHROPIC_MESSAGES;
@@ -314,10 +321,10 @@ class DevelopmentServices {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetch(settings.aiEndpoint, {
+      const response = await fetch(endpoint.href, {
         method: 'POST',
         headers,
-        redirect: isAnthropic ? 'error' : 'follow',
+        redirect: isAnthropic || endpoint.protocol === 'http:' ? 'error' : 'follow',
         body: JSON.stringify(this.createAiRequestBody(settings, context)),
         signal: controller.signal
       });
@@ -557,15 +564,17 @@ class DevelopmentServices {
   }
 
   /**
-   * 校验 AI 端点、协议、模型和远程鉴权要求。
+   * 校验 AI 端点、协议、模型和鉴权要求，补全以 /v1 结尾的基础地址。
    *
    * @param {object} settings AI 配置
+   * @returns {URL} 实际请求地址
    */
   validateAiSettings(settings) {
     if (!settings.aiEnabled) {
       throw new Error(MESSAGE.aiDisabled);
     }
-    if (!AI_SUPPORTED_PROTOCOLS.has(settings.aiProtocol)) {
+    const protocolPath = AI_PROTOCOL_PATHS.get(settings.aiProtocol);
+    if (!protocolPath) {
       throw new Error(MESSAGE.unsupportedAiProtocol);
     }
     if (settings.aiProtocol === AI_PROTOCOL_ANTHROPIC_MESSAGES
@@ -581,13 +590,19 @@ class DevelopmentServices {
     } catch (error) {
       throw new Error(MESSAGE.invalidAiEndpoint);
     }
-    const loopback = LOOPBACK_HOSTS.has(endpoint.hostname);
-    if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && loopback)) {
+    const { hostname } = endpoint;
+    const localEndpoint = LOOPBACK_HOSTS.has(hostname)
+      || (isIPv4(hostname) && PRIVATE_IPV4_SUBNETS.check(hostname));
+    if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && localEndpoint)) {
       throw new Error(MESSAGE.insecureRemoteAiEndpoint);
     }
-    if (!loopback && !settings.aiApiKeyEncrypted) {
+    if (!localEndpoint && !settings.aiApiKeyEncrypted) {
       throw new Error(MESSAGE.missingRemoteAiKey);
     }
+    if (/\/v1\/?$/.test(endpoint.pathname)) {
+      endpoint.pathname = endpoint.pathname.replace(/\/$/, '') + '/' + protocolPath;
+    }
+    return endpoint;
   }
 
   /**
