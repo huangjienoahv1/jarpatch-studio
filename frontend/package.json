@@ -81,6 +81,7 @@
   },
   "dependencies": {
     "monaco-editor": "0.53.0",
-    "node-fetch": "2.7.0"
+    "node-fetch": "2.7.0",
+    "ssh2": "1.17.0"
   }
 }

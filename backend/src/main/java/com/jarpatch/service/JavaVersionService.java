@@ -6,6 +6,7 @@ import com.jarpatch.model.ProjectRecord;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,6 +43,18 @@ public class JavaVersionService {
     private static final int UNKNOWN_VERSION = 0;
 
     private final WorkspaceService workspaceService;
+
+    /**
+     * 根据运行时 class 快照的文件头识别 javac 的目标版本。
+     *
+     * @param bytes JVM 中采集的 class 内容
+     * @param evidence 诊断中显示的类名
+     * @return 原 class 对应的 Java 特性版本
+     * @throws IOException class 文件头不完整
+     */
+    public int detectClassFeatureVersion(byte[] bytes, String evidence) throws IOException {
+        return toFeatureVersion(readMajorVersion(new ByteArrayInputStream(bytes), evidence));
+    }
 
     /**
      * 创建 Java 版本识别服务。

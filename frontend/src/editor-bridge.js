@@ -1041,8 +1041,8 @@ function createDiffView(container, diff) {
     automaticLayout: true,
     readOnly: true,
     originalEditable: false,
-    originalAriaLabel: '导入基线',
-    modifiedAriaLabel: '当前内容',
+    originalAriaLabel: diff.originalLabel || '导入基线',
+    modifiedAriaLabel: diff.currentLabel || '当前内容',
     renderSideBySide: true,
     enableSplitViewResizing: false,
     useInlineViewWhenSpaceIsLimited: false,
@@ -1238,8 +1238,32 @@ function toMonacoWorkspaceEdit(workspaceEdit) {
   };
 }
 
+function createRuntimeJavaView(container, content, onChange) {
+  const model = monaco.editor.createModel(content, 'java');
+  const initialVersion = model.getAlternativeVersionId();
+  const editable = Boolean(onChange);
+  const editor = monaco.editor.create(container, {
+    model,
+    readOnly: !editable,
+    domReadOnly: !editable,
+    ariaLabel: '在线反编译源码',
+    automaticLayout: true,
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    fontSize: 13
+  });
+  const change = onChange && model.onDidChangeContent(onChange);
+  return {
+    getValue: () => model.getValue(),
+    isChanged: () => model.getAlternativeVersionId() !== initialVersion,
+    setBusy: (busy) => editor.updateOptions({ readOnly: !editable || busy, domReadOnly: !editable || busy }),
+    dispose() { change?.dispose(); editor.dispose(); model.dispose(); }
+  };
+}
+
 window.jarPatchEditor = Object.freeze({
   create: (container) => new MonacoEditorFacade(container),
   createDiffView,
+  createRuntimeJavaView,
   detectLanguage
 });

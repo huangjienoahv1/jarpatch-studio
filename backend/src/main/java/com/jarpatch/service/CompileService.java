@@ -13,7 +13,6 @@ import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -38,13 +37,6 @@ import java.util.UUID;
 public class CompileService {
 
     private static final String TASK_TYPE_COMPILE = "COMPILE";
-    private static final String JAVAC_ARGUMENT_FILE_NAME = "javac-arguments.txt";
-    private static final String JAVAC_ARGUMENT_FILE_PREFIX = "@";
-    private static final String JAVAC_RELEASE_ARGUMENT = "--release";
-    private static final String JAVAC_DISABLE_PROCESSING_ARGUMENT = "-proc:none";
-    // javac 诊断输出和参数文件读取都跟随 javac 自身 JVM 的默认编码；中文 Windows 的 JDK 17 默认 GBK，
-    // 会把 UTF-8 参数文件里的中文路径读错、把中文错误信息写乱，因此必须在命令行强制 UTF-8（-J 参数不能写进参数文件）。
-    private static final String JAVAC_FILE_ENCODING_ARGUMENT = "-J-Dfile.encoding=UTF-8";
     private static final String NESTED_JAR_SOURCE_PREFIX = JarPatchConstants.SOURCE_NESTED_JAR_DIR
             + JarPatchConstants.ZIP_SEPARATOR;
     private static final String NESTED_JAR_SOURCE_MARKER = "." + JarPatchConstants.JAR_EXTENSION
@@ -53,10 +45,6 @@ public class CompileService {
     private static final String OUTPUT_DIR = "outputs";
     private static final String BACKUP_DIR = "backup";
     private static final int MINIMUM_RELEASE_COMPILER_VERSION = 9;
-    private static final char WINDOWS_PATH_SEPARATOR = '\\';
-    private static final char JAVAC_ARGUMENT_PATH_SEPARATOR = '/';
-    private static final String JAVAC_ARGUMENT_QUOTE = "\"";
-    private static final String JAVAC_ARGUMENT_ESCAPED_QUOTE = "\\\"";
     private static final String MESSAGE_COMPILE_START = "开始编译修改过的 Java 文件";
     private static final String MESSAGE_COMPILE_LOCATE_JAVAC = "定位并执行 javac -version";
     private static final String MESSAGE_JAVAC_RELEASE_REQUIRED = "当前 javac 不支持 --release，请配置 Java 9 或更高版本的完整 JDK";
@@ -292,59 +280,15 @@ public class CompileService {
                                       Path compiledDir,
                                       List<String> javaPaths,
                                       int releaseVersion) throws IOException {
-        Path argumentFile = compiledDir.resolve(JAVAC_ARGUMENT_FILE_NAME);
-        writeArgumentFile(project, compiledDir, javaPaths, releaseVersion, argumentFile);
-        return List.of(javac.toString(), JAVAC_FILE_ENCODING_ARGUMENT,
-                JAVAC_ARGUMENT_FILE_PREFIX + argumentFile);
-    }
-
-    /**
-     * 写入禁用注解处理、包含 --release、classpath、输出目录和明确源码清单的 javac 参数文件。
-     *
-     * @param project        项目记录
-     * @param compiledDir    编译输出目录
-     * @param javaPaths      修改源码路径
-     * @param releaseVersion --release 版本
-     * @param argumentFile   参数文件
-     * @throws IOException 写入失败时抛出
-     */
-    private void writeArgumentFile(ProjectRecord project,
-                                   Path compiledDir,
-                                   List<String> javaPaths,
-                                   int releaseVersion,
-                                   Path argumentFile) throws IOException {
-        List<String> arguments = new ArrayList<>();
-        // 原包依赖只用于解析类型，补丁编译不执行其中自动发现的注解处理器。
-        arguments.add(JAVAC_DISABLE_PROCESSING_ARGUMENT);
-        arguments.add(JAVAC_RELEASE_ARGUMENT);
-        arguments.add(String.valueOf(releaseVersion));
-        arguments.add("-encoding");
-        arguments.add(JarPatchConstants.UTF_8);
-        arguments.add("-classpath");
-        arguments.add(formatArgumentFileValue(buildClasspath(project)));
-        arguments.add("-d");
-        arguments.add(formatArgumentFileValue(compiledDir.toString()));
+        List<Path> sources = new ArrayList<>();
         for (String javaPath : javaPaths) {
             if (!javaPath.startsWith(JarPatchConstants.TREE_SOURCE_PREFIX)) {
                 throw new IllegalArgumentException(JarPatchConstants.MESSAGE_FILE_OUT_OF_WORKSPACE);
             }
             String relativePath = javaPath.substring(JarPatchConstants.TREE_SOURCE_PREFIX.length());
-            arguments.add(formatArgumentFileValue(workspaceService.resolveSource(project, relativePath).toString()));
+            sources.add(workspaceService.resolveSource(project, relativePath));
         }
-        Files.write(argumentFile, arguments, StandardCharsets.UTF_8);
-    }
-
-    /**
-     * 把路径值转为 javac 参数文件要求的带引号格式。
-     *
-     * @param value 原始参数值
-     * @return 参数文件值
-     */
-    private String formatArgumentFileValue(String value) {
-        return JAVAC_ARGUMENT_QUOTE
-                + value.replace(WINDOWS_PATH_SEPARATOR, JAVAC_ARGUMENT_PATH_SEPARATOR)
-                .replace(JAVAC_ARGUMENT_QUOTE, JAVAC_ARGUMENT_ESCAPED_QUOTE)
-                + JAVAC_ARGUMENT_QUOTE;
+        return compileProcessRunner.prepareCommand(javac, compiledDir, releaseVersion, buildClasspath(project), sources);
     }
 
     /**

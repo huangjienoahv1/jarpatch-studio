@@ -8,10 +8,260 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="styles-settings.css">
   <link rel="stylesheet" href="styles-help.css">
+  <link rel="stylesheet" href="styles-runtime.css">
   <link rel="stylesheet" href="generated/editor-bridge.css">
 </head>
 <body>
   <div id="notificationArea" class="notification-area" aria-live="polite"></div>
+  <dialog id="runtimeDialog" class="runtime-dialog" aria-labelledby="runtimeTitle">
+    <header class="runtime-heading">
+      <div>
+        <h2 id="runtimeTitle">运行时工作台</h2>
+        <p>远程容器诊断 · Arthas 4.3.5</p>
+      </div>
+      <button id="runtimeClose" class="tool-btn" type="button">关闭</button>
+    </header>
+    <div class="runtime-row">
+      <label>连接方式<select id="runtimeProvider"><option value="docker">Docker</option><option value="kubernetes">Kubernetes</option></select></label>
+      <label>SSH 认证<select id="runtimeSshAuth"><option value="openssh">OpenSSH 配置</option><option value="password">账号密码</option></select></label>
+      <label class="runtime-saved-hosts">已保存的 SSH 主机<select id="runtimeSshHosts"><option value="">暂无保存的主机</option></select></label>
+      <button id="runtimeRemoveSshHost" class="tool-btn" type="button" disabled>移除主机</button>
+      <div id="runtimeKubernetes" class="runtime-row runtime-grow" hidden>
+        <label>Context<input id="runtimeKubeContext" placeholder="当前默认 Context" spellcheck="false"></label>
+        <label>命名空间<input id="runtimeKubeNamespace" value="default" spellcheck="false"></label>
+        <label>标签选择器<input id="runtimeKubeSelector" placeholder="app=my-app" spellcheck="false"></label>
+        <label>调试容器名<input id="runtimeKubeDebug" placeholder="可选" spellcheck="false"></label>
+        <label class="runtime-grow">远程 kubeconfig<input id="runtimeKubeConfig" placeholder="可选绝对路径" spellcheck="false"></label>
+      </div>
+    </div>
+    <div class="runtime-target">
+      <label>SSH 主机<input id="runtimeHost" placeholder="SSH 别名或 user@host" spellcheck="false"></label>
+      <button id="runtimeConnect" class="tool-btn" type="button">加载容器</button>
+      <label>容器<select id="runtimeContainer"></select></label>
+      <label>Java 进程<select id="runtimeProcess"></select></label>
+      <button id="runtimeAttach" class="tool-btn runtime-primary" type="button">连接 Arthas</button>
+      <button id="runtimeDetach" class="tool-btn" type="button">释放 Arthas</button>
+    </div>
+    <div id="runtimePasswordFields" class="runtime-row" hidden>
+      <label>SSH 账号<input id="runtimeSshUser" autocomplete="username" spellcheck="false"></label>
+      <label>SSH 端口<input id="runtimeSshPort" type="number" min="1" max="65535" value="22"></label>
+      <label class="runtime-grow">SSH 密码<input id="runtimeSshPassword" type="password" autocomplete="off"></label>
+      <button id="runtimeSaveSshHost" class="tool-btn" type="button" disabled>保存主机</button>
+    </div>
+    <div class="runtime-row runtime-package">
+      <button id="runtimePackage" class="tool-btn" type="button">选择离线包</button>
+      <span id="runtimePackageName">默认下载并校验官方完整包</span>
+      <button id="runtimeResetPackage" class="tool-btn" type="button" hidden>使用官方下载</button>
+    </div>
+    <p id="runtimeStatus" class="runtime-status" role="status"></p>
+    <p id="runtimeError" class="runtime-error" role="alert" tabindex="-1" hidden></p>
+    <nav class="runtime-tabs" aria-label="运行时功能">
+      <button class="tool-btn" type="button" data-runtime-tab="logs" aria-pressed="true">容器日志</button>
+      <button class="tool-btn" type="button" data-runtime-tab="classes" aria-pressed="false">类与方法</button>
+      <button class="tool-btn" type="button" data-runtime-tab="jvm" aria-pressed="false">JVM 检查</button>
+      <button class="tool-btn" type="button" data-runtime-tab="request" aria-pressed="false">请求测试</button>
+      <button class="tool-btn" type="button" data-runtime-tab="comparison" aria-pressed="false">部署包对照</button>
+      <button class="tool-btn" type="button" data-runtime-tab="suite" aria-pressed="false">回归验证</button>
+      <button class="tool-btn" type="button" data-runtime-tab="performance" aria-pressed="false">性能采集</button>
+      <button class="tool-btn" type="button" data-runtime-tab="advanced" aria-pressed="false">环境与集成</button>
+      <button id="runtimeReport" class="tool-btn runtime-report" type="button">导出诊断报告</button>
+    </nav>
+    <div class="runtime-content">
+      <section class="runtime-pane" data-runtime-pane="logs" aria-label="容器日志">
+        <div class="runtime-row">
+          <label>最近行数<input id="runtimeTail" type="number" min="1" max="1000" value="100"></label>
+          <button id="runtimeReadLogs" class="tool-btn" type="button">查看日志</button>
+          <button id="runtimeFollowLogs" class="tool-btn" type="button">实时追踪</button>
+          <button id="runtimeStopLogs" class="tool-btn" type="button">停止追踪</button>
+          <span id="runtimeLogStatus" class="runtime-muted" role="status"></span>
+        </div>
+        <pre id="runtimeLogs" class="runtime-output" tabindex="0" aria-label="日志内容"></pre>
+      </section>
+      <section class="runtime-pane" data-runtime-pane="classes" aria-label="类与方法" hidden>
+        <div class="runtime-class-controls">
+          <div class="runtime-row">
+            <label class="runtime-grow">类名<input id="runtimeClass" placeholder="简单类名或完整类名，支持 *" spellcheck="false"></label>
+            <button id="runtimeSearch" class="tool-btn" type="button">搜索已加载的类</button>
+            <button id="runtimeMethods" class="tool-btn" type="button">查看方法</button>
+            <button id="runtimeSource" class="tool-btn" type="button">反编译</button>
+            <button id="runtimeEditSource" class="tool-btn" type="button" aria-describedby="runtimeSourcePatchAvailability" disabled>反编译并编辑</button>
+            <button id="runtimeCompareClass" class="tool-btn" type="button">对照本地包</button>
+          </div>
+          <p id="runtimeSourcePatchAvailability" class="runtime-muted" role="status" hidden></p>
+          <div class="runtime-row">
+            <label>ClassLoader 哈希<input id="runtimeLoader" placeholder="同名类时指定" spellcheck="false"></label>
+            <label class="runtime-grow">方法名<input id="runtimeMethod" spellcheck="false"></label>
+            <button id="runtimeTrace" class="tool-btn" type="button">追踪方法耗时</button>
+            <button id="runtimeCancelTrace" class="tool-btn" type="button">停止采集</button>
+          </div>
+          <p id="runtimeTraceStatus" class="runtime-muted" role="status">采集最多 20 秒或 3 次，可切换到请求测试触发方法。</p>
+          <details id="runtimeClassChoices" class="runtime-class-choices" hidden>
+            <summary id="runtimeClassChoicesTitle">搜索结果</summary>
+            <div id="runtimeMethodFilters" class="runtime-row runtime-method-filters" hidden>
+              <label>访问级别<select id="runtimeMethodAccess">
+                <option value="">全部</option>
+                <option value="public">public</option>
+                <option value="protected">protected</option>
+                <option value="package">包可见</option>
+                <option value="private">private</option>
+                <option value="unknown">未知</option>
+              </select></label>
+              <label>方法类型<select id="runtimeMethodKind">
+                <option value="">全部</option>
+                <option value="http">Spring HTTP 映射</option>
+                <option value="interface">Java 接口方法</option>
+                <option value="ordinary">普通方法</option>
+                <option value="proxy">代理类方法</option>
+              </select></label>
+              <span id="runtimeMethodCount" class="runtime-muted" role="status"></span>
+            </div>
+            <p id="runtimeMethodWarning" class="runtime-muted runtime-method-warning" role="status" hidden></p>
+            <div id="runtimeClassMatches" class="runtime-matches"></div>
+          </details>
+          <pre id="runtimeClassOutput" class="runtime-output" tabindex="0" aria-label="类和方法诊断结果"></pre>
+        </div>
+        <div id="runtimeSourcePanel" class="runtime-source-panel" hidden>
+          <div id="runtimeSourceTools" class="runtime-row" hidden>
+            <span id="runtimeSourceTarget" class="runtime-muted"></span>
+            <button id="runtimeApplySourcePatch" class="primary-action" type="button">编译并热替换</button>
+            <button id="runtimeRestoreSourcePatch" class="tool-btn" type="button" hidden>恢复原 class</button>
+            <span id="runtimeSourcePatchStatus" class="runtime-muted" role="status"></span>
+          </div>
+          <div id="runtimeSourceView" class="runtime-source" aria-label="在线反编译源码"></div>
+        </div>
+      </section>
+      <section class="runtime-pane" data-runtime-pane="jvm" aria-label="JVM 检查" hidden>
+        <div class="runtime-row">
+          <button class="tool-btn" type="button" data-runtime-diagnose="jvm">JVM 信息</button>
+          <button class="tool-btn" type="button" data-runtime-diagnose="threads">忙碌线程与堆栈</button>
+          <button class="tool-btn" type="button" data-runtime-diagnose="memory">内存</button>
+          <button id="runtimeCancelJvm" class="tool-btn" type="button">取消查询</button>
+        </div>
+        <pre id="runtimeJvmOutput" class="runtime-output" tabindex="0" aria-label="JVM 诊断结果"></pre>
+      </section>
+      <section class="runtime-pane" data-runtime-pane="request" aria-label="请求测试" hidden>
+        <div class="runtime-row">
+          <label>方法<select id="runtimeHttpMethod"><option>GET</option><option>HEAD</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>OPTIONS</option></select></label>
+          <label>协议<select id="runtimeProtocol"><option value="http">HTTP</option><option value="https">HTTPS</option></select></label>
+          <label>JVM 监听端口<select id="runtimePorts"></select></label>
+          <button id="runtimeRefreshPorts" class="tool-btn" type="button">刷新端口</button>
+          <label class="runtime-grow">路径<input id="runtimePath" value="/" spellcheck="false"></label>
+        </div>
+        <details class="runtime-request-settings">
+          <summary>请求头、请求体与 TLS 主机名</summary>
+          <label>TLS 主机名<input id="runtimeServerName" spellcheck="false" placeholder="证书上的域名，连接仍指向容器内 127.0.0.1"></label>
+          <div class="runtime-payload">
+            <label>请求头（每行一项）<textarea id="runtimeHeaders" rows="3" spellcheck="false" placeholder="Content-Type: application/json"></textarea></label>
+            <label>请求体<textarea id="runtimeBody" rows="3" spellcheck="false"></textarea></label>
+          </div>
+        </details>
+        <div class="runtime-row">
+          <button id="runtimeSend" class="tool-btn runtime-primary" type="button">发送请求</button>
+          <button id="runtimeCancelRequest" class="tool-btn" type="button">取消请求</button>
+          <button id="runtimeCorrelate" class="tool-btn" type="button">查看关联日志</button>
+          <button id="runtimeAddCase" class="tool-btn" type="button">添加到请求集合</button>
+          <span id="runtimeRequestStatus" class="runtime-muted" role="status"></span>
+        </div>
+        <pre id="runtimeResponse" class="runtime-output" tabindex="0" aria-label="HTTP 响应"></pre>
+      </section>
+      <section class="runtime-pane" data-runtime-pane="comparison" aria-label="部署包对照" hidden>
+        <div class="runtime-row">
+          <span id="runtimeComparisonTarget" class="runtime-muted">从「类与方法」选择已加载类并对照本地包。</span>
+          <label class="runtime-grow">包内候选<select id="runtimeComparisonEntry"></select></label>
+        </div>
+        <pre id="runtimeComparisonMeta" class="runtime-summary" role="status"></pre>
+        <div id="runtimeComparisonView" class="runtime-source" aria-label="本地部署包和运行中源码差异" hidden></div>
+      </section>
+      <section class="runtime-pane" data-runtime-pane="suite" aria-label="回归验证" hidden>
+        <div class="runtime-row">
+          <button id="runtimeOpenSuite" class="tool-btn" type="button">打开集合</button>
+          <button id="runtimeSaveSuite" class="tool-btn" type="button">保存集合</button>
+          <button id="runtimeRunBaseline" class="tool-btn runtime-primary" type="button">运行补丁前基线</button>
+          <button id="runtimeRunCandidate" class="tool-btn" type="button">运行补丁后验证</button>
+          <button id="runtimeCancelSuite" class="tool-btn" type="button">停止运行</button>
+        </div>
+        <div class="runtime-suite-layout">
+          <div class="runtime-suite-editor">
+            <label>请求集合<textarea id="runtimeSuiteJson" rows="9" spellcheck="false"></textarea></label>
+            <details class="runtime-request-settings">
+              <summary>本次请求头与断言格式</summary>
+              <label>本次共用请求头<textarea id="runtimeSuiteCredentials" rows="2" spellcheck="false"></textarea></label>
+              <p class="runtime-muted">集合使用当前 JVM 的业务端口。可从「请求测试」收录用例。断言类型有 status、maxMs、contains、jsonEquals。JSON 路径用指针格式，如 /result/ok。</p>
+            </details>
+          </div>
+          <div class="runtime-suite-results">
+            <span id="runtimeSuiteStatus" class="runtime-muted" role="status"></span>
+            <pre id="runtimeSuiteOutput" class="runtime-output" tabindex="0" aria-label="补丁前后验证结果"></pre>
+          </div>
+        </div>
+      </section>
+      <section class="runtime-pane" data-runtime-pane="performance" aria-label="性能采集" hidden>
+        <div class="runtime-row">
+          <label>采集类型<select id="runtimeProfileType"><option value="jfr">JFR</option><option value="flame">火焰图</option></select></label>
+          <label>时间（秒）<input id="runtimeProfileSeconds" type="number" min="5" max="30" value="10"></label>
+          <label id="runtimeProfileEventField" hidden>火焰图事件<select id="runtimeProfileEvent"><option value="itimer">CPU 定时器</option><option value="cpu">CPU perf</option><option value="wall">Wall clock</option></select></label>
+          <button id="runtimeProfile" class="tool-btn runtime-primary" type="button">开始采集</button>
+          <button id="runtimeCancelProfile" class="tool-btn" type="button">取消采集</button>
+          <button id="runtimeSaveJfr" class="tool-btn" type="button">保存 JFR</button>
+          <button id="runtimeSaveFlame" class="tool-btn" type="button">保存火焰图</button>
+        </div>
+        <p id="runtimeProfileStatus" class="runtime-muted" role="status"></p>
+        <pre id="runtimeProfileOutput" class="runtime-output" tabindex="0" aria-label="性能采集结果"></pre>
+      </section>
+      <section class="runtime-pane" data-runtime-pane="advanced" aria-label="环境与集成" hidden>
+        <div class="runtime-integrations">
+          <details open>
+            <summary>多实例检查</summary>
+            <label>目标实例<select id="runtimeInventoryTargets" multiple size="4"></select></label>
+            <button id="runtimeInventory" type="button" class="tool-btn">检查所选实例</button>
+          </details>
+          <details>
+            <summary>Spring Boot Actuator</summary>
+            <div class="runtime-row">
+              <label>基础路径<input id="runtimeActuatorBase" value="/actuator" spellcheck="false"></label>
+              <label>端点<select id="runtimeActuatorEndpoint"><option>health</option><option>info</option><option>metrics</option><option>mappings</option><option>httpexchanges</option></select></label>
+              <label>指标名<input id="runtimeActuatorMetric" placeholder="仅 metrics，可选" spellcheck="false"></label>
+              <button id="runtimeActuator" type="button" class="tool-btn">读取端点</button>
+            </div>
+            <p class="runtime-muted">复用「请求测试」中的协议、业务端口、TLS 主机名和请求头。</p>
+          </details>
+          <details>
+            <summary>Loki 集中日志</summary>
+            <div class="runtime-row">
+              <label class="runtime-grow">Loki 地址<input id="runtimeLokiUrl" placeholder="https://loki.example.com" spellcheck="false"></label>
+              <label>租户<input id="runtimeLokiTenant" spellcheck="false"></label>
+              <label>Bearer 凭据<input id="runtimeLokiToken" type="password" autocomplete="off"></label>
+              <label>最近分钟<input id="runtimeLokiMinutes" type="number" min="1" max="60" value="15"></label>
+            </div>
+            <label>LogQL<textarea id="runtimeLokiQuery" rows="2" spellcheck="false" placeholder='{app="service"}'></textarea></label>
+            <button id="runtimeLoki" type="button" class="tool-btn">查询日志</button>
+          </details>
+          <details>
+            <summary>Arthas Tunnel</summary>
+            <div class="runtime-row">
+              <label class="runtime-grow">控制台地址<input id="runtimeTunnelUrl" placeholder="https://tunnel.example.com" spellcheck="false"></label>
+              <label class="runtime-grow">已注册的 Agent ID<input id="runtimeTunnelAgent" spellcheck="false"></label>
+              <label>WebSocket 端口<input id="runtimeTunnelPort" type="number" min="1" max="65535" placeholder="默认 7777"></label>
+              <button id="runtimeTunnel" type="button" class="tool-btn">打开官方控制台</button>
+            </div>
+          </details>
+          <details>
+            <summary>Docker 容器热替换</summary>
+            <div class="runtime-row">
+              <button id="runtimePatch" type="button" class="tool-btn">选择 class 并替换</button>
+              <button id="runtimeRollback" type="button" class="tool-btn">恢复原 class</button>
+            </div>
+            <p class="runtime-muted">使用「类与方法」选中的类和 ClassLoader。替换前会备份原 class。</p>
+          </details>
+        </div>
+        <div class="runtime-row">
+          <span id="runtimeAdvancedStatus" class="runtime-muted" role="status"></span>
+          <button id="runtimeCancelAdvanced" class="tool-btn" type="button">取消查询</button>
+        </div>
+        <pre id="runtimeAdvancedOutput" class="runtime-output" tabindex="0" aria-label="环境和集成结果"></pre>
+      </section>
+    </div>
+  </dialog>
   <dialog id="helpDialog" class="help-dialog" aria-labelledby="helpDialogTitle">
     <header class="help-header">
       <h2 id="helpDialogTitle">JarPatch Studio 使用手册</h2>
@@ -475,6 +725,7 @@
           <button id="errorGuideBtn" class="tool-btn" type="button">排错向导</button>
           <button id="diagnosticBtn" class="tool-btn" type="button">导出诊断</button>
           <button id="settingsBtn" class="tool-btn" type="button">⚙ 开发能力</button>
+          <button id="runtimeBtn" class="tool-btn" type="button" aria-haspopup="dialog" aria-controls="runtimeDialog">运行时工作台</button>
           <button id="helpBtn" class="tool-btn help-button" type="button" aria-haspopup="dialog" aria-controls="helpDialog">帮助</button>
         </div>
       </header>
@@ -553,5 +804,8 @@
   <script src="generated/editor-bridge.js"></script>
   <script src="api-client.js"></script>
   <script src="renderer.js"></script>
+  <script src="runtime-analysis-renderer.js"></script>
+  <script src="runtime-integrations-renderer.js"></script>
+  <script src="runtime-renderer.js"></script>
 </body>
 </html>
