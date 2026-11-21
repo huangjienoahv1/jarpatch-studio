@@ -1,5 +1,7 @@
 package com.jarpatch.repository;
 
+import com.jarpatch.common.TaskStatus;
+import com.jarpatch.config.UserContext;
 import com.jarpatch.model.TaskRecord;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -40,11 +42,12 @@ public class TaskRepository {
      * @param record 任务记录
      */
     public void insert(TaskRecord record) {
+        String operator = UserContext.currentUsername();
         jdbcTemplate.update("INSERT INTO tasks " +
-                        "(id, project_id, task_type, status, progress, message, created_at, updated_at) " +
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "(id, project_id, task_type, status, progress, message, creator, updater, created_at, updated_at) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 record.getId(), record.getProjectId(), record.getTaskType(), record.getStatus(),
-                record.getProgress(), record.getMessage(), record.getCreatedAt(), record.getUpdatedAt());
+                record.getProgress(), record.getMessage(), operator, operator, record.getCreatedAt(), record.getUpdatedAt());
     }
 
     /**
@@ -53,10 +56,10 @@ public class TaskRepository {
      * @param record 任务记录
      */
     public int updateIfRunning(TaskRecord record) {
-        return jdbcTemplate.update("UPDATE tasks SET status = ?, progress = ?, message = ?, updated_at = ? " +
+        return jdbcTemplate.update("UPDATE tasks SET status = ?, progress = ?, message = ?, updater = ?, updated_at = ? " +
                         "WHERE id = ? AND status = ?",
-                record.getStatus(), record.getProgress(), record.getMessage(), record.getUpdatedAt(), record.getId(),
-                com.jarpatch.common.TaskStatus.RUNNING.getCode());
+                record.getStatus(), record.getProgress(), record.getMessage(), UserContext.currentUsername(),
+                record.getUpdatedAt(), record.getId(), TaskStatus.RUNNING.getCode());
     }
 
     /**

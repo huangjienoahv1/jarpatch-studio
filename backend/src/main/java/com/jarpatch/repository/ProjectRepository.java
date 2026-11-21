@@ -1,5 +1,6 @@
 package com.jarpatch.repository;
 
+import com.jarpatch.config.UserContext;
 import com.jarpatch.model.ProjectRecord;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -40,13 +41,14 @@ public class ProjectRepository {
      * @param record 项目记录
      */
     public void insert(ProjectRecord record) {
+        String operator = UserContext.currentUsername();
         jdbcTemplate.update("INSERT INTO projects " +
                         "(id, name, package_type, original_path, workspace_path, target_java_version, " +
-                        "class_major_version, java_version_evidence, created_at, updated_at) " +
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "class_major_version, java_version_evidence, creator, updater, created_at, updated_at) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 record.getId(), record.getName(), record.getPackageType(), record.getOriginalPath(),
                 record.getWorkspacePath(), record.getTargetJavaVersion(), record.getClassMajorVersion(),
-                record.getJavaVersionEvidence(), record.getCreatedAt(), record.getUpdatedAt());
+                record.getJavaVersionEvidence(), operator, operator, record.getCreatedAt(), record.getUpdatedAt());
     }
 
     /**
@@ -80,7 +82,8 @@ public class ProjectRepository {
      * @param updatedAt 更新时间
      */
     public void touch(String id, String updatedAt) {
-        jdbcTemplate.update("UPDATE projects SET updated_at = ? WHERE id = ?", updatedAt, id);
+        jdbcTemplate.update("UPDATE projects SET updater = ?, updated_at = ? WHERE id = ?",
+                UserContext.currentUsername(), updatedAt, id);
     }
 
     /**
@@ -90,8 +93,8 @@ public class ProjectRepository {
      * @param cleanedAt 清理时间
      */
     public void markWorkspaceCleaned(String id, String cleanedAt) {
-        jdbcTemplate.update("UPDATE projects SET workspace_cleaned_at = ?, updated_at = ? WHERE id = ?",
-                cleanedAt, cleanedAt, id);
+        jdbcTemplate.update("UPDATE projects SET workspace_cleaned_at = ?, updater = ?, updated_at = ? WHERE id = ?",
+                cleanedAt, UserContext.currentUsername(), cleanedAt, id);
     }
 
     /**

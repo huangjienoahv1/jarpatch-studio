@@ -45,6 +45,7 @@ let backendShutdownPromise = null;
 let backendToken = null;
 let backendInstanceId = null;
 let backendLogPath = null;
+let activeSessionToken = '';
 let mainWindow = null;
 let backendReady = false;
 const backendLogs = [];
@@ -62,8 +63,12 @@ async function requestRuntimeSource(action, payload, signal) {
   signal.addEventListener('abort', cancel, { once: true });
   if (signal.aborted) cancel();
   try {
+    const headers = { 'X-JarPatch-Token': backendToken, 'Content-Type': 'application/json' };
+    if (activeSessionToken) {
+      headers['X-JarPatch-Session'] = activeSessionToken;
+    }
     const response = await fetch(BACKEND_BASE_URL + '/api/runtime/' + action, {
-      method: 'POST', headers: { 'X-JarPatch-Token': backendToken, 'Content-Type': 'application/json' },
+      method: 'POST', headers,
       body: JSON.stringify(payload), signal: controller.signal
     });
     if (!response.ok) throw new Error('本地运行时源码接口请求失败（HTTP ' + response.status + '）');
@@ -93,7 +98,7 @@ function createWindow() {
     minWidth: 1180,
     minHeight: 760,
     title: 'JarPatch Studio',
-    backgroundColor: '#f4f1ea',
+    backgroundColor: '#0d1117',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -348,6 +353,17 @@ ipcMain.handle('backend:connection', () => ({
   token: backendToken,
   instanceId: backendInstanceId
 }));
+
+/**
+ * 同步渲染进程当前登录会话令牌到主进程，供主进程转发运行时反编译/编译请求时鉴权。
+ */
+ipcMain.handle('auth:setSessionToken', (event, token) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== event.sender.mainFrame) {
+    throw new Error('仅允许主窗口同步会话状态');
+  }
+  activeSessionToken = typeof token === 'string' ? token.trim() : '';
+  return true;
+});
 
 // 开发能力 IPC 只暴露固定的 JDT LS 与 AI 操作，不允许渲染页面启动任意进程或读取密钥。
 developmentServices.registerIpc(ipcMain);

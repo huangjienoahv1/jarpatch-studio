@@ -1,6 +1,7 @@
 package com.jarpatch.config;
 
-import com.jarpatch.common.JarPatchConstants;
+import com.jarpatch.model.UserView;
+import com.jarpatch.service.AuthService;
 import com.jarpatch.service.TaskService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;
@@ -14,12 +15,13 @@ import org.springframework.web.util.UriTemplate;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 任务日志 WebSocket 本地握手拦截器。
  * <p>
- * WebSocket 建连入口先校验随机令牌，再确认路径中的任务 ID 已写入当前实例数据库；
- * 任一条件不满足时拒绝升级连接，避免任意网页订阅或探测本机任务日志。
+ * WebSocket 建连入口先校验 Electron 本机实例令牌与当前有效用户会话令牌，再确认路径中的
+ * 任务 ID 已写入当前实例数据库；任一条件不满足时拒绝升级连接，防止未授权订阅任务日志。
  * </p>
  *
  * @author 黄杰
@@ -31,21 +33,26 @@ public class LocalAccessHandshakeInterceptor implements HandshakeInterceptor {
     private static final String TASK_ID_ATTRIBUTE = "taskId";
 
     private final LocalAccessProperties localAccessProperties;
+    private final AuthService authService;
     private final TaskService taskService;
 
     /**
      * 创建 WebSocket 本地握手拦截器。
      *
      * @param localAccessProperties 本地实例访问配置
+     * @param authService           本地用户认证服务
      * @param taskService           任务服务
      */
-    public LocalAccessHandshakeInterceptor(LocalAccessProperties localAccessProperties, TaskService taskService) {
+    public LocalAccessHandshakeInterceptor(LocalAccessProperties localAccessProperties,
+                                           AuthService authService,
+                                           TaskService taskService) {
         this.localAccessProperties = localAccessProperties;
+        this.authService = authService;
         this.taskService = taskService;
     }
 
     /**
-     * 在协议升级前校验令牌和任务归属，并把任务 ID 写入会话属性。
+     * 在协议升级前校验实例令牌、用户会话和任务归属，并把任务 ID 写入会话属性。
      *
      * @param request    握手请求
      * @param response   握手响应
@@ -58,10 +65,16 @@ public class LocalAccessHandshakeInterceptor implements HandshakeInterceptor {
                                    ServerHttpResponse response,
                                    WebSocketHandler wsHandler,
                                    Map<String, Object> attributes) {
-        String token = UriComponentsBuilder.fromUri(request.getURI()).build()
-                .getQueryParams().getFirst(LocalAccessProperties.TOKEN_QUERY_PARAMETER);
+        var queryParams = UriComponentsBuilder.fromUri(request.getURI()).build().getQueryParams();
+        String token = queryParams.getFirst(LocalAccessProperties.TOKEN_QUERY_PARAMETER);
+        String sessionToken = queryParams.getFirst(LocalAccessProperties.SESSION_QUERY_PARAMETER);
         String taskId = resolveTaskId(request);
-        if (!tokenMatches(token) || taskId == null || taskService.findById(taskId).isEmpty()) {
+        Optional<UserView> user = authService.authenticateSession(sessionToken);
+        if (!tokenMatches(token)
+                || user.isEmpty()
+                || user.get().isMustChangePassword()
+                || taskId == null
+                || taskService.findById(taskId).isEmpty()) {
             response.setStatusCode(HttpStatus.UNAUTHORIZED);
             return false;
         }

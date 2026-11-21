@@ -146,15 +146,121 @@ const AI_CONTEXT_MAX_SOURCE_CHARACTERS = 60000;
 const DIAGNOSTIC_DEFAULT_FILE_NAME = 'jarpatch-studio-diagnostics.json';
 const JSON_INDENT_SPACES = 2;
 const STORAGE_KEY_TREE_PANEL_WIDTH = 'jarpatch.treePanelWidth';
-const TREE_PANEL_DEFAULT_WIDTH = 380;
-const TREE_PANEL_MIN_WIDTH = 280;
-const TREE_PANEL_MAX_WIDTH = 760;
-const TREE_PANEL_EDITOR_MIN_WIDTH = 560;
-const TREE_PANEL_EDITOR_ANALYSIS_OPEN_MIN_WIDTH = 520;
-const TREE_RESIZER_WIDTH = 8;
-const ANALYSIS_TOGGLE_WIDTH = 56;
-const ANALYSIS_PANEL_WIDTH = 330;
+const STORAGE_KEY_THEME = 'jarpatch.uiTheme';
+const STORAGE_KEY_LOG_HEIGHT = 'jarpatch.logPanelHeight';
+const STORAGE_KEY_LOG_COLLAPSED = 'jarpatch.logPanelCollapsed';
+const THEME_DARK = 'dark';
+const THEME_LIGHT = 'light';
+const LABEL_SWITCH_TO_LIGHT = '切换浅色主题';
+const LABEL_SWITCH_TO_DARK = '切换深色主题';
+const TREE_PANEL_DEFAULT_WIDTH = 340;
+const TREE_PANEL_MIN_WIDTH = 240;
+const TREE_PANEL_MAX_WIDTH = 720;
+const TREE_PANEL_EDITOR_MIN_WIDTH = 480;
+const TREE_PANEL_EDITOR_ANALYSIS_OPEN_MIN_WIDTH = 440;
+const TREE_RESIZER_WIDTH = 6;
+const ANALYSIS_TOGGLE_WIDTH = 44;
+const ANALYSIS_PANEL_WIDTH = 324;
+const LOG_PANEL_DEFAULT_HEIGHT = 128;
+const LOG_PANEL_MIN_HEIGHT = 76;
+const LOG_PANEL_MAX_HEIGHT = 360;
+const BUTTON_TEXT_LOG_COLLAPSE = '收起';
+const BUTTON_TEXT_LOG_EXPAND = '展开';
+const MESSAGE_LOG_EMPTY_TO_COPY = '当前没有可复制的执行日志';
+const MESSAGE_LOG_COPIED = '执行日志已复制到剪贴板';
+const MESSAGE_LOG_COPY_FAILED = '复制日志失败';
+const MESSAGE_EMPTY_NO_PROJECT_TITLE = '欢迎使用 JarPatch Studio';
+const MESSAGE_EMPTY_NO_PROJECT_DESC = '导入本地 Jar、Spring Boot Jar 或 War 包，浏览反编译源码、修改配置或代码、校验差异并安全导出新包。';
+const MESSAGE_EMPTY_NO_FILE_TITLE = '从左侧文件树选择文件';
+const MESSAGE_EMPTY_NO_FILE_DESC = '展开 sources 查看反编译后的 Java 源码，或展开 extracted 修改配置与文本资源。';
+const TASK_STATE_IDLE = 'idle';
+const TASK_STATE_RUNNING = 'running';
+const TASK_STATE_DONE = 'done';
+const TASK_STATE_FAILED = 'failed';
+const TASK_STATE_CANCELED = 'canceled';
+const TASK_PROGRESS_MIN = 0;
+const TASK_PROGRESS_MAX = 100;
+const PACKAGE_TYPE_BADGE_MAP = {
+  SPRING_BOOT_JAR: { label: 'Spring Boot', className: 'pkg-boot' },
+  WAR: { label: 'WAR', className: 'pkg-war' },
+  PLAIN_JAR: { label: 'JAR', className: 'pkg-jar' }
+};
+const TREE_ICON_SVG_MAP = {
+  dirClosed: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+  dirOpen: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>',
+  java: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg>',
+  config: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>',
+  markup: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15h6"/></svg>',
+  archive: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>',
+  signature: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+  binary: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>',
+  file: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>'
+};
+const DELETE_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>';
+const STORAGE_KEY_COMPACT_FOLDERS = 'jarpatch.compactFolders';
+const MAX_OPEN_EDITOR_TABS = 12;
+const TAB_CLOSE_ICON_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+const MESSAGE_PATH_COPIED = '文件路径已复制';
+const MESSAGE_PATH_COPY_FAILED = '复制文件路径失败';
+const MESSAGE_ADMIN_ONLY_ACTION = '当前操作仅限管理员执行';
+const MESSAGE_PROJECT_FILTER_EMPTY = '没有匹配的项目';
+const MESSAGE_CANDIDATE_FILTER_EMPTY = '没有匹配的嵌套 Jar';
+const HISTORY_TAB_OPERATIONS = 'operations';
+const HISTORY_TAB_ANALYSES = 'analyses';
+const HISTORY_TAB_VALIDATIONS = 'validations';
+const SETTINGS_TAB_JDK = 'jdk';
+const SETTINGS_TAB_JDTLS = 'jdtls';
+const SETTINGS_TAB_AI = 'ai';
+const LANGUAGE_LABEL_MAP = {
+  java: 'Java',
+  xml: 'XML',
+  yaml: 'YAML',
+  ini: 'Properties',
+  json: 'JSON',
+  javascript: 'JavaScript',
+  css: 'CSS',
+  html: 'HTML',
+  plaintext: 'Plain Text'
+};
+const DIFF_STATUS_LABEL_MAP = {
+  MODIFIED: { label: '已修改', className: 'diff-modified' },
+  ADDED: { label: '新增', className: 'diff-added' },
+  DELETED: { label: '已删除', className: 'diff-deleted' }
+};
+const RISK_LEVEL_LABEL_MAP = {
+  HIGH: '高风险',
+  WARN: '警告',
+  INFO: '提示'
+};
+const HISTORY_STATUS_META_MAP = {
+  SUCCESS: { label: '成功', className: 'status-success' },
+  FAILED: { label: '失败', className: 'status-failed' },
+  CANCELED: { label: '已取消', className: 'status-canceled' },
+  RUNNING: { label: '进行中', className: 'status-running' }
+};
+const COMPACT_FOLDER_MAX_DEPTH = 12;
+const DEFAULT_OPERATOR_NAME = 'admin';
+const SIGNATURE_POLICY_REMOVE = 'REMOVE_INVALID_SIGNATURES';
+const SIGNATURE_POLICY_PRESERVE = 'PRESERVE_ONLY_UNMODIFIED';
+const DELETE_ACTION_HISTORY_ONLY = 'history';
+const DELETE_ACTION_WITH_WORKSPACE = 'both';
+const DELETE_ACTION_CANCEL = 'cancel';
 const UNICODE_PREVIEW_REFRESH_DELAY_MS = 400;
+const UNICODE_PREVIEW_FIRST_LINE = 1;
+const UNICODE_PREVIEW_FIRST_COLUMN = 1;
+const UNICODE_PREVIEW_FIRST_INDEX = 0;
+const UNICODE_PREVIEW_NO_ACTIVE_INDEX = -1;
+const UNICODE_PREVIEW_STEP_PREV = -1;
+const UNICODE_PREVIEW_STEP_NEXT = 1;
+const UNICODE_PREVIEW_MIN_NAVIGABLE_COUNT = 2;
+const CRLF_SEQUENCE_LENGTH = 2;
+const MESSAGE_UNICODE_PREVIEW_SUMMARY_PREFIX = '已解码 ';
+const MESSAGE_UNICODE_PREVIEW_SUMMARY_SPAN_UNIT = ' 处（';
+const MESSAGE_UNICODE_PREVIEW_SUMMARY_CHAR_UNIT = ' 字，分布 ';
+const MESSAGE_UNICODE_PREVIEW_SUMMARY_LINE_UNIT = ' 行）· 原文件未修改';
+const MESSAGE_UNICODE_PREVIEW_MATCH_SEPARATOR = ' / ';
+const MESSAGE_UNICODE_PREVIEW_LINE_PREFIX = ' · 第 ';
+const MESSAGE_UNICODE_PREVIEW_LINE_SUFFIX = ' 行';
 const LOG_OUTPUT_MAX_CHARS = 128 * 1024;
 const NUMBER_PARSE_RADIX = 10;
 const UNICODE_HEX_RADIX = 16;
@@ -217,6 +323,9 @@ const state = {
   currentFileEncoding: null,
   currentFileOriginalContent: null,
   unicodePreviewOpen: false,
+  unicodePreviewView: null,
+  unicodePreviewRanges: [],
+  unicodePreviewActiveIndex: UNICODE_PREVIEW_NO_ACTIVE_INDEX,
   analysisOpen: false,
   analysisReport: null,
   diffRequestId: 0,
@@ -232,16 +341,32 @@ const state = {
   languageServerReady: false,
   aiRequestContext: null,
   aiResult: null,
+  allProjects: [],
+  openTabs: [],
+  activeSearchPath: null,
+  lastSearchKeyword: '',
+  currentProjectHistory: null,
+  activeHistoryTab: HISTORY_TAB_OPERATIONS,
+  activeSettingsTab: SETTINGS_TAB_JDK,
+  compactFolders: true,
   treePanelWidth: TREE_PANEL_DEFAULT_WIDTH,
+  logPanelHeight: LOG_PANEL_DEFAULT_HEIGHT,
+  logPanelCollapsed: false,
+  uiTheme: THEME_DARK,
   expandedPaths: new Set([''])
 };
 
 const elements = {
   appShell: document.querySelector('.app-shell'),
+  workspace: document.querySelector('.workspace'),
   sidebarToggleBtn: document.getElementById('sidebarToggleBtn'),
+  sidebarQuickOpenBtn: document.getElementById('sidebarQuickOpenBtn'),
   sidebarContent: document.getElementById('sidebarContent'),
   openArchiveBtn: document.getElementById('openArchiveBtn'),
+  projectCountBadge: document.getElementById('projectCountBadge'),
+  projectSearchInput: document.getElementById('projectSearchInput'),
   projectList: document.getElementById('projectList'),
+  currentProjectBadge: document.getElementById('currentProjectBadge'),
   currentProjectName: document.getElementById('currentProjectName'),
   currentProjectMeta: document.getElementById('currentProjectMeta'),
   analyzeBtn: document.getElementById('analyzeBtn'),
@@ -249,6 +374,11 @@ const elements = {
   compileBtn: document.getElementById('compileBtn'),
   exportBtn: document.getElementById('exportBtn'),
   settingsBtn: document.getElementById('settingsBtn'),
+  runtimeBtn: document.getElementById('runtimeBtn'),
+  moreToolsMenu: document.getElementById('moreToolsMenu'),
+  moreToolsBtn: document.getElementById('moreToolsBtn'),
+  moreToolsPopover: document.getElementById('moreToolsPopover'),
+  themeToggleBtn: document.getElementById('themeToggleBtn'),
   projectSettingsBtn: document.getElementById('projectSettingsBtn'),
   projectHistoryBtn: document.getElementById('projectHistoryBtn'),
   cleanupWorkspaceBtn: document.getElementById('cleanupWorkspaceBtn'),
@@ -259,6 +389,10 @@ const elements = {
   helpDialog: document.getElementById('helpDialog'),
   helpNavigation: document.getElementById('helpNavigation'),
   settingsDialog: document.getElementById('settingsDialog'),
+  settingsTabs: document.getElementById('settingsTabs'),
+  settingsDotJdk: document.getElementById('settingsDotJdk'),
+  settingsDotJdtls: document.getElementById('settingsDotJdtls'),
+  settingsDotAi: document.getElementById('settingsDotAi'),
   settingsDialogSummary: document.getElementById('settingsDialogSummary'),
   jdkHomeInput: document.getElementById('jdkHomeInput'),
   browseJdkBtn: document.getElementById('browseJdkBtn'),
@@ -292,21 +426,31 @@ const elements = {
   closeProjectSettingsBtn: document.getElementById('closeProjectSettingsBtn'),
   saveProjectSettingsBtn: document.getElementById('saveProjectSettingsBtn'),
   projectHistoryDialog: document.getElementById('projectHistoryDialog'),
+  projectHistoryTabs: document.getElementById('projectHistoryTabs'),
   projectHistoryContent: document.getElementById('projectHistoryContent'),
   closeProjectHistoryBtn: document.getElementById('closeProjectHistoryBtn'),
   errorGuideDialog: document.getElementById('errorGuideDialog'),
   errorGuideContent: document.getElementById('errorGuideContent'),
   closeErrorGuideBtn: document.getElementById('closeErrorGuideBtn'),
+  taskBar: document.getElementById('taskBar'),
   taskStatusText: document.getElementById('taskStatusText'),
   taskStatusDetail: document.getElementById('taskStatusDetail'),
+  taskProgressFill: document.getElementById('taskProgressFill'),
   cancelTaskBtn: document.getElementById('cancelTaskBtn'),
   contentGrid: document.getElementById('contentGrid'),
   treeResizeHandle: document.getElementById('treeResizeHandle'),
+  compactFoldersBtn: document.getElementById('compactFoldersBtn'),
+  collapseTreeBtn: document.getElementById('collapseTreeBtn'),
   fileTree: document.getElementById('fileTree'),
   searchInput: document.getElementById('searchInput'),
+  clearSearchBtn: document.getElementById('clearSearchBtn'),
   searchBtn: document.getElementById('searchBtn'),
   searchResults: document.getElementById('searchResults'),
+  editorTabs: document.getElementById('editorTabs'),
+  activeFileDirtyDot: document.getElementById('activeFileDirtyDot'),
+  editorBreadcrumb: document.getElementById('editorBreadcrumb'),
   activeFileName: document.getElementById('activeFileName'),
+  copyFilePathBtn: document.getElementById('copyFilePathBtn'),
   activeFileKind: document.getElementById('activeFileKind'),
   unicodePreviewBtn: document.getElementById('unicodePreviewBtn'),
   fileEncodingSelect: document.getElementById('fileEncodingSelect'),
@@ -316,7 +460,22 @@ const elements = {
   aiInlineBtn: document.getElementById('aiInlineBtn'),
   aiAssistantBtn: document.getElementById('aiAssistantBtn'),
   editorIntelligenceStatus: document.getElementById('editorIntelligenceStatus'),
+  editorIntelligenceText: document.getElementById('editorIntelligenceText'),
+  statusCursorPos: document.getElementById('statusCursorPos'),
+  statusLanguage: document.getElementById('statusLanguage'),
+  statusCurrentUser: document.getElementById('statusCurrentUser'),
+  editorEmptyState: document.getElementById('editorEmptyState'),
+  emptyStateTitle: document.getElementById('emptyStateTitle'),
+  emptyStateDesc: document.getElementById('emptyStateDesc'),
+  emptyStateActions: document.getElementById('emptyStateActions'),
+  emptyOpenArchiveBtn: document.getElementById('emptyOpenArchiveBtn'),
+  emptyOpenRuntimeBtn: document.getElementById('emptyOpenRuntimeBtn'),
   editor: window.jarPatchEditor.create(document.getElementById('editor')),
+  unicodePreviewPanel: document.getElementById('unicodePreviewPanel'),
+  unicodePreviewSummary: document.getElementById('unicodePreviewSummary'),
+  unicodePreviewMatchStatus: document.getElementById('unicodePreviewMatchStatus'),
+  unicodePreviewPrevBtn: document.getElementById('unicodePreviewPrevBtn'),
+  unicodePreviewNextBtn: document.getElementById('unicodePreviewNextBtn'),
   unicodePreview: document.getElementById('unicodePreview'),
   aiAssistantDialog: document.getElementById('aiAssistantDialog'),
   aiContextSummary: document.getElementById('aiContextSummary'),
@@ -332,10 +491,19 @@ const elements = {
   analysisBadge: document.getElementById('analysisBadge'),
   analysisPanel: document.getElementById('analysisPanel'),
   analysisResult: document.getElementById('analysisResult'),
+  logResizeHandle: document.getElementById('logResizeHandle'),
+  logPanel: document.getElementById('logPanel'),
+  copyLogBtn: document.getElementById('copyLogBtn'),
+  clearLogBtn: document.getElementById('clearLogBtn'),
+  toggleLogBtn: document.getElementById('toggleLogBtn'),
   logOutput: document.getElementById('logOutput'),
   notificationArea: document.getElementById('notificationArea'),
   decompileDialog: document.getElementById('decompileDialog'),
+  decompileFilterInput: document.getElementById('decompileFilterInput'),
+  decompileSelectedBadge: document.getElementById('decompileSelectedBadge'),
   diffDialog: document.getElementById('diffDialog'),
+  diffExpandAllBtn: document.getElementById('diffExpandAllBtn'),
+  diffCollapseAllBtn: document.getElementById('diffCollapseAllBtn'),
   diffDialogSummary: document.getElementById('diffDialogSummary'),
   diffContent: document.getElementById('diffContent'),
   continueExportBtn: document.getElementById('continueExportBtn'),
@@ -388,39 +556,355 @@ function isEditorDirty() {
 }
 
 /**
- * 在切换文件、项目或清理工作区前确认是否放弃未保存内容。
+ * 在切换文件、项目或清理工作区前，通过内置确认弹窗提醒用户是否放弃未保存内容。
  *
- * @return 可以继续操作时返回 true
+ * @returns {Promise<boolean>} 可以继续操作时返回 true
  */
-function confirmDiscardUnsavedChanges() {
-  return !isEditorDirty() || window.confirm(MESSAGE_UNSAVED_CHANGES_CONFIRM);
+async function confirmDiscardUnsavedChanges() {
+  if (!isEditorDirty()) {
+    return true;
+  }
+  return window.jarPatchDialogs.confirm({
+    title: '放弃未保存的修改？',
+    message: MESSAGE_UNSAVED_CHANGES_CONFIRM,
+    tone: window.jarPatchDialogs.TONE_WARN,
+    details: state.currentFilePath ? [{ label: '当前文件', value: state.currentFilePath }] : [],
+    actions: [
+      { value: false, label: '继续编辑', variant: window.jarPatchDialogs.VARIANT_SECONDARY },
+      { value: true, label: '放弃修改并继续', variant: window.jarPatchDialogs.VARIANT_DANGER }
+    ]
+  });
 }
 
 /**
- * 根据编辑器脏状态更新文件提示和保存按钮。
+ * 渲染编辑器路径面包屑导航并控制复制路径按钮。
+ *
+ * @param {string|null} filePath 当前文件相对路径
+ */
+function renderEditorBreadcrumb(filePath) {
+  if (!filePath) {
+    elements.editorBreadcrumb.replaceChildren();
+    const emptyNode = document.createElement('span');
+    emptyNode.id = 'activeFileName';
+    emptyNode.className = 'active-file';
+    emptyNode.textContent = MESSAGE_ACTIVE_FILE_EMPTY;
+    elements.editorBreadcrumb.appendChild(emptyNode);
+    elements.activeFileName = emptyNode;
+    elements.copyFilePathBtn.hidden = true;
+    return;
+  }
+  const parts = filePath.split('/').filter(Boolean);
+  const fragment = document.createDocumentFragment();
+  parts.forEach((segment, index) => {
+    if (index > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'breadcrumb-sep';
+      sep.textContent = '›';
+      sep.setAttribute('aria-hidden', 'true');
+      fragment.appendChild(sep);
+    }
+    const span = document.createElement('span');
+    if (index === parts.length - 1) {
+      span.id = 'activeFileName';
+      span.className = 'active-file';
+      elements.activeFileName = span;
+    } else {
+      span.className = 'breadcrumb-seg';
+    }
+    span.textContent = segment;
+    fragment.appendChild(span);
+  });
+  elements.editorBreadcrumb.replaceChildren(fragment);
+  elements.editorBreadcrumb.title = filePath;
+  elements.copyFilePathBtn.hidden = false;
+}
+
+/**
+ * 将当前打开文件加入多文件标签栏（去重且保持上限），并重绘标签栏。
+ *
+ * @param {string} path 文件相对路径
+ * @param {string} kind 文件类型
+ */
+function upsertEditorTab(path, kind) {
+  const existing = state.openTabs.find((tab) => tab.path === path);
+  if (existing) {
+    existing.kind = kind || existing.kind;
+  } else {
+    state.openTabs.push({ path, kind: kind || 'SOURCE' });
+    if (state.openTabs.length > MAX_OPEN_EDITOR_TABS) {
+      state.openTabs.shift();
+    }
+  }
+  renderEditorTabs();
+}
+
+/**
+ * 重绘编辑器顶部多文件标签栏。
+ */
+function renderEditorTabs() {
+  if (!state.openTabs.length) {
+    elements.editorTabs.hidden = true;
+    elements.editorTabs.replaceChildren();
+    return;
+  }
+  elements.editorTabs.hidden = false;
+  const dirty = isEditorDirty();
+  const fragment = document.createDocumentFragment();
+  for (const tab of state.openTabs) {
+    const active = tab.path === state.currentFilePath;
+    const fileName = tab.path.split('/').pop() || tab.path;
+    const tabBtn = document.createElement('div');
+    tabBtn.className = `editor-tab ${active ? 'active' : ''}`;
+    tabBtn.setAttribute('role', 'tab');
+    tabBtn.setAttribute('aria-selected', String(active));
+    tabBtn.title = tab.path;
+    tabBtn.tabIndex = 0;
+
+    if (active && dirty) {
+      const dot = document.createElement('span');
+      dot.className = 'editor-tab-dot';
+      dot.title = MESSAGE_UNSAVED_CHANGES;
+      tabBtn.appendChild(dot);
+    }
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'editor-tab-name';
+    nameSpan.textContent = fileName;
+    tabBtn.appendChild(nameSpan);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'editor-tab-close';
+    closeBtn.setAttribute('aria-label', `关闭 ${fileName}`);
+    closeBtn.title = '关闭标签';
+    closeBtn.innerHTML = TAB_CLOSE_ICON_SVG;
+    closeBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void closeEditorTab(tab.path);
+    });
+    tabBtn.appendChild(closeBtn);
+
+    tabBtn.addEventListener('click', () => {
+      if (tab.path !== state.currentFilePath) {
+        void openFile({ path: tab.path, kind: tab.kind, editable: true });
+      }
+    });
+    tabBtn.addEventListener('keydown', (event) => {
+      if ((event.key === 'Enter' || event.key === ' ') && tab.path !== state.currentFilePath) {
+        event.preventDefault();
+        void openFile({ path: tab.path, kind: tab.kind, editable: true });
+      }
+    });
+    fragment.appendChild(tabBtn);
+  }
+  elements.editorTabs.replaceChildren(fragment);
+}
+
+/**
+ * 关闭指定文件标签；如果关闭的是当前激活文件，先确认未保存改动再切换到相邻标签或恢复空态。
+ *
+ * @param {string} targetPath 待关闭文件路径
+ */
+async function closeEditorTab(targetPath) {
+  const index = state.openTabs.findIndex((tab) => tab.path === targetPath);
+  if (index < 0) {
+    return;
+  }
+  const closingActive = targetPath === state.currentFilePath;
+  if (closingActive && !(await confirmDiscardUnsavedChanges())) {
+    return;
+  }
+  state.openTabs.splice(index, 1);
+  if (!closingActive) {
+    renderEditorTabs();
+    return;
+  }
+  const nextTab = state.openTabs[index] || state.openTabs[index - 1] || null;
+  if (nextTab) {
+    state.currentFileOriginalContent = null;
+    await openFile({ path: nextTab.path, kind: nextTab.kind, editable: true });
+    return;
+  }
+  clearActiveFileState();
+}
+
+/**
+ * 清空当前打开的文件状态并回到编辑器空态，同时保持项目已打开。
+ */
+function clearActiveFileState() {
+  state.documentSessionId++;
+  state.currentFilePath = null;
+  state.currentFileHash = null;
+  state.currentFileEncoding = null;
+  state.currentFileOriginalContent = null;
+  closeUnicodePreview();
+  elements.editor.closeDocument();
+  elements.editor.disabled = true;
+  elements.saveBtn.disabled = true;
+  elements.saveBtn.classList.remove('busy');
+  elements.fileEncodingSelect.disabled = true;
+  elements.activeFileDirtyDot.hidden = true;
+  renderEditorBreadcrumb(null);
+  elements.activeFileKind.textContent = MESSAGE_ACTIVE_FILE_TIP;
+  elements.activeFileKind.dataset.kind = '';
+  updateLanguageStatus(null);
+  updateCursorStatus(null);
+  updateEditorEmptyState();
+  updateEditorActionButtons();
+  renderEditorTabs();
+  renderCurrentTree(true);
+}
+
+/**
+ * 复制当前打开文件的相对路径到系统剪贴板。
+ */
+async function copyCurrentFilePath() {
+  if (!state.currentFilePath) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(state.currentFilePath);
+    notify(`${MESSAGE_PATH_COPIED}：${state.currentFilePath}`, NOTICE_TYPE_SUCCESS);
+  } catch (error) {
+    notify(`${MESSAGE_PATH_COPY_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
+}
+
+/**
+ * 更新底部 IDE 状态栏中的光标行列号显示。
+ *
+ * @param {{lineNumber: number, column: number}|null} position 光标位置
+ */
+function updateCursorStatus(position) {
+  if (!position || !state.currentFilePath) {
+    elements.statusCursorPos.hidden = true;
+    return;
+  }
+  elements.statusCursorPos.textContent = `行 ${position.lineNumber}, 列 ${position.column}`;
+  elements.statusCursorPos.hidden = false;
+}
+
+/**
+ * 更新底部 IDE 状态栏中的语言标识。
+ *
+ * @param {string|null} filePath 当前文件路径
+ */
+function updateLanguageStatus(filePath) {
+  if (!filePath) {
+    elements.statusLanguage.hidden = true;
+    return;
+  }
+  const languageId = window.jarPatchEditor.detectLanguage(filePath);
+  elements.statusLanguage.textContent = LANGUAGE_LABEL_MAP[languageId] || languageId;
+  elements.statusLanguage.hidden = false;
+}
+
+/**
+ * 根据当前登录用户角色同步界面管理员权限入口及底部状态栏身份。
+ *
+ * @param {object|null} user 当前已认证用户
+ */
+function applyUserRoleUi(user) {
+  const admin = Boolean(user && user.role === 'ADMIN');
+  elements.settingsBtn.hidden = !admin;
+  elements.cleanupWorkspaceBtn.hidden = !admin;
+  elements.orphanWorkspacesBtn.hidden = !admin;
+  if (!user) {
+    elements.statusCurrentUser.textContent = '未登录';
+    return;
+  }
+  const roleLabel = admin ? '管理员' : '普通用户';
+  elements.statusCurrentUser.textContent = `${user.displayName || user.username} · ${roleLabel}`;
+}
+
+/**
+ * 更新带图标按钮的文案节点，避免直接改写 textContent 误删内置 SVG 图标。
+ *
+ * @param {HTMLButtonElement} button 目标按钮
+ * @param {string} text 新文案
+ */
+function setButtonLabel(button, text) {
+  const label = button.querySelector('.btn-label');
+  if (label) {
+    label.textContent = text;
+    return;
+  }
+  button.textContent = text;
+}
+
+/**
+ * 解析包类型对应的中文短标签和样式类。
+ *
+ * @param {string} packageType 后端包类型枚举值
+ * @returns {{label: string, className: string}} 展示徽标信息
+ */
+function getPackageTypeBadge(packageType) {
+  return PACKAGE_TYPE_BADGE_MAP[packageType] || { label: packageType || 'JAR', className: 'pkg-jar' };
+}
+
+/**
+ * 同步顶部工具栏的包类型徽标。
+ *
+ * @param {object|null} project 当前打开的项目
+ */
+function updateCurrentProjectBadge(project) {
+  if (!project) {
+    elements.currentProjectBadge.hidden = true;
+    elements.currentProjectBadge.textContent = '';
+    elements.currentProjectBadge.className = 'pkg-badge';
+    return;
+  }
+  const badge = getPackageTypeBadge(project.packageType);
+  elements.currentProjectBadge.hidden = false;
+  elements.currentProjectBadge.textContent = badge.label;
+  elements.currentProjectBadge.className = `pkg-badge ${badge.className}`;
+}
+
+/**
+ * 按当前是否已打开项目和文件更新编辑器欢迎空状态覆盖层。
+ */
+function updateEditorEmptyState() {
+  const hasFile = Boolean(state.currentFilePath);
+  elements.editorEmptyState.hidden = hasFile;
+  if (hasFile) {
+    return;
+  }
+  const hasProject = Boolean(state.currentProject);
+  elements.emptyStateTitle.textContent = hasProject ? MESSAGE_EMPTY_NO_FILE_TITLE : MESSAGE_EMPTY_NO_PROJECT_TITLE;
+  elements.emptyStateDesc.textContent = hasProject ? MESSAGE_EMPTY_NO_FILE_DESC : MESSAGE_EMPTY_NO_PROJECT_DESC;
+  elements.emptyStateActions.hidden = hasProject;
+}
+
+/**
+ * 根据编辑器脏状态更新文件提示、未保存圆点、保存按钮以及多文件标签栏。
  */
 function updateDirtyIndicator() {
   if (!state.currentFilePath) {
+    elements.activeFileDirtyDot.hidden = true;
     return;
   }
   const dirty = isEditorDirty();
   const kind = elements.activeFileKind.dataset.kind || '';
+  elements.activeFileDirtyDot.hidden = !dirty;
   elements.activeFileKind.textContent = dirty ? `${kind} · ${MESSAGE_UNSAVED_CHANGES}` : kind;
   elements.saveBtn.classList.toggle('busy', dirty);
+  renderEditorTabs();
   scheduleUnicodePreviewButtonRefresh();
 }
 
 /**
- * 根据文件类型和已启用能力更新传统代码智能与 AI 按钮。
+ * 根据文件类型、当前预览状态和已启用能力更新传统代码智能与 AI 按钮。
  */
 function updateEditorActionButtons() {
   const hasFile = Boolean(state.currentProject && state.currentFilePath);
-  const javaFile = hasFile && state.currentFilePath.toLowerCase().endsWith('.java');
+  // 只读中文预览态禁用源码级修复与 AI 改写入口，避免操作隐藏中的源编辑器。
+  const editableView = hasFile && !state.unicodePreviewOpen;
+  const javaFile = editableView && state.currentFilePath.toLowerCase().endsWith('.java');
   const aiEnabled = Boolean(state.developmentSettings && state.developmentSettings.aiEnabled);
   elements.quickFixBtn.disabled = !javaFile || !state.languageServerReady;
   elements.organizeImportsBtn.disabled = !javaFile || !state.languageServerReady;
-  elements.aiInlineBtn.disabled = !hasFile || !aiEnabled;
-  elements.aiAssistantBtn.disabled = !hasFile || !aiEnabled;
+  elements.aiInlineBtn.disabled = !editableView || !aiEnabled;
+  elements.aiAssistantBtn.disabled = !editableView || !aiEnabled;
 }
 
 /**
@@ -431,7 +915,7 @@ function updateEditorActionButtons() {
 function handleLanguageStatus(status) {
   state.languageServerReady = status.state === 'ready';
   elements.editorIntelligenceStatus.dataset.state = status.state || 'idle';
-  elements.editorIntelligenceStatus.textContent = status.message || MESSAGE_LANGUAGE_SERVER_NOT_CONFIGURED;
+  elements.editorIntelligenceText.textContent = status.message || MESSAGE_LANGUAGE_SERVER_NOT_CONFIGURED;
   updateEditorActionButtons();
 }
 
@@ -467,19 +951,58 @@ function isChineseReadableCharacter(value) {
 }
 
 /**
- * 将文本中符合 Java 反斜杠规则的中文 Unicode 转义转换为只读预览内容。
+ * 将文本中符合 Java 反斜杠规则的中文 Unicode 转义转换为只读预览内容，
+ * 并同步记录每段连续解码中文在预览文本中的 1-based 行列区间，供 Monaco 高亮与上下处跳转。
  * 连续偶数个反斜杠表示转义后的字面量，不参与转换，避免改变原代码含义。
  *
- * @param content 编辑器原始文本
- * @return 预览内容和实际转换数量
+ * @param {string} content 编辑器原始文本
+ * @returns {{content: string, convertedCount: number, ranges: Array<object>, lineCount: number}} 预览文本、转换字数、连续区间与涉及行数
  */
 function decodeChineseUnicodeEscapes(content) {
   let index = 0;
   let convertedCount = 0;
+  let lineNumber = UNICODE_PREVIEW_FIRST_LINE;
+  let column = UNICODE_PREVIEW_FIRST_COLUMN;
   const previewParts = [];
+  const ranges = [];
+  const decodedLines = new Set();
+  let activeSpan = null;
+
+  /**
+   * 结束当前连续中文解码区间并写入结果数组。
+   */
+  const flushActiveSpan = () => {
+    if (activeSpan) {
+      ranges.push(activeSpan);
+      activeSpan = null;
+    }
+  };
+
   while (index < content.length) {
-    if (content[index] !== '\\') {
-      previewParts.push(content[index]);
+    const ch = content[index];
+    if (ch !== '\\') {
+      flushActiveSpan();
+      if (ch === '\r') {
+        if (content[index + 1] === '\n') {
+          previewParts.push('\r\n');
+          index += CRLF_SEQUENCE_LENGTH;
+        } else {
+          previewParts.push('\r');
+          index++;
+        }
+        lineNumber++;
+        column = UNICODE_PREVIEW_FIRST_COLUMN;
+        continue;
+      }
+      if (ch === '\n') {
+        previewParts.push('\n');
+        lineNumber++;
+        column = UNICODE_PREVIEW_FIRST_COLUMN;
+        index++;
+        continue;
+      }
+      previewParts.push(ch);
+      column++;
       index++;
       continue;
     }
@@ -490,12 +1013,20 @@ function decodeChineseUnicodeEscapes(content) {
     }
     const slashCount = slashEnd - index;
     if (slashCount % BACKSLASH_ESCAPE_PAIR_LENGTH === 0) {
+      flushActiveSpan();
       previewParts.push(content.slice(index, slashEnd));
+      column += slashCount;
       index = slashEnd;
       continue;
     }
 
-    previewParts.push(content.slice(index, slashEnd - 1));
+    const prefixSlashCount = slashCount - 1;
+    if (prefixSlashCount > 0) {
+      flushActiveSpan();
+      previewParts.push(content.slice(index, slashEnd - 1));
+      column += prefixSlashCount;
+    }
+
     let unicodeEnd = slashEnd;
     while (unicodeEnd < content.length && content[unicodeEnd] === 'u') {
       unicodeEnd++;
@@ -505,15 +1036,118 @@ function decodeChineseUnicodeEscapes(content) {
       const decoded = String.fromCharCode(Number.parseInt(hexadecimal, UNICODE_HEX_RADIX));
       if (isChineseReadableCharacter(decoded)) {
         previewParts.push(decoded);
+        // 连续的中文转义合并为同一高亮区间，便于整词高亮与“上一处/下一处”按片段跳转。
+        if (activeSpan && activeSpan.endLineNumber === lineNumber && activeSpan.endColumn === column) {
+          activeSpan.endColumn += decoded.length;
+        } else {
+          flushActiveSpan();
+          activeSpan = {
+            startLineNumber: lineNumber,
+            startColumn: column,
+            endLineNumber: lineNumber,
+            endColumn: column + decoded.length
+          };
+        }
+        decodedLines.add(lineNumber);
+        column += decoded.length;
         convertedCount++;
         index = unicodeEnd + UNICODE_ESCAPE_HEX_LENGTH;
         continue;
       }
     }
+    flushActiveSpan();
     previewParts.push('\\');
+    column++;
     index = slashEnd;
   }
-  return { content: previewParts.join(''), convertedCount };
+
+  flushActiveSpan();
+  return {
+    content: previewParts.join(''),
+    convertedCount,
+    ranges,
+    lineCount: decodedLines.size
+  };
+}
+
+/**
+ * 懒加载创建独立的只读 Monaco 中文预览实例，并接入底部状态栏光标同步。
+ *
+ * @returns {object} 只读预览视图控制器
+ */
+function ensureUnicodePreviewView() {
+  if (!state.unicodePreviewView) {
+    state.unicodePreviewView = window.jarPatchEditor.createUnicodePreviewView(elements.unicodePreview);
+    state.unicodePreviewView.onCursorChange((position) => {
+      if (state.unicodePreviewOpen) {
+        updateCursorStatus(position);
+      }
+    });
+  }
+  return state.unicodePreviewView;
+}
+
+/**
+ * 更新中文预览栏中的当前定位计数与上下处按钮可用态。
+ */
+function updateUnicodePreviewMatchStatus() {
+  const total = state.unicodePreviewRanges.length;
+  const activeRange = total > 0 && state.unicodePreviewActiveIndex >= UNICODE_PREVIEW_FIRST_INDEX
+    ? state.unicodePreviewRanges[state.unicodePreviewActiveIndex]
+    : null;
+  if (activeRange) {
+    elements.unicodePreviewMatchStatus.textContent = `${state.unicodePreviewActiveIndex + 1}${MESSAGE_UNICODE_PREVIEW_MATCH_SEPARATOR}${total}${MESSAGE_UNICODE_PREVIEW_LINE_PREFIX}${activeRange.startLineNumber}${MESSAGE_UNICODE_PREVIEW_LINE_SUFFIX}`;
+  } else {
+    elements.unicodePreviewMatchStatus.textContent = '';
+  }
+  const canNavigate = total >= UNICODE_PREVIEW_MIN_NAVIGABLE_COUNT;
+  elements.unicodePreviewPrevBtn.disabled = !canNavigate;
+  elements.unicodePreviewNextBtn.disabled = !canNavigate;
+}
+
+/**
+ * 刷新只读中文预览顶部提示条摘要信息。
+ *
+ * @param {{convertedCount: number, ranges: Array<object>, lineCount: number}} decoded 解码统计结果
+ */
+function renderUnicodePreviewSummary(decoded) {
+  elements.unicodePreviewSummary.textContent = `${MESSAGE_UNICODE_PREVIEW_SUMMARY_PREFIX}${decoded.ranges.length}${MESSAGE_UNICODE_PREVIEW_SUMMARY_SPAN_UNIT}${decoded.convertedCount}${MESSAGE_UNICODE_PREVIEW_SUMMARY_CHAR_UNIT}${decoded.lineCount}${MESSAGE_UNICODE_PREVIEW_SUMMARY_LINE_UNIT}`;
+  updateUnicodePreviewMatchStatus();
+}
+
+/**
+ * 在只读中文预览中跳转到上一处或下一处解码中文位置。
+ *
+ * @param {number} step 步进方向（-1 表示上一处，1 表示下一处）
+ */
+function navigateUnicodePreviewMatch(step) {
+  if (!state.unicodePreviewOpen || !state.unicodePreviewView || !state.unicodePreviewRanges.length) {
+    return;
+  }
+  state.unicodePreviewActiveIndex = state.unicodePreviewView.revealRange(state.unicodePreviewActiveIndex + step);
+  updateUnicodePreviewMatchStatus();
+  state.unicodePreviewView.focus();
+}
+
+/**
+ * 保存后刷新当前打开的只读中文预览内容，保持滚动位置不变。
+ */
+function refreshUnicodePreviewContent() {
+  if (!state.unicodePreviewOpen || !state.unicodePreviewView) {
+    return;
+  }
+  const decoded = decodeChineseUnicodeEscapes(elements.editor.value);
+  if (!decoded.convertedCount) {
+    closeUnicodePreview({ syncScrollToEditor: true });
+    return;
+  }
+  state.unicodePreviewRanges = decoded.ranges;
+  state.unicodePreviewActiveIndex = state.unicodePreviewView.updateContent({
+    content: decoded.content,
+    language: elements.editor.getLanguageId(),
+    ranges: decoded.ranges
+  });
+  renderUnicodePreviewSummary(decoded);
 }
 
 /**
@@ -532,32 +1166,56 @@ function scheduleUnicodePreviewButtonRefresh() {
 }
 
 /**
- * 根据当前文件内容更新中文预览按钮状态。
+ * 根据当前文件内容与预览状态更新中文预览按钮可用性。
  */
 function updateUnicodePreviewButton() {
   elements.unicodePreviewBtn.disabled = elements.editor.disabled
     || !state.currentFilePath
-    || !elements.editor.value.includes('\\u');
+    || (!state.unicodePreviewOpen && !elements.editor.value.includes('\\u'));
 }
 
 /**
- * 关闭只读预览并恢复原始编辑器；原始文本始终保存在 editor 中，不参与替换。
+ * 关闭只读中文预览并恢复原始编辑器；原始文本始终保存在 editor 中，不参与替换。
+ *
+ * @param {{syncScrollToEditor?: boolean}} [options] 关闭选项；用户主动返回原文时同步预览滚动位置回主编辑器
  */
-function closeUnicodePreview() {
+function closeUnicodePreview(options = {}) {
+  const { syncScrollToEditor = false } = options;
+  const previewScrollTop = state.unicodePreviewOpen && syncScrollToEditor && state.unicodePreviewView
+    ? state.unicodePreviewView.getScrollTop()
+    : null;
   state.unicodePreviewOpen = false;
+  state.unicodePreviewRanges = [];
+  state.unicodePreviewActiveIndex = UNICODE_PREVIEW_NO_ACTIVE_INDEX;
+  if (state.unicodePreviewView) {
+    state.unicodePreviewView.clear();
+  }
+  elements.unicodePreviewPanel.hidden = true;
+  elements.unicodePreviewSummary.textContent = '';
+  elements.unicodePreviewMatchStatus.textContent = '';
+  elements.unicodePreviewPrevBtn.disabled = true;
+  elements.unicodePreviewNextBtn.disabled = true;
   elements.editor.hidden = false;
-  elements.unicodePreview.hidden = true;
-  elements.unicodePreview.value = '';
-  elements.unicodePreviewBtn.textContent = BUTTON_TEXT_UNICODE_PREVIEW;
+  if (previewScrollTop !== null) {
+    // 预览与原文行号严格 1:1 对齐，返回原文时同步纵向位置便于直接定位修改。
+    elements.editor.scrollTop = previewScrollTop;
+  }
+  if (state.currentFilePath) {
+    updateCursorStatus(elements.editor.getCursorPosition());
+  }
+  setButtonLabel(elements.unicodePreviewBtn, BUTTON_TEXT_UNICODE_PREVIEW);
   elements.unicodePreviewBtn.setAttribute('aria-pressed', 'false');
+  updateEditorActionButtons();
+  updateUnicodePreviewButton();
 }
 
 /**
- * 在原始编辑器和中文只读预览之间切换。
+ * 在原始 Monaco 编辑器和只读 Monaco 中文预览之间切换。
+ * 入口为顶部“中文预览 / 返回原文”按钮；渲染结果仅落在独立只读预览模型，不改写源文件。
  */
 function toggleUnicodePreview() {
   if (state.unicodePreviewOpen) {
-    closeUnicodePreview();
+    closeUnicodePreview({ syncScrollToEditor: true });
     elements.editor.focus();
     return;
   }
@@ -566,13 +1224,26 @@ function toggleUnicodePreview() {
     notify(MESSAGE_UNICODE_PREVIEW_EMPTY, NOTICE_TYPE_INFO);
     return;
   }
-  elements.unicodePreview.value = decoded.content;
-  elements.unicodePreview.scrollTop = elements.editor.scrollTop;
+  const sourceScrollTop = elements.editor.scrollTop;
+  // 先切换面板可见性，再初始化并打开 Monaco 只读预览，确保视口高度与滚动定位计算准确。
   elements.editor.hidden = true;
-  elements.unicodePreview.hidden = false;
-  elements.unicodePreviewBtn.textContent = BUTTON_TEXT_UNICODE_SOURCE;
-  elements.unicodePreviewBtn.setAttribute('aria-pressed', 'true');
+  elements.unicodePreviewPanel.hidden = false;
+  const previewView = ensureUnicodePreviewView();
+  const openResult = previewView.open({
+    content: decoded.content,
+    language: elements.editor.getLanguageId(),
+    ranges: decoded.ranges,
+    initialScrollTop: sourceScrollTop
+  });
+  state.unicodePreviewRanges = decoded.ranges;
+  state.unicodePreviewActiveIndex = openResult.activeIndex;
   state.unicodePreviewOpen = true;
+  renderUnicodePreviewSummary(decoded);
+  setButtonLabel(elements.unicodePreviewBtn, BUTTON_TEXT_UNICODE_SOURCE);
+  elements.unicodePreviewBtn.setAttribute('aria-pressed', 'true');
+  updateEditorActionButtons();
+  updateUnicodePreviewButton();
+  previewView.focus();
 }
 
 /**
@@ -593,16 +1264,27 @@ function parseTaskProgress(message) {
 }
 
 /**
- * 更新任务状态栏。
+ * 更新任务状态栏文案、可视化状态点与进度条百分比。
  *
- * @param title  标题文案
- * @param detail 详情文案
- * @param active 是否处于执行中
+ * @param title    标题文案
+ * @param detail   详情文案
+ * @param active   是否处于执行中
+ * @param barState 任务栏视觉状态（idle / running / done / failed / canceled）
+ * @param progress 进度百分比（0-100），传入 null 时保持当前进度条
  */
-function updateTaskPanel(title, detail, active) {
+function updateTaskPanel(title, detail, active, barState = null, progress = null) {
   elements.taskStatusText.textContent = title;
   elements.taskStatusDetail.textContent = detail;
   elements.cancelTaskBtn.disabled = !active || state.currentTaskCancelRequested;
+  if (barState) {
+    elements.taskBar.dataset.state = barState;
+  } else {
+    elements.taskBar.dataset.state = active ? TASK_STATE_RUNNING : TASK_STATE_IDLE;
+  }
+  if (typeof progress === 'number' && !Number.isNaN(progress)) {
+    const clamped = Math.min(Math.max(progress, TASK_PROGRESS_MIN), TASK_PROGRESS_MAX);
+    elements.taskProgressFill.style.width = `${clamped}%`;
+  }
 }
 
 /**
@@ -610,6 +1292,7 @@ function updateTaskPanel(title, detail, active) {
  */
 function restoreWorkspaceControls() {
   elements.openArchiveBtn.disabled = false;
+  elements.sidebarQuickOpenBtn.disabled = false;
   elements.settingsBtn.disabled = false;
   elements.errorGuideBtn.disabled = false;
   elements.projectSettingsBtn.disabled = !state.currentProject;
@@ -621,6 +1304,8 @@ function restoreWorkspaceControls() {
   elements.searchResults.style.pointerEvents = '';
   elements.analysisToggleBtn.disabled = false;
   elements.analysisCloseBtn.disabled = false;
+  elements.compactFoldersBtn.disabled = !state.currentProject;
+  elements.collapseTreeBtn.disabled = !state.currentProject;
   elements.searchInput.disabled = !state.currentProject;
   elements.searchBtn.disabled = !state.currentProject;
   elements.saveBtn.disabled = !state.currentProject || !state.currentFilePath;
@@ -634,9 +1319,9 @@ function restoreWorkspaceControls() {
   elements.exportBtn.disabled = !state.currentProject;
   elements.compileBtn.classList.remove('busy');
   elements.exportBtn.classList.remove('busy');
-  elements.compileBtn.textContent = BUTTON_TEXT_COMPILE;
-  elements.exportBtn.textContent = BUTTON_TEXT_EXPORT;
-  elements.analyzeBtn.textContent = BUTTON_TEXT_ANALYZE;
+  setButtonLabel(elements.compileBtn, BUTTON_TEXT_COMPILE);
+  setButtonLabel(elements.exportBtn, BUTTON_TEXT_EXPORT);
+  setButtonLabel(elements.analyzeBtn, BUTTON_TEXT_ANALYZE);
   elements.cancelTaskBtn.disabled = true;
 }
 
@@ -645,6 +1330,7 @@ function restoreWorkspaceControls() {
  */
 function lockWorkspaceControls() {
   elements.openArchiveBtn.disabled = true;
+  elements.sidebarQuickOpenBtn.disabled = true;
   elements.settingsBtn.disabled = true;
   elements.errorGuideBtn.disabled = true;
   elements.projectSettingsBtn.disabled = true;
@@ -656,6 +1342,8 @@ function lockWorkspaceControls() {
   elements.searchResults.style.pointerEvents = 'none';
   elements.analysisToggleBtn.disabled = true;
   elements.analysisCloseBtn.disabled = true;
+  elements.compactFoldersBtn.disabled = true;
+  elements.collapseTreeBtn.disabled = true;
   elements.searchInput.disabled = true;
   elements.searchBtn.disabled = true;
   elements.saveBtn.disabled = true;
@@ -706,7 +1394,7 @@ function openTaskSocket(taskId) {
     };
     const taskLabel = state.currentTask ? getTaskLabel(state.currentTask.taskType) : MESSAGE_TASK_PANEL_LABEL;
     socket.onopen = () => {
-      updateTaskPanel(`${taskLabel} · 0%`, MESSAGE_TASK_CONNECTED, true);
+      updateTaskPanel(`${taskLabel} · 0%`, MESSAGE_TASK_CONNECTED, true, TASK_STATE_RUNNING, TASK_PROGRESS_MIN);
       settle(socket);
     };
     socket.onmessage = (event) => {
@@ -717,8 +1405,7 @@ function openTaskSocket(taskId) {
         elements.taskStatusDetail.textContent = parsed.detail;
         return;
       }
-      elements.taskStatusText.textContent = `${taskLabel} · ${parsed.progress}%`;
-      elements.taskStatusDetail.textContent = parsed.detail;
+      updateTaskPanel(`${taskLabel} · ${parsed.progress}%`, parsed.detail, true, TASK_STATE_RUNNING, parsed.progress);
     };
     socket.onerror = () => {
       appendLog(MESSAGE_TASK_LOG_UNAVAILABLE);
@@ -739,19 +1426,21 @@ function beginTaskSession(task) {
   state.currentTaskAbortController = new AbortController();
   state.currentTaskCancelRequested = false;
   lockWorkspaceControls();
-  updateTaskPanel(`${getTaskLabel(task.taskType)} · 0%`, task.message || MESSAGE_TASK_PANEL_READY, true);
+  updateTaskPanel(`${getTaskLabel(task.taskType)} · 0%`, task.message || MESSAGE_TASK_PANEL_READY, true, TASK_STATE_RUNNING, TASK_PROGRESS_MIN);
 }
 
 /**
  * 结束当前任务会话。
  *
- * @param task    任务记录
- * @param status  最终状态文案
- * @param detail  最终详情文案
+ * @param task     任务记录
+ * @param status   最终状态文案
+ * @param detail   最终详情文案
+ * @param barState 任务栏结束态标识
  */
-function endTaskSession(task, status, detail) {
+function endTaskSession(task, status, detail, barState = TASK_STATE_DONE) {
   const label = getTaskLabel(task.taskType);
-  updateTaskPanel(`${label} · ${status}`, detail, false);
+  const finalProgress = barState === TASK_STATE_DONE ? TASK_PROGRESS_MAX : null;
+  updateTaskPanel(`${label} · ${status}`, detail, false, barState, finalProgress);
   closeTaskSocket();
   state.currentTaskAbortController = null;
   state.currentTaskCancelRequested = false;
@@ -781,15 +1470,15 @@ async function executeTaskOperation(taskType, projectId, message, requestRunner)
   await openTaskSocket(task.id);
   try {
     const result = await requestRunner(task, state.currentTaskAbortController.signal);
-    endTaskSession(task, MESSAGE_TASK_PANEL_DONE, result && result.message ? result.message : MESSAGE_TASK_COMPLETED);
+    endTaskSession(task, MESSAGE_TASK_PANEL_DONE, result && result.message ? result.message : MESSAGE_TASK_COMPLETED, TASK_STATE_DONE);
     return result;
   } catch (error) {
     if (isTaskCanceledError(error)) {
-      endTaskSession(task, MESSAGE_TASK_PANEL_CANCELED, MESSAGE_TASK_CANCELED);
+      endTaskSession(task, MESSAGE_TASK_PANEL_CANCELED, MESSAGE_TASK_CANCELED, TASK_STATE_CANCELED);
       notify(MESSAGE_TASK_CANCELED, NOTICE_TYPE_INFO);
       return null;
     }
-    endTaskSession(task, MESSAGE_TASK_PANEL_FAILED, error.message || MESSAGE_TASK_FAILED);
+    endTaskSession(task, MESSAGE_TASK_PANEL_FAILED, error.message || MESSAGE_TASK_FAILED, TASK_STATE_FAILED);
     throw error;
   }
 }
@@ -829,9 +1518,46 @@ async function cancelCurrentTask() {
 }
 
 /**
+ * 切换开发能力配置弹窗的分段标签页。
+ *
+ * @param {string} tabName 目标标签名（jdk / jdtls / ai）
+ */
+function selectSettingsTab(tabName) {
+  const normalized = tabName === SETTINGS_TAB_JDTLS || tabName === SETTINGS_TAB_AI
+    ? tabName
+    : SETTINGS_TAB_JDK;
+  state.activeSettingsTab = normalized;
+  elements.settingsTabs.querySelectorAll('[data-settings-tab]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.settingsTab === normalized));
+  });
+  elements.settingsDialog.querySelectorAll('[data-settings-pane]').forEach((pane) => {
+    pane.hidden = pane.dataset.settingsPane !== normalized;
+  });
+}
+
+/**
+ * 同步开发能力配置标签页的实时状态指示圆点。
+ */
+function updateSettingsTabDots() {
+  const jdkReady = Boolean(state.jdkSettings && state.jdkSettings.effectiveValid);
+  elements.settingsDotJdk.className = `tab-status-dot ${jdkReady ? 'ready' : 'warn'}`;
+
+  const jdtlsEnabled = elements.languageServerEnabledInput.checked;
+  elements.settingsDotJdtls.className = `tab-status-dot ${jdtlsEnabled ? 'ready' : ''}`.trim();
+
+  const aiEnabled = elements.aiEnabledInput.checked;
+  elements.settingsDotAi.className = `tab-status-dot ${aiEnabled ? 'ready' : ''}`.trim();
+}
+
+/**
  * 打开开发能力配置弹窗，同时读取编译 JDK、JDT LS 与 AI 配置。
  */
 async function openSettingsDialog() {
+  if (!window.jarPatchAuth.isAdmin()) {
+    notify(MESSAGE_ADMIN_ONLY_ACTION, NOTICE_TYPE_INFO);
+    return;
+  }
+  selectSettingsTab(SETTINGS_TAB_JDK);
   elements.settingsDialog.classList.add('open');
   elements.settingsDialog.setAttribute('aria-hidden', 'false');
   renderJdkSettings(null, MESSAGE_SETTINGS_LOADING);
@@ -845,9 +1571,11 @@ async function openSettingsDialog() {
     state.developmentSettings = developmentSettings;
     renderJdkSettings(jdkSettings, MESSAGE_DEVELOPMENT_SETTINGS_SUMMARY);
     renderDevelopmentSettings(developmentSettings);
+    updateSettingsTabDots();
     updateEditorActionButtons();
   } catch (error) {
     renderJdkSettings(null, MESSAGE_SETTINGS_LOADING);
+    updateSettingsTabDots();
     notify(`${MESSAGE_DEVELOPMENT_SETTINGS_LOAD_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
   }
 }
@@ -1076,6 +1804,7 @@ async function saveJdkSettings() {
     } else {
       failures.push(`${MESSAGE_DEVELOPMENT_SETTINGS_LABEL}：${developmentResult.reason.message}`);
     }
+    updateSettingsTabDots();
     if (failures.length) {
       notify(`${MESSAGE_DEVELOPMENT_SETTINGS_PARTIAL}：${failures.join('；')}`, NOTICE_TYPE_ERROR);
       return;
@@ -1122,12 +1851,32 @@ function closeProjectSettingsDialog() {
 }
 
 /**
+ * 切换项目历史弹窗的分段标签页并渲染对应列表。
+ *
+ * @param {string} tabName 目标标签名（operations / analyses / validations）
+ */
+function selectHistoryTab(tabName) {
+  const normalized = tabName === HISTORY_TAB_ANALYSES || tabName === HISTORY_TAB_VALIDATIONS
+    ? tabName
+    : HISTORY_TAB_OPERATIONS;
+  state.activeHistoryTab = normalized;
+  elements.projectHistoryTabs.querySelectorAll('[data-history-tab]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.historyTab === normalized));
+  });
+  if (state.currentProjectHistory) {
+    renderActiveProjectHistoryTab();
+  }
+}
+
+/**
  * 加载并展示当前项目最近的业务操作、分析和导出校验历史。
  */
 async function openProjectHistoryDialog() {
   if (!state.currentProject) {
     return;
   }
+  state.currentProjectHistory = null;
+  selectHistoryTab(HISTORY_TAB_OPERATIONS);
   elements.projectHistoryDialog.classList.add('open');
   elements.projectHistoryDialog.setAttribute('aria-hidden', 'false');
   elements.projectHistoryContent.innerHTML = '<div class="empty">正在读取项目历史...</div>';
@@ -1149,31 +1898,78 @@ function closeProjectHistoryDialog() {
 }
 
 /**
- * 渲染项目历史聚合视图。
+ * 解析历史操作状态对应的中文文案与徽标样式类。
  *
- * @param history 后端历史聚合数据
+ * @param {string} status 后端操作状态值
+ * @returns {{label: string, className: string}} 展示元数据
+ */
+function getHistoryStatusMeta(status) {
+  const key = String(status || '').toUpperCase();
+  return HISTORY_STATUS_META_MAP[key] || { label: status || '未知', className: 'status-running' };
+}
+
+/**
+ * 保存并渲染项目历史聚合视图。
+ *
+ * @param {object} history 后端历史聚合数据
  */
 function renderProjectHistory(history) {
-  const operations = (history.operations || []).map((item) => `
-    <div class="history-item">
-      <strong>${escapeHtml(item.createdAt)} · ${escapeHtml(item.operationType)} · ${escapeHtml(item.status)}</strong>
-      <span>操作 ID：${escapeHtml(item.operationId || '-')}</span>
-      <span>${escapeHtml(item.details || '')}</span>
-    </div>`).join('') || '<div class="empty">暂无操作记录</div>';
-  const analyses = (history.analyses || []).map((item) => {
-    const risks = item.report && Array.isArray(item.report.risks) ? item.report.risks.length : 0;
-    return `<div class="history-item"><strong>${escapeHtml(item.createdAt)}</strong><span>风险项：${risks}</span></div>`;
-  }).join('') || '<div class="empty">暂无分析记录</div>';
-  const validations = (history.exportValidations || []).map((item) => `
-    <div class="history-item">
-      <strong>${escapeHtml(item.createdAt)} · ${item.valid ? '通过' : '未通过'}</strong>
-      <span>${escapeHtml(item.outputPath || '')}</span>
-      <span>检查 ${item.checks ? item.checks.length : 0} 项，错误 ${item.errors ? item.errors.length : 0} 项</span>
-    </div>`).join('') || '<div class="empty">暂无导出校验记录</div>';
-  elements.projectHistoryContent.innerHTML = `
-    <section class="history-section"><h3>操作时间线</h3>${operations}</section>
-    <section class="history-section"><h3>结构分析历史</h3>${analyses}</section>
-    <section class="history-section"><h3>导出校验历史</h3>${validations}</section>`;
+  state.currentProjectHistory = history || { operations: [], analyses: [], exportValidations: [] };
+  renderActiveProjectHistoryTab();
+}
+
+/**
+ * 根据当前选中的项目历史分段渲染对应内容，展示操作人与状态徽标。
+ */
+function renderActiveProjectHistoryTab() {
+  const history = state.currentProjectHistory || { operations: [], analyses: [], exportValidations: [] };
+  if (state.activeHistoryTab === HISTORY_TAB_ANALYSES) {
+    const analyses = (history.analyses || []).map((item) => {
+      const risks = item.report && Array.isArray(item.report.risks) ? item.report.risks.length : 0;
+      const badgeClass = risks > 0 ? 'status-canceled' : 'status-success';
+      const badgeText = risks > 0 ? `${risks} 项风险` : '无风险';
+      return `
+        <div class="history-item">
+          <div class="history-item-head">
+            <strong>${escapeHtml(item.createdAt)}</strong>
+            <span class="history-status-badge ${badgeClass}">${escapeHtml(badgeText)}</span>
+          </div>
+          <span>包类型：${escapeHtml(item.report && item.report.packageType ? item.report.packageType : '-')} · 修改文件：${item.report && Array.isArray(item.report.modifiedFiles) ? item.report.modifiedFiles.length : 0}</span>
+        </div>`;
+    }).join('') || '<div class="empty">暂无结构分析记录</div>';
+    elements.projectHistoryContent.innerHTML = `<section class="history-section"><h3>结构分析历史</h3>${analyses}</section>`;
+    return;
+  }
+
+  if (state.activeHistoryTab === HISTORY_TAB_VALIDATIONS) {
+    const validations = (history.exportValidations || []).map((item) => `
+      <div class="history-item">
+        <div class="history-item-head">
+          <strong>${escapeHtml(item.createdAt)}</strong>
+          <span class="history-status-badge ${item.valid ? 'status-success' : 'status-failed'}">${item.valid ? '校验通过' : '未通过'}</span>
+        </div>
+        <span>${escapeHtml(item.outputPath || '-')}</span>
+        <span>检查 ${item.checks ? item.checks.length : 0} 项，错误 ${item.errors ? item.errors.length : 0} 项</span>
+      </div>`).join('') || '<div class="empty">暂无导出校验记录</div>';
+    elements.projectHistoryContent.innerHTML = `<section class="history-section"><h3>导出校验历史</h3>${validations}</section>`;
+    return;
+  }
+
+  const operations = (history.operations || []).map((item) => {
+    const statusMeta = getHistoryStatusMeta(item.status);
+    const operator = item.operator || DEFAULT_OPERATOR_NAME;
+    return `
+      <div class="history-item">
+        <div class="history-item-head">
+          <strong>${escapeHtml(item.createdAt)} · ${escapeHtml(item.operationType)}</strong>
+          <span class="history-status-badge ${statusMeta.className}">${escapeHtml(statusMeta.label)}</span>
+          <span class="history-operator-tag">@${escapeHtml(operator)}</span>
+        </div>
+        <span>操作 ID：${escapeHtml(item.operationId || '-')}</span>
+        <span>${escapeHtml(item.details || '')}</span>
+      </div>`;
+  }).join('') || '<div class="empty">暂无操作记录</div>';
+  elements.projectHistoryContent.innerHTML = `<section class="history-section"><h3>操作时间线</h3>${operations}</section>`;
 }
 
 /**
@@ -1225,20 +2021,32 @@ async function saveProjectSettings() {
  * 预览并确认清理当前项目工作区。
  */
 async function cleanupCurrentWorkspace() {
-  if (!state.currentProject || !confirmDiscardUnsavedChanges()) {
+  if (!window.jarPatchAuth.isAdmin()) {
+    notify(MESSAGE_ADMIN_ONLY_ACTION, NOTICE_TYPE_INFO);
+    return;
+  }
+  if (!state.currentProject || !(await confirmDiscardUnsavedChanges())) {
     return;
   }
   try {
     const preview = await api(`/api/projects/${state.currentProject.id}/workspace/cleanup-preview`);
-    const details = [
-      MESSAGE_WORKSPACE_CLEANUP_CONFIRM,
-      `项目：${preview.projectName}`,
-      `路径：${preview.workspacePath}`,
-      `文件：${preview.fileCount} 个`,
-      `大小：${formatBytes(preview.totalBytes)}`,
-      `最后使用：${preview.lastUsedAt}`
-    ].join('\n');
-    if (!window.confirm(details)) {
+    const confirmed = await window.jarPatchDialogs.confirm({
+      title: '确认清理当前工作区',
+      message: MESSAGE_WORKSPACE_CLEANUP_CONFIRM,
+      tone: window.jarPatchDialogs.TONE_DANGER,
+      details: [
+        { label: '项目名称', value: preview.projectName },
+        { label: '工作区路径', value: preview.workspacePath },
+        { label: '文件数量', value: `${preview.fileCount} 个` },
+        { label: '占用空间', value: formatBytes(preview.totalBytes) },
+        { label: '最后使用', value: preview.lastUsedAt }
+      ],
+      actions: [
+        { value: false, label: '取消', variant: window.jarPatchDialogs.VARIANT_SECONDARY },
+        { value: true, label: '确认清理工作区', variant: window.jarPatchDialogs.VARIANT_DANGER }
+      ]
+    });
+    if (!confirmed) {
       return;
     }
     await api(`/api/projects/${state.currentProject.id}/workspace?confirmationId=${encodeURIComponent(preview.confirmationId)}`, {
@@ -1314,50 +2122,95 @@ function formatBytes(bytes) {
   return `${(bytes / BYTES_PER_MEGABYTE).toFixed(2)} MB`;
 }
 
+/**
+ * 从后端拉取历史项目列表并按当前筛选框实时渲染。
+ */
 async function loadProjects() {
   try {
     const projects = await api('/api/projects');
-    renderProjects(projects);
+    state.allProjects = Array.isArray(projects) ? projects : [];
+    renderFilteredProjects();
   } catch (error) {
     appendLog(`读取项目历史失败：${error.message}`);
   }
 }
 
-function renderProjects(projects) {
-  elements.projectList.innerHTML = '';
-  if (!projects.length) {
-    elements.projectList.innerHTML = `<div class="empty">${MESSAGE_PROJECT_HISTORY_EMPTY}</div>`;
+/**
+ * 按左侧项目筛选框关键词过滤并重绘历史项目列表。
+ */
+function renderFilteredProjects() {
+  const keyword = elements.projectSearchInput.value.trim().toLowerCase();
+  if (!keyword) {
+    renderProjects(state.allProjects, false);
     return;
   }
+  const filtered = state.allProjects.filter((project) => {
+    const name = String(project.name || '').toLowerCase();
+    const type = String(project.packageType || '').toLowerCase();
+    const workspacePath = String(project.workspacePath || '').toLowerCase();
+    return name.includes(keyword) || type.includes(keyword) || workspacePath.includes(keyword);
+  });
+  renderProjects(filtered, true);
+}
+
+/**
+ * 渲染左侧历史项目列表，展示包类型徽标、更新时间与管理员专属删除操作。
+ *
+ * @param {Array<object>} projects 过滤后的项目历史列表
+ * @param {boolean} isFiltering    当前是否处于关键词筛选态
+ */
+function renderProjects(projects, isFiltering = false) {
+  elements.projectList.innerHTML = '';
+  const totalCount = state.allProjects.length;
+  elements.projectCountBadge.textContent = isFiltering
+    ? `${projects.length}/${totalCount}`
+    : String(totalCount);
+  if (!projects.length) {
+    const emptyText = isFiltering ? MESSAGE_PROJECT_FILTER_EMPTY : MESSAGE_PROJECT_HISTORY_EMPTY;
+    elements.projectList.innerHTML = `<div class="empty">${emptyText}</div>`;
+    return;
+  }
+  const canDelete = window.jarPatchAuth && window.jarPatchAuth.isAdmin();
   projects.forEach((project) => {
     const item = document.createElement('div');
     item.className = `project-item ${state.currentProject && state.currentProject.id === project.id ? 'active' : ''}`;
 
     const selectButton = document.createElement('button');
     selectButton.className = 'project-main';
-    const workspaceState = project.workspaceCleanedAt
-      ? `${PROJECT_TIME_SEPARATOR}${MESSAGE_WORKSPACE_CLEANED_MARKER}`
+    selectButton.type = 'button';
+    selectButton.title = `${project.name}\n${project.workspacePath || ''}`;
+    const badge = getPackageTypeBadge(project.packageType);
+    const cleanedBadge = project.workspaceCleanedAt
+      ? `<span class="pkg-badge pkg-cleaned">${MESSAGE_WORKSPACE_CLEANED_MARKER}</span>`
       : '';
-    selectButton.innerHTML = `<strong>${escapeHtml(project.name)}</strong><span>${project.packageType}${PROJECT_TIME_SEPARATOR}${escapeHtml(formatProjectTime(project.updatedAt))}${workspaceState}</span>`;
+    selectButton.innerHTML = `
+      <strong>${escapeHtml(project.name)}</strong>
+      <div class="project-meta-row">
+        <span class="pkg-badge ${badge.className}">${escapeHtml(badge.label)}</span>
+        ${cleanedBadge}
+        <span class="project-time">${escapeHtml(formatProjectTime(project.updatedAt))}</span>
+      </div>`;
     selectButton.disabled = Boolean(project.workspaceCleanedAt);
     selectButton.addEventListener('click', () => selectProject(project));
-
-    const deleteButton = document.createElement('button');
-    deleteButton.className = 'project-delete';
-    deleteButton.type = 'button';
-    deleteButton.title = MESSAGE_PROJECT_HISTORY_DELETE;
-    deleteButton.setAttribute('aria-label', `${MESSAGE_PROJECT_HISTORY_DELETE}：${project.name}`);
-    deleteButton.textContent = MESSAGE_PROJECT_HISTORY_DELETE;
-    deleteButton.addEventListener('click', () => deleteProjectHistory(project));
-
     item.appendChild(selectButton);
-    item.appendChild(deleteButton);
+
+    if (canDelete) {
+      const deleteButton = document.createElement('button');
+      deleteButton.className = 'project-delete';
+      deleteButton.type = 'button';
+      deleteButton.title = MESSAGE_PROJECT_HISTORY_DELETE;
+      deleteButton.setAttribute('aria-label', `${MESSAGE_PROJECT_HISTORY_DELETE}：${project.name}`);
+      deleteButton.innerHTML = DELETE_ICON_SVG;
+      deleteButton.addEventListener('click', () => deleteProjectHistory(project));
+      item.appendChild(deleteButton);
+    }
+
     elements.projectList.appendChild(item);
   });
 }
 
 async function selectProject(project) {
-  if (project.workspaceCleanedAt || !confirmDiscardUnsavedChanges()) {
+  if (project.workspaceCleanedAt || !(await confirmDiscardUnsavedChanges())) {
     return;
   }
   const projectSessionId = ++state.projectSessionId;
@@ -1370,18 +2223,34 @@ async function selectProject(project) {
   state.currentFileEncoding = null;
   state.currentFileOriginalContent = null;
   state.currentTree = null;
+  state.openTabs = [];
+  state.activeSearchPath = null;
+  state.lastSearchKeyword = '';
   state.expandedPaths = new Set(['']);
   elements.editor.closeDocument();
+  updateCurrentProjectBadge(project);
   elements.currentProjectName.textContent = project.name;
-  elements.currentProjectMeta.textContent = `${project.packageType} · ${project.workspacePath}`;
+  elements.currentProjectName.title = project.name;
+  elements.currentProjectMeta.textContent = project.workspacePath;
+  elements.currentProjectMeta.title = project.workspacePath;
   restoreWorkspaceControls();
   elements.searchInput.disabled = false;
   elements.searchBtn.disabled = false;
+  elements.searchInput.value = '';
+  elements.searchResults.innerHTML = '';
+  updateSearchClearButton();
   elements.saveBtn.disabled = true;
+  elements.saveBtn.classList.remove('busy');
+  elements.activeFileDirtyDot.hidden = true;
   closeUnicodePreview();
   elements.editor.disabled = true;
-  elements.activeFileName.textContent = '未选择文件';
-  elements.activeFileKind.textContent = '请选择左侧可编辑文件';
+  renderEditorTabs();
+  renderEditorBreadcrumb(null);
+  elements.activeFileKind.textContent = MESSAGE_ACTIVE_FILE_TIP;
+  elements.activeFileKind.dataset.kind = '';
+  updateLanguageStatus(null);
+  updateCursorStatus(null);
+  updateEditorEmptyState();
   resetAnalysisPanel();
   await loadTree(project.id);
   if (state.projectSessionId !== projectSessionId) {
@@ -1393,23 +2262,55 @@ async function selectProject(project) {
   }
 }
 
+/**
+ * 管理员删除指定项目的历史记录，支持一步选择是否连同清理工作区目录。
+ *
+ * @param {object} project 待删除项目
+ */
 async function deleteProjectHistory(project) {
-  if (state.currentProject && state.currentProject.id === project.id && !confirmDiscardUnsavedChanges()) {
+  if (!window.jarPatchAuth.isAdmin()) {
+    notify(MESSAGE_ADMIN_ONLY_ACTION, NOTICE_TYPE_INFO);
+    return;
+  }
+  if (state.currentProject && state.currentProject.id === project.id && !(await confirmDiscardUnsavedChanges())) {
     return;
   }
   try {
     if (!project.workspaceCleanedAt) {
-      const cleanWorkspace = window.confirm(MESSAGE_PROJECT_HISTORY_DELETE_WITH_WORKSPACE);
-      if (cleanWorkspace) {
+      const choice = await window.jarPatchDialogs.confirm({
+        title: '删除项目历史记录',
+        message: '请选择仅移除历史记录，或连同清理本地工作区目录。保留工作区目录后，可在「扫描孤立工作区」中查看。',
+        tone: window.jarPatchDialogs.TONE_DANGER,
+        cancelValue: DELETE_ACTION_CANCEL,
+        details: [
+          { label: '项目名称', value: project.name },
+          { label: '工作区路径', value: project.workspacePath || '-' }
+        ],
+        actions: [
+          { value: DELETE_ACTION_CANCEL, label: '取消', variant: window.jarPatchDialogs.VARIANT_SECONDARY },
+          { value: DELETE_ACTION_HISTORY_ONLY, label: '仅删除历史', variant: window.jarPatchDialogs.VARIANT_SECONDARY },
+          { value: DELETE_ACTION_WITH_WORKSPACE, label: '清理工作区并删除', variant: window.jarPatchDialogs.VARIANT_DANGER }
+        ]
+      });
+      if (choice === DELETE_ACTION_CANCEL) {
+        return;
+      }
+      if (choice === DELETE_ACTION_WITH_WORKSPACE) {
         const cleaned = await previewAndCleanProjectWorkspace(project);
         if (!cleaned) {
           return;
         }
-      } else if (!window.confirm(MESSAGE_PROJECT_HISTORY_DELETE_ONLY)) {
-        return;
       }
     } else {
-      const confirmed = window.confirm(`${MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_PREFIX}${project.name}${MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_SUFFIX}`);
+      const confirmed = await window.jarPatchDialogs.confirm({
+        title: '确认删除项目历史',
+        message: `${MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_PREFIX}${project.name}${MESSAGE_PROJECT_HISTORY_DELETE_CONFIRM_SUFFIX}`,
+        tone: window.jarPatchDialogs.TONE_DANGER,
+        actions: [
+          { value: false, label: '取消', variant: window.jarPatchDialogs.VARIANT_SECONDARY },
+          { value: true, label: '确认删除历史', variant: window.jarPatchDialogs.VARIANT_DANGER }
+        ]
+      });
       if (!confirmed) {
         return;
       }
@@ -1436,24 +2337,36 @@ function resetCurrentProject() {
   state.currentFileEncoding = null;
   state.currentFileOriginalContent = null;
   state.currentTree = null;
+  state.openTabs = [];
+  state.activeSearchPath = null;
+  state.lastSearchKeyword = '';
   state.expandedPaths = new Set(['']);
+  updateCurrentProjectBadge(null);
   elements.currentProjectName.textContent = MESSAGE_PROJECT_NOT_OPENED;
+  elements.currentProjectName.title = '';
   elements.currentProjectMeta.textContent = MESSAGE_PROJECT_OPEN_TIP;
+  elements.currentProjectMeta.title = '';
   restoreWorkspaceControls();
   elements.searchBtn.disabled = true;
   elements.saveBtn.disabled = true;
   elements.fileEncodingSelect.disabled = true;
   elements.searchInput.value = '';
   elements.searchResults.innerHTML = '';
+  updateSearchClearButton();
   elements.fileTree.classList.add('empty');
   elements.fileTree.textContent = MESSAGE_FILE_TREE_EMPTY;
   closeUnicodePreview();
   elements.editor.closeDocument();
   elements.editor.disabled = true;
-  elements.activeFileName.textContent = MESSAGE_ACTIVE_FILE_EMPTY;
+  elements.activeFileDirtyDot.hidden = true;
+  renderEditorTabs();
+  renderEditorBreadcrumb(null);
   elements.activeFileKind.textContent = MESSAGE_ACTIVE_FILE_TIP;
   elements.activeFileKind.dataset.kind = '';
   elements.saveBtn.classList.remove('busy');
+  updateLanguageStatus(null);
+  updateCursorStatus(null);
+  updateEditorEmptyState();
   elements.editor.stopLanguageServer().catch((error) => {
     handleLanguageStatus({ state: 'error', message: `${MESSAGE_LANGUAGE_SERVER_UNAVAILABLE}：${error.message}` });
   });
@@ -1494,42 +2407,159 @@ function renderCurrentTree(keepScroll) {
   elements.fileTree.scrollLeft = scrollLeft;
 }
 
+/**
+ * 根据文件树节点类型与扩展名返回对应的 SVG 图标与语义着色类。
+ *
+ * @param {object} node     文件树节点
+ * @param {boolean} expanded 目录是否展开
+ * @returns {{svg: string, className: string}} 图标配置
+ */
+function getTreeNodeIcon(node, expanded) {
+  if (node.kind === 'DIRECTORY') {
+    return {
+      svg: expanded ? TREE_ICON_SVG_MAP.dirOpen : TREE_ICON_SVG_MAP.dirClosed,
+      className: 'tree-icon-dir'
+    };
+  }
+  if (node.kind === 'SIGNATURE') {
+    return { svg: TREE_ICON_SVG_MAP.signature, className: 'tree-icon-signature' };
+  }
+  if (node.kind === 'BINARY') {
+    const lowerName = String(node.name || '').toLowerCase();
+    if (lowerName.endsWith('.jar') || lowerName.endsWith('.war')) {
+      return { svg: TREE_ICON_SVG_MAP.archive, className: 'tree-icon-archive' };
+    }
+    return { svg: TREE_ICON_SVG_MAP.binary, className: 'tree-icon-binary' };
+  }
+  const lowerName = String(node.name || '').toLowerCase();
+  if (lowerName.endsWith('.java')) {
+    return { svg: TREE_ICON_SVG_MAP.java, className: 'tree-icon-java' };
+  }
+  if (lowerName.endsWith('.yml') || lowerName.endsWith('.yaml') || lowerName.endsWith('.properties') || lowerName.endsWith('.conf')) {
+    return { svg: TREE_ICON_SVG_MAP.config, className: 'tree-icon-config' };
+  }
+  if (lowerName.endsWith('.xml') || lowerName.endsWith('.json') || lowerName.endsWith('.html')) {
+    return { svg: TREE_ICON_SVG_MAP.markup, className: 'tree-icon-markup' };
+  }
+  return { svg: TREE_ICON_SVG_MAP.file, className: 'tree-icon-file' };
+}
+
+/**
+ * 初始化文件树“合并单子目录包路径（Compact Folders）”偏好状态。
+ */
+function initializeCompactFolders() {
+  const saved = localStorage.getItem(STORAGE_KEY_COMPACT_FOLDERS);
+  state.compactFolders = saved !== '0';
+  syncCompactFoldersButton();
+}
+
+/**
+ * 同步包路径合并切换按钮的激活态与无障碍属性。
+ */
+function syncCompactFoldersButton() {
+  elements.compactFoldersBtn.classList.toggle('active', state.compactFolders);
+  elements.compactFoldersBtn.setAttribute('aria-pressed', String(state.compactFolders));
+}
+
+/**
+ * 切换文件树“合并单子目录包路径”显示模式并立即重绘。
+ */
+function toggleCompactFolders() {
+  state.compactFolders = !state.compactFolders;
+  localStorage.setItem(STORAGE_KEY_COMPACT_FOLDERS, state.compactFolders ? '1' : '0');
+  syncCompactFoldersButton();
+  renderCurrentTree(true);
+}
+
+/**
+ * 在开启 Compact Folders 时，沿已加载的单子目录链折叠生成显示标签与末尾节点。
+ *
+ * @param {object} node 起始目录节点
+ * @returns {{tail: object, chain: Array<object>, displayName: string}} 合并结果
+ */
+function resolveCompactChain(node) {
+  const chain = [node];
+  if (!state.compactFolders || node.kind !== 'DIRECTORY' || !node.path || !node.childrenLoaded) {
+    return { tail: node, chain, displayName: node.name };
+  }
+  let current = node;
+  while (current.childrenLoaded
+      && Array.isArray(current.children)
+      && current.children.length === 1
+      && current.children[0].kind === 'DIRECTORY') {
+    current = current.children[0];
+    chain.push(current);
+  }
+  const javaPackageContext = node.path.startsWith('sources/') || node.path.includes('/classes/');
+  const separator = javaPackageContext ? '.' : '/';
+  return {
+    tail: current,
+    chain,
+    displayName: chain.map((item) => item.name).join(separator)
+  };
+}
+
 function renderTreeNode(node) {
+  const { tail, chain, displayName } = resolveCompactChain(node);
   const wrapper = document.createElement('div');
-  const hasChildren = Boolean(node.hasChildren);
-  const expanded = state.expandedPaths.has(node.path);
+  const hasChildren = Boolean(tail.hasChildren);
+  const expanded = state.expandedPaths.has(tail.path);
+  const isActive = Boolean(state.currentFilePath && tail.path === state.currentFilePath);
   wrapper.className = `tree-node ${hasChildren && !expanded ? 'collapsed' : ''}`;
 
   const label = document.createElement('button');
-  label.className = `tree-label ${node.editable ? '' : 'disabled'}`;
+  label.type = 'button';
+  label.className = `tree-label ${tail.editable || tail.kind === 'DIRECTORY' ? '' : 'disabled'} ${isActive ? 'active' : ''}`.trim();
+  label.title = tail.path || tail.name;
   const toggle = hasChildren ? (expanded ? '▾' : '▸') : '';
-  label.innerHTML = `<span class="tree-toggle">${toggle}</span>${escapeHtml(node.name)}`;
-  label.addEventListener('click', () => handleTreeClick(node));
+  const icon = getTreeNodeIcon(tail, expanded);
+  label.innerHTML = `<span class="tree-toggle">${toggle}</span><span class="tree-icon ${icon.className}" aria-hidden="true">${icon.svg}</span><span>${escapeHtml(displayName)}</span>`;
+  label.addEventListener('click', () => handleTreeClick(tail, chain));
   wrapper.appendChild(label);
 
-  if (node.childrenLoaded && node.children && node.children.length && expanded) {
+  if (tail.childrenLoaded && tail.children && tail.children.length && expanded) {
     const children = document.createElement('div');
     children.className = 'tree-children';
-    node.children.forEach((child) => children.appendChild(renderTreeNode(child)));
+    tail.children.forEach((child) => children.appendChild(renderTreeNode(child)));
     wrapper.appendChild(children);
   }
   return wrapper;
 }
 
-async function handleTreeClick(node) {
+async function handleTreeClick(node, chain = [node]) {
   const projectSessionId = state.projectSessionId;
   if (node.kind === 'DIRECTORY' && node.hasChildren) {
     if (state.expandedPaths.has(node.path)) {
       state.expandedPaths.delete(node.path);
     } else {
       try {
-        if (!node.childrenLoaded) {
-          await loadTreeChildren(node);
+        let current = node;
+        if (!current.childrenLoaded) {
+          await loadTreeChildren(current);
           if (state.projectSessionId !== projectSessionId) {
             return;
           }
         }
-        state.expandedPaths.add(node.path);
+        chain.forEach((item) => state.expandedPaths.add(item.path));
+        // 开启 Compact Folders 时自动预载单子目录链（如 com/example/service），一次点击直达包内容。
+        if (state.compactFolders && current.path) {
+          let depth = 0;
+          while (depth < COMPACT_FOLDER_MAX_DEPTH
+              && current.childrenLoaded
+              && Array.isArray(current.children)
+              && current.children.length === 1
+              && current.children[0].kind === 'DIRECTORY') {
+            current = current.children[0];
+            if (!current.childrenLoaded) {
+              await loadTreeChildren(current);
+              if (state.projectSessionId !== projectSessionId) {
+                return;
+              }
+            }
+            state.expandedPaths.add(current.path);
+            depth++;
+          }
+        }
       } catch (error) {
         notify(`文件树加载失败：${error.message}`, NOTICE_TYPE_ERROR);
         return;
@@ -1576,7 +2606,7 @@ async function openFile(node, encoding = null) {
   if (!state.currentProject) {
     return;
   }
-  if (node.path !== state.currentFilePath && !confirmDiscardUnsavedChanges()) {
+  if (node.path !== state.currentFilePath && !(await confirmDiscardUnsavedChanges())) {
     return;
   }
   const project = state.currentProject;
@@ -1595,7 +2625,7 @@ async function openFile(node, encoding = null) {
     const encodingQuery = encoding ? `&encoding=${encodeURIComponent(encoding)}` : '';
     const contentView = await api(`/api/projects/${project.id}/files/content?path=${encodeURIComponent(node.path)}${encodingQuery}`);
     if (!isCurrentRequest()
-        || (state.editorRevision !== editorRevision && !confirmDiscardUnsavedChanges())) {
+        || (state.editorRevision !== editorRevision && !(await confirmDiscardUnsavedChanges()))) {
       return;
     }
     closeUnicodePreview();
@@ -1616,11 +2646,16 @@ async function openFile(node, encoding = null) {
     elements.fileEncodingSelect.value = contentView.encoding;
     elements.fileEncodingSelect.disabled = false;
     elements.saveBtn.disabled = false;
-    elements.activeFileName.textContent = node.path;
+    renderEditorBreadcrumb(node.path);
     elements.activeFileKind.textContent = node.kind;
     elements.activeFileKind.dataset.kind = node.kind;
+    upsertEditorTab(node.path, node.kind);
+    updateLanguageStatus(node.path);
+    updateCursorStatus({ lineNumber: 1, column: 1 });
+    updateEditorEmptyState();
     updateDirtyIndicator();
     updateEditorActionButtons();
+    renderCurrentTree(true);
   } catch (error) {
     if (isCurrentRequest()) {
       notify(`${MESSAGE_FILE_OPEN_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
@@ -1634,11 +2669,16 @@ async function searchProject() {
   }
   const keyword = elements.searchInput.value.trim();
   if (!keyword) {
+    state.lastSearchKeyword = '';
+    state.activeSearchPath = null;
     elements.searchResults.innerHTML = '';
+    updateSearchClearButton();
     notify(MESSAGE_SEARCH_KEYWORD_EMPTY, NOTICE_TYPE_INFO);
     return;
   }
   try {
+    state.lastSearchKeyword = keyword;
+    state.activeSearchPath = null;
     const results = await api(`/api/projects/${state.currentProject.id}/search?keyword=${encodeURIComponent(keyword)}`);
     renderSearchResults(results);
     notify(`${MESSAGE_SEARCH_SUCCESS}：${keyword}，${results.length} 条结果`, NOTICE_TYPE_SUCCESS);
@@ -1647,19 +2687,65 @@ async function searchProject() {
   }
 }
 
+/**
+ * 对搜索结果预览文本进行 HTML 转义并安全高亮命中关键词。
+ *
+ * @param {string} preview 原始预览片段
+ * @param {string} keyword 搜索关键词
+ * @returns {string} 高亮后的安全 HTML
+ */
+function highlightSearchPreview(preview, keyword) {
+  const source = String(preview || '');
+  const query = String(keyword || '').trim();
+  if (!query) {
+    return escapeHtml(source);
+  }
+  const lowerSource = source.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  let cursor = 0;
+  let output = '';
+  while (cursor < source.length) {
+    const matchIndex = lowerSource.indexOf(lowerQuery, cursor);
+    if (matchIndex < 0) {
+      output += escapeHtml(source.slice(cursor));
+      break;
+    }
+    output += escapeHtml(source.slice(cursor, matchIndex));
+    output += `<mark class="search-hit">${escapeHtml(source.slice(matchIndex, matchIndex + query.length))}</mark>`;
+    cursor = matchIndex + query.length;
+  }
+  return output;
+}
+
 function renderSearchResults(results) {
   elements.searchResults.innerHTML = '';
   if (!results.length) {
     elements.searchResults.innerHTML = '<div class="empty">没有搜索结果</div>';
+    updateSearchClearButton();
     return;
   }
+  const header = document.createElement('div');
+  header.className = 'search-results-header';
+  header.innerHTML = `<span>找到 ${results.length} 条结果</span><span>点击跳转定位</span>`;
+  elements.searchResults.appendChild(header);
+
   results.forEach((result) => {
+    const resultKey = `${result.path}:${result.lineNumber}`;
     const button = document.createElement('button');
-    button.className = 'search-result';
-    button.innerHTML = `<strong>${escapeHtml(result.path)}:${result.lineNumber}</strong><span>${escapeHtml(result.preview)}</span>`;
-    button.addEventListener('click', () => openSearchResult(result));
+    button.type = 'button';
+    button.className = `search-result ${state.activeSearchPath === resultKey ? 'active' : ''}`.trim();
+    button.dataset.resultKey = resultKey;
+    button.innerHTML = `<strong>${escapeHtml(result.path)}:${result.lineNumber}</strong><span>${highlightSearchPreview(result.preview, state.lastSearchKeyword)}</span>`;
+    button.addEventListener('click', () => {
+      state.activeSearchPath = resultKey;
+      elements.searchResults.querySelectorAll('.search-result').forEach((node) => {
+        node.classList.toggle('active', node.dataset.resultKey === resultKey);
+      });
+      void openSearchResult(result);
+    });
     elements.searchResults.appendChild(button);
   });
+  updateSearchClearButton();
 }
 
 async function openSearchResult(result) {
@@ -1702,15 +2788,23 @@ async function expandPathParents(path) {
  */
 async function previewAndCleanProjectWorkspace(project) {
   const preview = await api(`/api/projects/${project.id}/workspace/cleanup-preview`);
-  const details = [
-    MESSAGE_WORKSPACE_CLEANUP_CONFIRM,
-    `项目：${preview.projectName}`,
-    `路径：${preview.workspacePath}`,
-    `文件：${preview.fileCount} 个`,
-    `大小：${formatBytes(preview.totalBytes)}`,
-    `最后使用：${preview.lastUsedAt}`
-  ].join('\n');
-  if (!window.confirm(details)) {
+  const confirmed = await window.jarPatchDialogs.confirm({
+    title: '确认清理项目工作区',
+    message: MESSAGE_WORKSPACE_CLEANUP_CONFIRM,
+    tone: window.jarPatchDialogs.TONE_DANGER,
+    details: [
+      { label: '项目名称', value: preview.projectName },
+      { label: '工作区路径', value: preview.workspacePath },
+      { label: '文件数量', value: `${preview.fileCount} 个` },
+      { label: '占用空间', value: formatBytes(preview.totalBytes) },
+      { label: '最后使用', value: preview.lastUsedAt }
+    ],
+    actions: [
+      { value: false, label: '取消', variant: window.jarPatchDialogs.VARIANT_SECONDARY },
+      { value: true, label: '确认清理工作区', variant: window.jarPatchDialogs.VARIANT_DANGER }
+    ]
+  });
+  if (!confirmed) {
     return false;
   }
   await api(`/api/projects/${project.id}/workspace?confirmationId=${encodeURIComponent(preview.confirmationId)}`, {
@@ -1723,16 +2817,30 @@ async function previewAndCleanProjectWorkspace(project) {
  * 扫描并显式确认清理全部孤立工作区。
  */
 async function cleanupOrphanWorkspaces() {
+  if (!window.jarPatchAuth.isAdmin()) {
+    notify(MESSAGE_ADMIN_ONLY_ACTION, NOTICE_TYPE_INFO);
+    return;
+  }
   try {
     const preview = await api('/api/workspaces/orphans/cleanup-preview');
     if (!preview.entries || !preview.entries.length) {
       notify(MESSAGE_ORPHAN_WORKSPACE_EMPTY, NOTICE_TYPE_INFO);
       return;
     }
-    const summary = preview.entries.map((entry) =>
-      `${entry.workspacePath}\n  ${entry.fileCount} 个文件，${formatBytes(entry.totalBytes)}，最后修改 ${entry.lastModifiedAt}`
-    ).join('\n\n');
-    if (!window.confirm(`确认清理以下 ${preview.entries.length} 个孤立工作区吗？\n\n${summary}`)) {
+    const confirmed = await window.jarPatchDialogs.confirm({
+      title: '清理孤立工作区',
+      message: `扫描到 ${preview.entries.length} 个无项目记录关联的本地工作目录，确认后将永久删除这些目录及其内容。`,
+      tone: window.jarPatchDialogs.TONE_DANGER,
+      listItems: preview.entries.map((entry) => ({
+        title: entry.workspacePath,
+        meta: `${entry.fileCount} 个文件 · ${formatBytes(entry.totalBytes)} · 最后修改 ${entry.lastModifiedAt}`
+      })),
+      actions: [
+        { value: false, label: '取消', variant: window.jarPatchDialogs.VARIANT_SECONDARY },
+        { value: true, label: `确认清理全部 ${preview.entries.length} 个目录`, variant: window.jarPatchDialogs.VARIANT_DANGER }
+      ]
+    });
+    if (!confirmed) {
       return;
     }
     const cleanedCount = await api(`/api/workspaces/orphans?confirmationId=${encodeURIComponent(preview.confirmationId)}`, {
@@ -1751,7 +2859,7 @@ async function reopenCurrentFileWithEncoding() {
   if (!state.currentProject || !state.currentFilePath) {
     return;
   }
-  if (!confirmDiscardUnsavedChanges()) {
+  if (!(await confirmDiscardUnsavedChanges())) {
     elements.fileEncodingSelect.value = state.currentFileEncoding || 'UTF-8';
     return;
   }
@@ -1844,7 +2952,7 @@ async function saveFileSnapshot(snapshot) {
       state.currentFileEncoding = contentView.encoding;
       elements.fileEncodingSelect.value = contentView.encoding;
       if (state.unicodePreviewOpen) {
-        elements.unicodePreview.value = decodeChineseUnicodeEscapes(elements.editor.value).content;
+        refreshUnicodePreviewContent();
       }
       updateDirtyIndicator();
     }
@@ -1932,7 +3040,7 @@ function setAiAssistantBusy(busy) {
   elements.aiInstructionInput.disabled = busy;
   elements.closeAiAssistantBtn.disabled = busy;
   elements.runAiAssistantBtn.disabled = busy;
-  elements.runAiAssistantBtn.textContent = busy ? BUTTON_TEXT_AI_RUNNING : BUTTON_TEXT_AI_RUN;
+  setButtonLabel(elements.runAiAssistantBtn, busy ? BUTTON_TEXT_AI_RUNNING : BUTTON_TEXT_AI_RUN);
   if (busy) {
     elements.applyAiResultBtn.disabled = true;
   }
@@ -2029,7 +3137,7 @@ async function triggerAiInlineCompletion() {
 }
 
 async function importArchive() {
-  if (!confirmDiscardUnsavedChanges()) {
+  if (!(await confirmDiscardUnsavedChanges())) {
     return;
   }
   const filePath = await window.jarPatch.openArchive();
@@ -2064,6 +3172,7 @@ async function importArchive() {
 
 function openDecompileDialog(inspection) {
   state.currentInspection = cloneInspection(inspection);
+  elements.decompileFilterInput.value = '';
   renderDecompileDialog();
   elements.decompileDialog.classList.add('open');
   elements.decompileDialog.setAttribute('aria-hidden', 'false');
@@ -2099,18 +3208,38 @@ function cloneInspection(inspection) {
 
 function renderDecompileDialog() {
   const inspection = state.currentInspection;
+  if (!inspection) {
+    return;
+  }
   const candidates = inspection.candidates || [];
   const selectedCount = candidates.filter((candidate) => candidate.selected).length;
+  const keyword = elements.decompileFilterInput.value.trim().toLowerCase();
   elements.decompileDialogMeta.textContent = `${inspection.packageType} · ${inspection.filePath}`;
   elements.decompileDialogSummary.textContent = candidates.length
     ? `pom.xml 模块：${renderPomModuleSummary(inspection.pomModules)}；当前已选择 ${selectedCount} ${MESSAGE_DECOMPILE_SELECTED_SUFFIX}`
     : MESSAGE_DECOMPILE_NO_CANDIDATE;
+  elements.decompileSelectedBadge.textContent = `${selectedCount} / ${candidates.length}`;
   elements.decompileCandidateList.innerHTML = '';
   if (!candidates.length) {
     elements.decompileCandidateList.innerHTML = `<div class="empty">${MESSAGE_DECOMPILE_NO_CANDIDATE}</div>`;
     return;
   }
+  const matched = [];
   candidates.forEach((candidate, index) => {
+    if (!keyword) {
+      matched.push({ candidate, index });
+      return;
+    }
+    const haystack = `${candidate.name || ''} ${candidate.path || ''} ${candidate.reason || ''}`.toLowerCase();
+    if (haystack.includes(keyword)) {
+      matched.push({ candidate, index });
+    }
+  });
+  if (!matched.length) {
+    elements.decompileCandidateList.innerHTML = `<div class="empty">${MESSAGE_CANDIDATE_FILTER_EMPTY}</div>`;
+    return;
+  }
+  matched.forEach(({ candidate, index }) => {
     elements.decompileCandidateList.appendChild(renderCandidateItem(candidate, index));
   });
 }
@@ -2188,22 +3317,81 @@ async function analyzeProject() {
   }
 }
 
+/**
+ * 渲染右侧包结构分析报告，展示风险等级徽标及可点击跳转的已修改文件清单。
+ *
+ * @param {object} report 后端返回的结构分析报告
+ */
 function renderAnalysis(report) {
   state.analysisReport = report;
   elements.analysisResult.classList.remove('empty');
   const risks = report.risks.length
-    ? report.risks.map((risk) => `<div class="risk ${risk.level}"><strong>${escapeHtml(risk.title)}</strong><br>${escapeHtml(risk.detail)}</div>`).join('')
+    ? report.risks.map((risk) => {
+      const levelLabel = RISK_LEVEL_LABEL_MAP[risk.level] || risk.level;
+      return `
+        <div class="risk ${escapeHtml(risk.level)}">
+          <div class="risk-head">
+            <span class="risk-badge">${escapeHtml(levelLabel)}</span>
+            <strong>${escapeHtml(risk.title)}</strong>
+          </div>
+          <div>${escapeHtml(risk.detail)}</div>
+        </div>`;
+    }).join('')
     : '<div class="empty">未发现导出风险</div>';
   updateAnalysisBadge(report);
+  const modifiedFiles = Array.isArray(report.modifiedFiles) ? report.modifiedFiles : [];
   elements.analysisResult.innerHTML = `
     <div class="metric"><span>包类型</span><strong>${escapeHtml(report.packageType)}</strong></div>
     <div class="metric"><span>入口类</span><strong>${escapeHtml(report.entryClass || '未识别')}</strong></div>
     <div class="metric"><span>Manifest</span><strong>${report.manifestExists ? '存在' : '不存在'}</strong></div>
     <div class="metric"><span>Class数量</span><strong>${report.classCount}</strong></div>
     <div class="metric"><span>依赖数量</span><strong>${report.dependencyCount}</strong></div>
-    <div class="metric"><span>修改文件</span><strong>${report.modifiedFiles.length}</strong></div>
+    <div class="metric"><span>修改文件</span><strong>${modifiedFiles.length}</strong></div>
     ${risks}
   `;
+  if (modifiedFiles.length) {
+    const modifiedSection = document.createElement('section');
+    modifiedSection.className = 'analysis-modified-section';
+    const subtitle = document.createElement('div');
+    subtitle.className = 'analysis-subtitle';
+    subtitle.textContent = `已修改文件（点击跳转打开）`;
+    const list = document.createElement('div');
+    list.className = 'analysis-modified-list';
+    modifiedFiles.forEach((filePath) => {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'analysis-file-link';
+      link.textContent = filePath;
+      link.title = `打开 ${filePath}`;
+      link.addEventListener('click', () => {
+        void openFileFromAnalysis(filePath);
+      });
+      list.appendChild(link);
+    });
+    modifiedSection.appendChild(subtitle);
+    modifiedSection.appendChild(list);
+    elements.analysisResult.appendChild(modifiedSection);
+  }
+}
+
+/**
+ * 从右侧分析面板的“已修改文件”清单展开目录树并在编辑器中打开对应文件。
+ *
+ * @param {string} filePath 工作区相对路径
+ */
+async function openFileFromAnalysis(filePath) {
+  if (!state.currentProject || !filePath) {
+    return;
+  }
+  await expandPathParents(filePath);
+  if (state.currentTree) {
+    renderCurrentTree(true);
+  }
+  await openFile({
+    path: filePath,
+    kind: filePath.toLowerCase().endsWith('.java') ? 'SOURCE' : 'RESOURCE',
+    editable: true
+  });
 }
 
 function setAnalysisPanelOpen(open) {
@@ -2265,7 +3453,12 @@ function renderDiffReport(report) {
     const details = document.createElement('details');
     details.className = 'diff-item';
     const summary = document.createElement('summary');
-    summary.textContent = `${diff.status} · ${diff.path}`;
+    const statusMeta = DIFF_STATUS_LABEL_MAP[diff.status] || { label: diff.status || '变更', className: 'diff-modified' };
+    const badge = document.createElement('span');
+    badge.className = `diff-status-badge ${statusMeta.className}`;
+    badge.textContent = statusMeta.label;
+    summary.appendChild(badge);
+    summary.appendChild(document.createTextNode(diff.path));
     details.appendChild(summary);
 
     const labels = document.createElement('div');
@@ -2377,7 +3570,21 @@ async function exportProject() {
     notify(MESSAGE_UNSAVED_CHANGES_BLOCK_ACTION, NOTICE_TYPE_INFO);
     return;
   }
-  const removeSignatures = window.confirm(MESSAGE_SIGNATURE_POLICY_CONFIRM);
+  const signaturePolicy = await window.jarPatchDialogs.confirm({
+    title: '选择导出签名处理策略',
+    message: MESSAGE_SIGNATURE_POLICY_CONFIRM,
+    tone: window.jarPatchDialogs.TONE_WARN,
+    cancelValue: null,
+    actions: [
+      { value: null, label: '取消导出', variant: window.jarPatchDialogs.VARIANT_SECONDARY },
+      { value: SIGNATURE_POLICY_PRESERVE, label: '保留原签名继续', variant: window.jarPatchDialogs.VARIANT_SECONDARY },
+      { value: SIGNATURE_POLICY_REMOVE, label: '移除失效签名并导出', variant: window.jarPatchDialogs.VARIANT_PRIMARY }
+    ]
+  });
+  if (!signaturePolicy) {
+    notify(MESSAGE_EXPORT_CANCELED, NOTICE_TYPE_INFO);
+    return;
+  }
   const settings = state.projectSettings || await api(`/api/projects/${state.currentProject.id}/settings`);
   state.projectSettings = settings;
   const defaultName = state.currentProject.name.replace(/(\.jar|\.war)$/i, '-patched$1');
@@ -2397,7 +3604,7 @@ async function exportProject() {
       body: JSON.stringify({
         outputPath,
         taskId: task.id,
-        signaturePolicy: removeSignatures ? 'REMOVE_INVALID_SIGNATURES' : 'PRESERVE_ONLY_UNMODIFIED'
+        signaturePolicy
       })
     }));
     if (result) {
@@ -2409,7 +3616,7 @@ async function exportProject() {
 }
 
 function setActionButtonRunning(button, runningText) {
-  button.textContent = runningText;
+  setButtonLabel(button, runningText);
   button.classList.add('busy');
   elements.analyzeBtn.disabled = true;
   elements.compileBtn.disabled = true;
@@ -2420,10 +3627,265 @@ function restoreProjectActionButtons() {
   restoreWorkspaceControls();
 }
 
+/**
+ * 切换并持久化工作台深色/浅色主题，同时同步所有 Monaco 编辑器实例配色。
+ *
+ * @param {string} theme 目标主题（dark 或 light）
+ * @param {boolean} persist 是否保存到本地存储
+ */
+function applyTheme(theme, persist = false) {
+  const normalized = theme === THEME_LIGHT ? THEME_LIGHT : THEME_DARK;
+  state.uiTheme = normalized;
+  document.body.dataset.theme = normalized;
+  const label = normalized === THEME_DARK ? LABEL_SWITCH_TO_LIGHT : LABEL_SWITCH_TO_DARK;
+  elements.themeToggleBtn.setAttribute('aria-label', label);
+  elements.themeToggleBtn.title = label;
+  window.jarPatchEditor.setTheme(normalized);
+  if (persist) {
+    localStorage.setItem(STORAGE_KEY_THEME, normalized);
+  }
+}
+
+/**
+ * 启动时读取本地主题偏好，默认启用专业深色 IDE 主题。
+ */
+function initializeTheme() {
+  const saved = localStorage.getItem(STORAGE_KEY_THEME);
+  applyTheme(saved === THEME_LIGHT ? THEME_LIGHT : THEME_DARK, false);
+}
+
+/**
+ * 在深色与浅色工作台主题之间切换。
+ */
+function toggleTheme() {
+  applyTheme(state.uiTheme === THEME_DARK ? THEME_LIGHT : THEME_DARK, true);
+}
+
+/**
+ * 展开或收起顶部“更多”工具弹出菜单。
+ *
+ * @param {boolean} open 是否展开
+ */
+function setMoreToolsOpen(open) {
+  elements.moreToolsPopover.hidden = !open;
+  elements.moreToolsBtn.setAttribute('aria-expanded', String(open));
+}
+
+/**
+ * 根据搜索输入或结果状态同步清空按钮可见性。
+ */
+function updateSearchClearButton() {
+  const hasContent = Boolean(elements.searchInput.value.trim()) || elements.searchResults.hasChildNodes();
+  elements.clearSearchBtn.hidden = !hasContent;
+}
+
+/**
+ * 清空项目搜索输入和搜索结果列表。
+ */
+function clearSearchResults() {
+  state.lastSearchKeyword = '';
+  state.activeSearchPath = null;
+  elements.searchInput.value = '';
+  elements.searchResults.innerHTML = '';
+  updateSearchClearButton();
+  elements.searchInput.focus();
+}
+
+/**
+ * 折叠文件树中的全部子目录，只保留根节点展开。
+ */
+function collapseFileTree() {
+  if (!state.currentTree) {
+    return;
+  }
+  state.expandedPaths = new Set(['']);
+  renderCurrentTree(false);
+}
+
+/**
+ * 初始化底部执行日志面板的高度和折叠状态。
+ */
+function initializeLogPanel() {
+  const savedHeight = Number.parseInt(localStorage.getItem(STORAGE_KEY_LOG_HEIGHT), NUMBER_PARSE_RADIX);
+  const initialHeight = Number.isNaN(savedHeight) ? LOG_PANEL_DEFAULT_HEIGHT : savedHeight;
+  setLogPanelHeight(initialHeight, false);
+  const collapsed = localStorage.getItem(STORAGE_KEY_LOG_COLLAPSED) === '1';
+  setLogPanelCollapsed(collapsed, false);
+}
+
+/**
+ * 设置底部执行日志面板高度并限制在安全范围内。
+ *
+ * @param {number} height 目标高度（像素）
+ * @param {boolean} persist 是否持久化到本地存储
+ */
+function setLogPanelHeight(height, persist) {
+  const clamped = Math.min(Math.max(Math.round(height), LOG_PANEL_MIN_HEIGHT), LOG_PANEL_MAX_HEIGHT);
+  state.logPanelHeight = clamped;
+  document.documentElement.style.setProperty('--log-panel-height', `${clamped}px`);
+  if (persist) {
+    localStorage.setItem(STORAGE_KEY_LOG_HEIGHT, String(clamped));
+  }
+}
+
+/**
+ * 切换底部执行日志面板的折叠/展开状态。
+ *
+ * @param {boolean} collapsed 是否折叠
+ * @param {boolean} persist 是否持久化到本地存储
+ */
+function setLogPanelCollapsed(collapsed, persist) {
+  state.logPanelCollapsed = Boolean(collapsed);
+  elements.workspace.classList.toggle('log-collapsed', state.logPanelCollapsed);
+  elements.toggleLogBtn.textContent = state.logPanelCollapsed ? BUTTON_TEXT_LOG_EXPAND : BUTTON_TEXT_LOG_COLLAPSE;
+  elements.toggleLogBtn.setAttribute('aria-expanded', String(!state.logPanelCollapsed));
+  if (persist) {
+    localStorage.setItem(STORAGE_KEY_LOG_COLLAPSED, state.logPanelCollapsed ? '1' : '0');
+  }
+}
+
+/**
+ * 开始拖拽调整底部执行日志高度。
+ *
+ * @param {PointerEvent} event 指针按下事件
+ */
+function beginLogResize(event) {
+  if (state.logPanelCollapsed) {
+    return;
+  }
+  event.preventDefault();
+  elements.logResizeHandle.classList.add('active');
+  document.body.classList.add('resizing-log');
+  document.addEventListener('pointermove', resizeLogPanel);
+  document.addEventListener('pointerup', endLogResize);
+}
+
+/**
+ * 根据指针纵坐标实时更新底部执行日志高度。
+ *
+ * @param {PointerEvent} event 指针移动事件
+ */
+function resizeLogPanel(event) {
+  const workspaceRect = elements.workspace.getBoundingClientRect();
+  setLogPanelHeight(workspaceRect.bottom - event.clientY - 8, false);
+}
+
+/**
+ * 结束执行日志高度拖拽并持久化最终高度。
+ */
+function endLogResize() {
+  elements.logResizeHandle.classList.remove('active');
+  document.body.classList.remove('resizing-log');
+  document.removeEventListener('pointermove', resizeLogPanel);
+  document.removeEventListener('pointerup', endLogResize);
+  setLogPanelHeight(state.logPanelHeight, true);
+}
+
+/**
+ * 复制当前执行日志到系统剪贴板。
+ */
+async function copyLogOutput() {
+  const content = elements.logOutput.textContent || '';
+  if (!content.trim()) {
+    notify(MESSAGE_LOG_EMPTY_TO_COPY, NOTICE_TYPE_INFO);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(content);
+    notify(MESSAGE_LOG_COPIED, NOTICE_TYPE_SUCCESS);
+  } catch (error) {
+    notify(`${MESSAGE_LOG_COPY_FAILED}：${error.message}`, NOTICE_TYPE_ERROR);
+  }
+}
+
+/**
+ * 清空当前界面显示的执行日志。
+ */
+function clearLogOutput() {
+  elements.logOutput.textContent = '';
+}
+
+/**
+ * 按 ID 关闭对应的非原生自定义弹窗。
+ *
+ * @param {string} modalId 弹窗 DOM ID
+ */
+function closeModalById(modalId) {
+  if (modalId === 'settingsDialog' && !elements.closeSettingsBtn.disabled) {
+    closeSettingsDialog();
+  } else if (modalId === 'projectSettingsDialog') {
+    closeProjectSettingsDialog();
+  } else if (modalId === 'projectHistoryDialog') {
+    closeProjectHistoryDialog();
+  } else if (modalId === 'errorGuideDialog') {
+    closeErrorGuideDialog();
+  } else if (modalId === 'aiAssistantDialog' && !elements.closeAiAssistantBtn.disabled) {
+    closeAiAssistantDialog();
+  } else if (modalId === 'decompileDialog') {
+    elements.cancelDecompileBtn.click();
+  } else if (modalId === 'changePasswordDialog' && window.jarPatchAuth) {
+    window.jarPatchAuth.closeChangePasswordDialog();
+  } else if (modalId === 'userManagementDialog' && window.jarPatchAuth) {
+    window.jarPatchAuth.closeUserManagement();
+  }
+}
+
+/**
+ * 退出登录或会话失效时，收起所有已打开的工作台非阻塞弹窗。
+ */
+function closeAllWorkbenchOverlays() {
+  setMoreToolsOpen(false);
+  closeSettingsDialog();
+  closeProjectSettingsDialog();
+  closeProjectHistoryDialog();
+  closeErrorGuideDialog();
+  closeAiAssistantDialog();
+  if (elements.diffDialog.open) {
+    elements.diffDialog.close();
+  }
+  const runtimeDialog = document.getElementById('runtimeDialog');
+  if (runtimeDialog && runtimeDialog.open) {
+    runtimeDialog.close();
+  }
+}
+
+/**
+ * 按 Esc 键优先关闭展开的顶部下拉菜单或最上层自定义弹窗。
+ *
+ * @returns {boolean} 已消费本次 Esc 按键时返回 true
+ */
+function closeTopmostOverlay() {
+  if (window.jarPatchAuth && window.jarPatchAuth.closeTopmostAuthOverlay()) {
+    return true;
+  }
+  if (!elements.moreToolsPopover.hidden) {
+    setMoreToolsOpen(false);
+    elements.moreToolsBtn.focus();
+    return true;
+  }
+  const modalIds = [
+    'aiAssistantDialog',
+    'settingsDialog',
+    'projectSettingsDialog',
+    'projectHistoryDialog',
+    'errorGuideDialog',
+    'decompileDialog'
+  ];
+  for (const id of modalIds) {
+    const node = elements[id];
+    if (node && node.classList.contains('open')) {
+      closeModalById(id);
+      return true;
+    }
+  }
+  return false;
+}
+
 function toggleSidebar() {
   const collapsed = elements.appShell.classList.toggle('sidebar-collapsed');
   const label = collapsed ? '展开项目栏' : '收起项目栏';
   elements.sidebarContent.hidden = collapsed;
+  elements.sidebarQuickOpenBtn.hidden = !collapsed;
   elements.sidebarToggleBtn.setAttribute('aria-expanded', String(!collapsed));
   elements.sidebarToggleBtn.setAttribute('aria-label', label);
   elements.sidebarToggleBtn.title = label;
@@ -2521,8 +3983,74 @@ function escapeHtml(value) {
 }
 
 elements.sidebarToggleBtn.addEventListener('click', toggleSidebar);
+elements.sidebarQuickOpenBtn.addEventListener('click', importArchive);
 elements.openArchiveBtn.addEventListener('click', importArchive);
+elements.projectSearchInput.addEventListener('input', renderFilteredProjects);
+elements.emptyOpenArchiveBtn.addEventListener('click', importArchive);
+elements.emptyOpenRuntimeBtn.addEventListener('click', () => elements.runtimeBtn.click());
+elements.themeToggleBtn.addEventListener('click', toggleTheme);
+elements.moreToolsBtn.addEventListener('click', (event) => {
+  event.stopPropagation();
+  setMoreToolsOpen(elements.moreToolsPopover.hidden);
+});
+elements.moreToolsPopover.addEventListener('click', (event) => {
+  if (event.target.closest('.dropdown-item')) {
+    setMoreToolsOpen(false);
+  }
+});
+document.addEventListener('click', (event) => {
+  if (!elements.moreToolsPopover.hidden && !elements.moreToolsMenu.contains(event.target)) {
+    setMoreToolsOpen(false);
+  }
+});
+elements.compactFoldersBtn.addEventListener('click', toggleCompactFolders);
+elements.collapseTreeBtn.addEventListener('click', collapseFileTree);
+elements.copyFilePathBtn.addEventListener('click', copyCurrentFilePath);
+elements.clearSearchBtn.addEventListener('click', clearSearchResults);
+elements.searchInput.addEventListener('input', updateSearchClearButton);
+elements.decompileFilterInput.addEventListener('input', renderDecompileDialog);
+elements.diffExpandAllBtn.addEventListener('click', () => {
+  elements.diffContent.querySelectorAll('details.diff-item').forEach((item) => {
+    item.open = true;
+  });
+});
+elements.diffCollapseAllBtn.addEventListener('click', () => {
+  elements.diffContent.querySelectorAll('details.diff-item').forEach((item) => {
+    item.open = false;
+  });
+});
+elements.settingsTabs.addEventListener('click', (event) => {
+  const tabButton = event.target.closest('[data-settings-tab]');
+  if (tabButton) {
+    selectSettingsTab(tabButton.dataset.settingsTab);
+  }
+});
+elements.projectHistoryTabs.addEventListener('click', (event) => {
+  const tabButton = event.target.closest('[data-history-tab]');
+  if (tabButton) {
+    selectHistoryTab(tabButton.dataset.historyTab);
+  }
+});
+elements.languageServerEnabledInput.addEventListener('change', updateSettingsTabDots);
+elements.aiEnabledInput.addEventListener('change', updateSettingsTabDots);
+elements.logResizeHandle.addEventListener('pointerdown', beginLogResize);
+elements.copyLogBtn.addEventListener('click', copyLogOutput);
+elements.clearLogBtn.addEventListener('click', clearLogOutput);
+elements.toggleLogBtn.addEventListener('click', () => setLogPanelCollapsed(!state.logPanelCollapsed, true));
+document.querySelectorAll('[data-close-modal]').forEach((button) => {
+  button.addEventListener('click', () => closeModalById(button.dataset.closeModal));
+});
+document.querySelectorAll('[data-close-dialog]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const dialog = document.getElementById(button.dataset.closeDialog);
+    if (dialog && dialog.open) {
+      dialog.close();
+    }
+  });
+});
 elements.unicodePreviewBtn.addEventListener('click', toggleUnicodePreview);
+elements.unicodePreviewPrevBtn.addEventListener('click', () => navigateUnicodePreviewMatch(UNICODE_PREVIEW_STEP_PREV));
+elements.unicodePreviewNextBtn.addEventListener('click', () => navigateUnicodePreviewMatch(UNICODE_PREVIEW_STEP_NEXT));
 elements.saveBtn.addEventListener('click', saveCurrentFile);
 elements.quickFixBtn.addEventListener('click', showQuickFix);
 elements.organizeImportsBtn.addEventListener('click', organizeImports);
@@ -2583,17 +4111,50 @@ elements.searchInput.addEventListener('keydown', (event) => {
   }
 });
 
+/**
+ * 初始化桌面工作台、Monaco 编辑器桥接与本地认证会话生命周期。
+ * <p>
+ * 登录或会话恢复成功后自动按角色同步界面权限并加载项目历史；
+ * 退出或会话失效时立即清空当前工作区状态并回到登录遮罩。
+ * </p>
+ */
 async function initializeApplication() {
+  initializeTheme();
+  initializeLogPanel();
+  initializeCompactFolders();
+  updateEditorEmptyState();
   const connection = await window.jarPatch.getBackendConnection();
   window.jarPatchApiClient.configure(connection);
   elements.editor.onLanguageStatus(handleLanguageStatus);
+  elements.editor.onCursorChange(updateCursorStatus);
   elements.editor.setAiCompletionProvider(provideAiInlineCompletion);
-  state.developmentSettings = await window.jarPatch.getDevelopmentSettings();
-  renderDevelopmentSettings(state.developmentSettings);
   handleLanguageStatus({ state: 'idle', message: MESSAGE_LANGUAGE_SERVER_NOT_CONFIGURED });
   initializeTreePanelWidth();
   restoreWorkspaceControls();
-  await loadProjects();
+
+  await window.jarPatchAuth.initialize({
+    onAuthenticated: async (user) => {
+      applyUserRoleUi(user);
+      try {
+        state.developmentSettings = await window.jarPatch.getDevelopmentSettings();
+        renderDevelopmentSettings(state.developmentSettings);
+        updateSettingsTabDots();
+      } catch (error) {
+        appendLog(`读取开发能力配置失败：${error.message}`);
+      }
+      restoreWorkspaceControls();
+      await loadProjects();
+    },
+    onLoggedOut: () => {
+      closeAllWorkbenchOverlays();
+      applyUserRoleUi(null);
+      state.allProjects = [];
+      elements.projectSearchInput.value = '';
+      renderProjects([], false);
+      resetCurrentProject();
+    },
+    onNotify: notify
+  });
 }
 
 initializeApplication().catch((error) => {
@@ -2625,6 +4186,12 @@ elements.editor.addEventListener('input', () => {
   updateDirtyIndicator();
 });
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    if (closeTopmostOverlay()) {
+      event.preventDefault();
+    }
+    return;
+  }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault();
     if (!elements.diffDialog.open && !elements.helpDialog.open) {

@@ -12,6 +12,49 @@
   const logCharacterLimit = 220000;
   const traceHint = '采集最多 20 秒或 3 次，可切换到请求测试触发方法。';
   const methodAccessLabels = { package: '包可见', unknown: '访问级别未知' };
+  const DEFAULT_SSH_PORT = 22;
+  const AUTH_METHOD = {
+    PASSWORD: 'password',
+    OPENSSH: 'openssh'
+  };
+  const PROVIDER_TYPE = {
+    DOCKER: 'docker',
+    KUBERNETES: 'kubernetes'
+  };
+  const HOST_OPTION = {
+    EMPTY: '',
+    CUSTOM: '__custom__',
+    NEW: '__new__'
+  };
+  const CONNECTION_COPY = {
+    TOGGLE_OPEN: '连接配置',
+    TOGGLE_CLOSE: '收起配置',
+    HOST_PLACEHOLDER_PASSWORD: '服务器 IP 或主机名',
+    HOST_PLACEHOLDER_OPENSSH: 'SSH 别名或 user@host',
+    PASSWORD_SAVED_HINT: '已保存密码，留空直接连接',
+    PASSWORD_EMPTY_HINT: '输入登录密码',
+    SELECT_HOST_PROMPT: '请选择服务器',
+    EMPTY_HOST_PROMPT: '请先配置服务器',
+    ADD_HOST_OPTION: '＋ 新增 / 临时主机…',
+    UNSAVED_SUFFIX: '（未保存）',
+    OPENSSH_PREFIX: 'OpenSSH · ',
+    LOAD_CONTAINERS: '加载容器',
+    LOAD_PODS: '加载 Pod',
+    CONTAINER_LABEL: '容器',
+    POD_CONTAINER_LABEL: 'Pod / 容器',
+    BADGE_K8S_PREFIX: 'K8s · ',
+    BADGE_K8S: 'Kubernetes',
+    BADGE_OPENSSH: 'OpenSSH',
+    BADGE_OFFLINE_PACKAGE: '离线包',
+    DEFAULT_PACKAGE_LABEL: '默认下载并校验官方完整包',
+    STATUS_READY_SAVED_HOST: '已选中常用服务器，点击加载即可开始诊断',
+    STATUS_NEED_HOST_CONFIG: '请在连接配置中填写服务器信息后加载目标',
+    STATUS_RELOAD_OR_SELECT: '选择容器或重新加载清单',
+    STATUS_HOST_SAVED: 'SSH 主机已保存，可直接点击加载',
+    STATUS_HOST_REMOVED: '已移除保存的 SSH 主机',
+    ERROR_HOST_REQUIRED: '请先在连接配置中填写 SSH 主机地址',
+    ERROR_USER_REQUIRED: '请先在连接配置中填写 SSH 账号'
+  };
   let sequence = 0;
   let host;
   let process;
@@ -32,6 +75,162 @@
   let loadedLogin;
   let savedHosts = [];
   let managingSshHosts = false;
+  let connectionExpanded = false;
+  let lastHostOptionsKey = '';
+
+  /**
+   * 展开或收起运行时工作台顶部的连接配置面板。
+   * 入口：右上角配置按钮、打开工作台默认态判断、下拉框「新增主机」及 Arthas 连接成功回调；
+   * 结果：更新 `#runtimeConnectionBox` 显隐与开关按钮的文案及 `aria-expanded` 状态。
+   *
+   * @param {boolean} expanded 是否展开配置面板
+   */
+  function setConnectionBoxExpanded(expanded) {
+    connectionExpanded = Boolean(expanded);
+    view('ConnectionBox').hidden = !connectionExpanded;
+    const toggleBtn = view('ConnToggleBtn');
+    toggleBtn.setAttribute('aria-expanded', String(connectionExpanded));
+    view('ConnToggleLabel').textContent = connectionExpanded
+      ? CONNECTION_COPY.TOGGLE_CLOSE
+      : CONNECTION_COPY.TOGGLE_OPEN;
+  }
+
+  /**
+   * 格式化已保存的 SSH 主机展示文案，自动为 IPv6 地址补充方括号。
+   *
+   * @param {{ host: string, username: string, port: number }} entry 已保存主机条目
+   * @returns {string} `user@host:port` 展示字符串
+   */
+  function formatSavedHostLabel(entry) {
+    const address = entry.host.includes(':') ? `[${entry.host}]` : entry.host;
+    return `${entry.username}@${address}:${entry.port}`;
+  }
+
+  /**
+   * 格式化未保存的临时主机或 OpenSSH 目标文案，用于在单行工作条服务器选择器中如实展示当前配置。
+   *
+   * @param {{ method: string, address: string, username?: string, port?: string|number }} login 当前登录配置
+   * @returns {string} 可读目标摘要
+   */
+  function formatCustomHostLabel(login) {
+    if (login.method === AUTH_METHOD.OPENSSH) {
+      return `${CONNECTION_COPY.OPENSSH_PREFIX}${login.address}`;
+    }
+    const address = login.address.includes(':') && !login.address.startsWith('[')
+      ? `[${login.address}]`
+      : login.address;
+    const userPrefix = login.username ? `${login.username}@` : '';
+    const portSuffix = login.port ? `:${login.port}` : '';
+    return `${userPrefix}${address}${portSuffix}${CONNECTION_COPY.UNSAVED_SUFFIX}`;
+  }
+
+  /**
+   * 将一条已保存的 SSH 主机记录回填到连接配置表单中，并切换为账号密码认证模式。
+   * 仅更新本地表单值，不主动触发远程 SSH 连接。
+   *
+   * @param {{ host: string, username: string, port: number }} entry 已保存主机条目
+   */
+  function applySavedHost(entry) {
+    view('SshAuth').value = AUTH_METHOD.PASSWORD;
+    view('Host').value = entry.host;
+    view('SshUser').value = entry.username;
+    view('SshPort').value = entry.port ?? DEFAULT_SSH_PORT;
+    view('SshPassword').value = '';
+  }
+
+  /**
+   * 重置主机配置草稿为空白账号密码状态，用于新增临时/新保存主机或移除当前主机后清理残留。
+   */
+  function resetNewHostDraft() {
+    view('SshAuth').value = AUTH_METHOD.PASSWORD;
+    view('Host').value = '';
+    view('SshUser').value = '';
+    view('SshPort').value = DEFAULT_SSH_PORT;
+    view('SshPassword').value = '';
+  }
+
+  /**
+   * 同步单行工作条中的服务器选择器（`#runtimeSshHosts`）。
+   * 按当前表单状态构建选项列表：若当前配置未匹配已保存主机但已填地址，则在顶部追加只读当前目标项；
+   * 底部始终附带「新增 / 临时主机」入口。仅在选项集合变化时重建 DOM，避免输入时闪烁。
+   *
+   * @param {{ method: string, address: string, username?: string, port?: string|number }} login 当前表单登录信息
+   * @param {{ id: string } | undefined} savedHost 命中的已保存主机条目
+   */
+  function syncServerSelector(login, savedHost) {
+    const select = view('SshHosts');
+    const items = [];
+    let selectedValue = HOST_OPTION.EMPTY;
+
+    // 1. 决定顶部临时项或占位提示项，确保单行工作条始终准确反映即将连接的目标
+    if (savedHost) {
+      selectedValue = savedHost.id;
+    } else if (login.address) {
+      items.push({ value: HOST_OPTION.CUSTOM, label: formatCustomHostLabel(login) });
+      selectedValue = HOST_OPTION.CUSTOM;
+    } else {
+      items.push({
+        value: HOST_OPTION.EMPTY,
+        label: savedHosts.length ? CONNECTION_COPY.SELECT_HOST_PROMPT : CONNECTION_COPY.EMPTY_HOST_PROMPT
+      });
+    }
+
+    // 2. 追加全部已保存主机，方便高频一键切换
+    for (const entry of savedHosts) {
+      items.push({ value: entry.id, label: formatSavedHostLabel(entry) });
+    }
+
+    // 3. 底部固定追加新增/临时主机入口
+    items.push({ value: HOST_OPTION.NEW, label: CONNECTION_COPY.ADD_HOST_OPTION });
+
+    const optionsKey = items.map((item) => `${item.value}\u0000${item.label}`).join('\u0001');
+    if (optionsKey !== lastHostOptionsKey) {
+      lastHostOptionsKey = optionsKey;
+      select.replaceChildren(...items.map((item) => new Option(item.label, item.value)));
+    }
+    select.value = selectedValue;
+  }
+
+  /**
+   * 同步单行快速工作条的动态文案、标题栏非默认配置微徽标及 Arthas 挂载状态视觉反馈。
+   *
+   * @param {{ method: string }} login 当前表单登录配置
+   */
+  function syncConnectionBarState(login) {
+    const isK8s = view('Provider').value === PROVIDER_TYPE.KUBERNETES;
+    const isOpenSsh = login.method === AUTH_METHOD.OPENSSH;
+    const hasOfflinePackage = Boolean(packageName);
+
+    // 同步单行工作条在 Docker 与 Kubernetes 模式下的按钮及字段标签
+    view('Connect').textContent = isK8s ? CONNECTION_COPY.LOAD_PODS : CONNECTION_COPY.LOAD_CONTAINERS;
+    view('ContainerLabel').textContent = isK8s
+      ? CONNECTION_COPY.POD_CONTAINER_LABEL
+      : CONNECTION_COPY.CONTAINER_LABEL;
+
+    // 同步标题栏轻量配置徽标，收起配置面板时仍一眼可见非默认模式
+    const kubeNamespace = view('KubeNamespace').value.trim();
+    const providerBadge = view('BadgeProvider');
+    providerBadge.hidden = !isK8s;
+    providerBadge.textContent = kubeNamespace
+      ? `${CONNECTION_COPY.BADGE_K8S_PREFIX}${kubeNamespace}`
+      : CONNECTION_COPY.BADGE_K8S;
+
+    const authBadge = view('BadgeAuth');
+    authBadge.hidden = !isOpenSsh;
+    authBadge.textContent = CONNECTION_COPY.BADGE_OPENSSH;
+
+    const packageBadge = view('BadgePackage');
+    packageBadge.hidden = !hasOfflinePackage;
+    packageBadge.textContent = CONNECTION_COPY.BADGE_OFFLINE_PACKAGE;
+
+    view('ConfigBadges').hidden = !isK8s && !isOpenSsh && !hasOfflinePackage;
+
+    // 同步单行工作条与「释放 Arthas」按钮的在线绿灯 / 待清理警告灯样式
+    const needsRetryCleanup = canRelease && !attached;
+    view('QuickBar').classList.toggle('is-attached', attached);
+    view('Detach').classList.toggle('is-attached', attached);
+    view('Detach').classList.toggle('needs-retry', needsRetryCleanup);
+  }
 
   function showError(error) {
     const field = view('Error');
@@ -52,36 +251,41 @@
   function loginFields() {
     const method = view('SshAuth').value;
     const address = view('Host').value.trim();
-    return method === 'password'
+    return method === AUTH_METHOD.PASSWORD
       ? { method, address, username: view('SshUser').value.trim(), port: view('SshPort').value }
       : { method, address };
   }
 
   function savedHostFor(login) {
-    if (login.method !== 'password') return undefined;
+    if (login.method !== AUTH_METHOD.PASSWORD) return undefined;
     const address = login.address.replace(/^\[([a-f0-9:]+)\]$/i, '$1').toLowerCase();
     return savedHosts.find((entry) => entry.host === address && entry.username === login.username
       && entry.port === Number(login.port));
   }
 
+  /**
+   * 执行本地已保存 SSH 主机清单的读取、保存或移除，并在完成后刷新所有控件状态。
+   *
+   * @param {() => Promise<Array>} operation 返回最新已保存主机列表的异步操作
+   */
   async function manageSshHosts(operation) {
     managingSshHosts = true;
     syncControls();
     try {
       savedHosts = await operation();
-      fillOptions(view('SshHosts'), savedHosts, (entry) => {
-        const address = entry.host.includes(':') ? '[' + entry.host + ']' : entry.host;
-        return `${entry.username}@${address}:${entry.port}`;
-      }, (entry) => entry.id, savedHosts.length ? '选择已保存的主机' : '暂无保存的主机');
     } finally {
       managingSshHosts = false;
       syncControls();
     }
   }
 
+  /**
+   * 按当前会话、任务与表单状态统一刷新运行时工作台全部控件的可用性、显隐与联动文案。
+   */
   function syncControls() {
     const clusterOptions = integrations?.cluster();
     const login = loginFields();
+    const isPassword = login.method === AUTH_METHOD.PASSWORD;
     const currentHost = Boolean(host) && JSON.stringify(loadedLogin) === JSON.stringify(login)
       && JSON.stringify(loadedCluster) === JSON.stringify(clusterOptions);
     const hasContainer = currentHost && Boolean(view('Container').value);
@@ -94,19 +298,32 @@
     const requestActive = tasks.has('request');
     const lockTarget = closing || active || canRelease || managingSshHosts;
     const savedHost = savedHostFor(login);
+
+    // 同步连接配置面板中的 SSH 表单项显隐与禁用态
     view('Host').disabled = lockTarget;
-    view('Host').placeholder = login.method === 'password' ? '服务器 IP 或主机名' : 'SSH 别名或 user@host';
-    view('PasswordFields').hidden = login.method !== 'password';
+    view('Host').placeholder = isPassword
+      ? CONNECTION_COPY.HOST_PLACEHOLDER_PASSWORD
+      : CONNECTION_COPY.HOST_PLACEHOLDER_OPENSSH;
+    view('PortField').hidden = !isPassword;
+    view('PasswordFields').hidden = !isPassword;
     for (const name of ['SshAuth', 'SshUser', 'SshPort', 'SshPassword']) view(name).disabled = lockTarget;
-    view('SshHosts').value = savedHost?.id || '';
-    view('SshHosts').disabled = lockTarget || !savedHosts.length;
-    view('SshPassword').placeholder = savedHost ? '已保存密码，留空直接连接' : '';
+
+    // 同步单行工作条的服务器选择器与主机保存/移除按钮
+    syncServerSelector(login, savedHost);
+    view('SshHosts').disabled = lockTarget;
+    view('SshPassword').placeholder = savedHost
+      ? CONNECTION_COPY.PASSWORD_SAVED_HINT
+      : CONNECTION_COPY.PASSWORD_EMPTY_HINT;
     view('SaveSshHost').disabled = lockTarget || !login.address || !login.username || !login.port || !view('SshPassword').value;
     view('RemoveSshHost').disabled = lockTarget || !savedHost;
+
+    // 同步单行工作条的目标加载与 Arthas 互斥操作按钮
     view('Connect').disabled = lockTarget;
     view('Container').disabled = lockTarget || !currentHost;
     view('Process').disabled = lockTarget || !hasContainer || processes.length === 0;
+    view('Attach').hidden = canRelease;
     view('Attach').disabled = closing || active || !hasProcess || canRelease;
+    view('Detach').hidden = !canRelease;
     view('Detach').disabled = closing || active || !canRelease;
     view('Package').disabled = lockTarget;
     view('ResetPackage').disabled = lockTarget;
@@ -132,6 +349,7 @@
     view('ApplySourcePatch').disabled = !canPatch || !integrations?.canApplyPatch() || !sourceView?.isChanged();
     view('RestoreSourcePatch').hidden = !sourceDraft || !integrations?.canRestoreSource(sourceDraft);
     view('RestoreSourcePatch').disabled = !canPatch;
+    syncConnectionBarState(login);
   }
 
   function invoke(scope, data, onUpdate) {
@@ -196,9 +414,24 @@
     setSourcePaneVisible(false);
   }
 
-  function confirmSourceDiscard() {
-    return !sourceDraft || !sourceView.isChanged() || sourceView.getValue() === sourceDraft.source
-      || window.confirm('离开当前源码编辑器会丢弃本次修改，继续吗？');
+  /**
+   * 离开已修改的在线反编译源码前，通过内置确认弹窗提醒用户避免误丢改动。
+   *
+   * @returns {Promise<boolean>} 允许继续时返回 true
+   */
+  async function confirmSourceDiscard() {
+    if (!sourceDraft || !sourceView.isChanged() || sourceView.getValue() === sourceDraft.source) {
+      return true;
+    }
+    return window.jarPatchDialogs.confirm({
+      title: '放弃未应用的在线源码修改？',
+      message: '离开当前在线反编译编辑器会丢弃本次未热替换的代码改动。',
+      tone: window.jarPatchDialogs.TONE_WARN,
+      actions: [
+        { value: false, label: '继续编辑', variant: window.jarPatchDialogs.VARIANT_SECONDARY },
+        { value: true, label: '放弃修改并离开', variant: window.jarPatchDialogs.VARIANT_DANGER }
+      ]
+    });
   }
 
   function showSource(content, editable = false) {
@@ -215,7 +448,7 @@
   }
 
   async function editOnlineSource() {
-    if (!confirmSourceDiscard()) return;
+    if (!(await confirmSourceDiscard())) return;
     disposeSource();
     const target = selectedTarget();
     const output = view('ClassOutput');
@@ -396,9 +629,9 @@
         }
         button.appendChild(tags);
       }
-      button.addEventListener('click', () => {
+      button.addEventListener('click', async () => {
         if (!tasks.has('classes') && tasks.get('advanced')?.type !== 'sourcePatch' && !choosingSourceArchive
-            && confirmSourceDiscard()) select(choice);
+            && (await confirmSourceDiscard())) select(choice);
       });
       buttons.appendChild(button);
     }
@@ -488,7 +721,7 @@
     const isClass = scope === 'classes';
     const output = view(isClass ? 'ClassOutput' : 'JvmOutput');
     if (isClass) {
-      if (!confirmSourceDiscard()) return;
+      if (!(await confirmSourceDiscard())) return;
       disposeSource();
     }
     if (type === 'classes' || type === 'methods') clearClassChoices();
@@ -538,7 +771,7 @@
   }
 
   async function close() {
-    if (closing || managingSshHosts || choosingSourceArchive || !confirmSourceDiscard()) return;
+    if (closing || managingSshHosts || choosingSourceArchive || !(await confirmSourceDiscard())) return;
     closing = true;
     view('Status').textContent = '正在关闭工作台…';
     syncControls();
@@ -579,34 +812,77 @@
   }
 
   bind('Btn', async () => {
-    view('Status').textContent = host ? '选择容器或重新加载清单' : '选择 SSH 认证方式后加载容器';
+    clearError();
     root.showModal();
     await manageSshHosts(() => bridge.listSshHosts());
-    view('Host').focus();
+    // 打开工作台时按是否有已保存主机智能决定默认态：有常用主机则默认选中首台并收起配置面板
+    if (!host && !view('Host').value.trim()) {
+      if (savedHosts.length) {
+        applySavedHost(savedHosts[0]);
+        setConnectionBoxExpanded(false);
+        syncControls();
+        view('Status').textContent = CONNECTION_COPY.STATUS_READY_SAVED_HOST;
+        view('SshHosts').focus();
+      } else {
+        setConnectionBoxExpanded(true);
+        syncControls();
+        view('Status').textContent = CONNECTION_COPY.STATUS_NEED_HOST_CONFIG;
+        view('Host').focus();
+      }
+      return;
+    }
+    setConnectionBoxExpanded(false);
+    syncControls();
+    view('Status').textContent = host ? CONNECTION_COPY.STATUS_RELOAD_OR_SELECT : CONNECTION_COPY.STATUS_READY_SAVED_HOST;
+    view('SshHosts').focus();
   });
   bind('Close', close);
   view('SshHosts').addEventListener('change', () => {
     clearError();
-    const entry = savedHosts.find((item) => item.id === view('SshHosts').value);
-    if (entry) view('SshAuth').value = 'password';
-    view('Host').value = entry?.host || '';
-    view('SshUser').value = entry?.username || '';
-    view('SshPort').value = entry?.port ?? 22;
-    view('SshPassword').value = '';
+    const selected = view('SshHosts').value;
+    // 选中底部「新增 / 临时主机」时清空草稿并展开配置面板，聚焦主机输入框
+    if (selected === HOST_OPTION.NEW) {
+      resetNewHostDraft();
+      setConnectionBoxExpanded(true);
+      syncControls();
+      view('Host').focus();
+      return;
+    }
+    if (selected === HOST_OPTION.CUSTOM || selected === HOST_OPTION.EMPTY) {
+      syncControls();
+      return;
+    }
+    const entry = savedHosts.find((item) => item.id === selected);
+    if (entry) applySavedHost(entry);
     syncControls();
   });
   bind('SaveSshHost', async () => {
     const { address, username, port } = loginFields();
     await manageSshHosts(() => bridge.saveSshHost({ host: address, username, port, password: view('SshPassword').value }));
     view('SshPassword').value = '';
-    view('Status').textContent = 'SSH 主机已保存，可以直接加载目标';
+    view('Status').textContent = CONNECTION_COPY.STATUS_HOST_SAVED;
     syncControls();
   });
   bind('RemoveSshHost', async () => {
     const entry = savedHostFor(loginFields());
-    if (!entry || !window.confirm('移除此主机及已保存的密码？')) return;
+    if (!entry) return;
+    const confirmed = await window.jarPatchDialogs.confirm({
+      title: '移除已保存的 SSH 主机',
+      message: '将从本机删除该主机记录及加密保存的登录密码，后续连接需要重新输入。',
+      tone: window.jarPatchDialogs.TONE_DANGER,
+      details: [
+        { label: '主机', value: formatSavedHostLabel(entry) }
+      ],
+      actions: [
+        { value: false, label: '取消', variant: window.jarPatchDialogs.VARIANT_SECONDARY },
+        { value: true, label: '确认移除', variant: window.jarPatchDialogs.VARIANT_DANGER }
+      ]
+    });
+    if (!confirmed) return;
     await manageSshHosts(() => bridge.removeSshHost(entry.id));
-    view('Status').textContent = '已移除保存的 SSH 主机';
+    resetNewHostDraft();
+    view('Status').textContent = CONNECTION_COPY.STATUS_HOST_REMOVED;
+    syncControls();
   });
   root.addEventListener('cancel', (event) => {
     event.preventDefault();
@@ -620,6 +896,17 @@
   });
   bind('Connect', async () => {
     const login = loginFields();
+    // 发起连接前校验必填连接参数；缺失时主动展开配置面板引导补填
+    if (!login.address) {
+      setConnectionBoxExpanded(true);
+      view('Host').focus();
+      throw new Error(CONNECTION_COPY.ERROR_HOST_REQUIRED);
+    }
+    if (login.method === AUTH_METHOD.PASSWORD && !login.username) {
+      setConnectionBoxExpanded(true);
+      view('SshUser').focus();
+      throw new Error(CONNECTION_COPY.ERROR_USER_REQUIRED);
+    }
     const cluster = integrations.cluster();
     const sameLogin = host && JSON.stringify(login) === JSON.stringify(loadedLogin);
     const password = view('SshPassword').value;
@@ -627,13 +914,13 @@
     view('Status').textContent = '正在通过 SSH 读取' + (cluster ? ' Kubernetes Pod…' : ' Docker 容器…');
     try {
       let list;
-      if (login.method === 'password' && (password || !sameLogin || savedHostFor(login))) {
+      if (login.method === AUTH_METHOD.PASSWORD && (password || !sameLogin || savedHostFor(login))) {
         const connection = await invoke('target', { action: 'passwordContainers', host: login.address,
           username: login.username, port: login.port, password, cluster });
         host = connection.host;
         list = connection.list;
       } else {
-        const requestedHost = login.method === 'password' ? host : login.address;
+        const requestedHost = login.method === AUTH_METHOD.PASSWORD ? host : login.address;
         list = await invoke('target', { action: 'containers', host: requestedHost, cluster });
         host = requestedHost;
       }
@@ -660,7 +947,8 @@
   view('Process').addEventListener('change', () => { clearError(); selectProcess().catch(showError); });
   for (const name of ['Host', 'SshUser', 'SshPort', 'SshPassword']) {
     view(name).addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && !view('Connect').disabled) view('Connect').click();
+      // 忽略中文输入法组合态中的回车按键，避免误触发远程连接
+      if (!event.isComposing && event.key === 'Enter' && !view('Connect').disabled) view('Connect').click();
     });
     view(name).addEventListener('input', syncControls);
   }
@@ -675,11 +963,13 @@
     packageName = name;
     view('PackageName').textContent = name;
     view('ResetPackage').hidden = false;
+    syncControls();
   });
   bind('ResetPackage', () => {
     packageName = undefined;
-    view('PackageName').textContent = '默认下载并校验官方完整包';
+    view('PackageName').textContent = CONNECTION_COPY.DEFAULT_PACKAGE_LABEL;
     view('ResetPackage').hidden = true;
+    syncControls();
   });
   bind('Attach', async () => {
     canRelease = true;
@@ -689,6 +979,7 @@
       attached = true;
       integrations.setAttachment(result);
       view('Status').textContent = 'Arthas ' + result.version + ' 已连接 · PID ' + result.pid;
+      setConnectionBoxExpanded(false);
       selectTab('classes');
       view('Class').focus();
     } catch (error) {
@@ -700,7 +991,7 @@
     }
   });
   bind('Detach', async () => {
-    if (!confirmSourceDiscard()) return;
+    if (!(await confirmSourceDiscard())) return;
     view('Status').textContent = '正在释放 Arthas…';
     try {
       await invoke('target', { action: 'detach' });
@@ -715,6 +1006,7 @@
     view('Status').textContent = 'Arthas 已释放';
     syncControls();
   });
+  view('ConnToggleBtn').addEventListener('click', () => setConnectionBoxExpanded(!connectionExpanded));
   for (const button of tabs) button.addEventListener('click', () => selectTab(button.dataset.runtimeTab));
   bind('ReadLogs', () => readLogs(false));
   bind('FollowLogs', () => readLogs(true));
@@ -767,5 +1059,6 @@
   fillOptions(view('Container'), [], String, String, '请先加载容器');
   fillOptions(view('Process'), [], String, String, '请选择容器');
   fillOptions(view('Ports'), [], String, String, '请选择 Java 进程');
+  setConnectionBoxExpanded(false);
   syncControls();
 })();

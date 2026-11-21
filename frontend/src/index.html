@@ -9,49 +9,202 @@
   <link rel="stylesheet" href="styles-settings.css">
   <link rel="stylesheet" href="styles-help.css">
   <link rel="stylesheet" href="styles-runtime.css">
+  <link rel="stylesheet" href="styles-auth.css">
   <link rel="stylesheet" href="generated/editor-bridge.css">
 </head>
-<body>
+<body data-theme="dark">
   <div id="notificationArea" class="notification-area" aria-live="polite"></div>
+
+  <div id="authOverlay" class="auth-overlay">
+    <button id="authThemeToggleBtn" class="tool-btn icon-only-btn auth-theme-corner" type="button" aria-label="切换浅色/深色主题" title="切换浅色/深色主题">
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2M20 12h2m-17.07 7.07 1.41-1.41m11.32-11.32 1.41-1.41"/></svg>
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+    </button>
+
+    <section id="authLoginCard" class="auth-card" aria-labelledby="authLoginTitle">
+      <div class="auth-card-brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2 3 7l9 5 9-5-9-5Z"/>
+            <path d="m3 12 9 5 9-5"/>
+            <path d="m3 17 9 5 9-5"/>
+          </svg>
+        </div>
+        <div>
+          <h2 id="authLoginTitle">JarPatch Studio</h2>
+          <p>请登录本地账号以进入修复与诊断工作台</p>
+        </div>
+      </div>
+
+      <div id="authDefaultAdminHint" class="auth-hint-box" hidden>
+        <span id="authDefaultAdminHintText"></span>
+        <button id="authFillDefaultAdminBtn" class="tool-btn" type="button">一键填入默认管理员</button>
+      </div>
+
+      <form id="authLoginForm" class="auth-form">
+        <label class="field-label">用户名
+          <input id="authUsernameInput" type="text" autocomplete="username" placeholder="输入本地用户名" spellcheck="false" required>
+        </label>
+        <label class="field-label">密码
+          <span class="auth-password-wrap">
+            <input id="authPasswordInput" type="password" autocomplete="current-password" placeholder="输入登录密码" required>
+            <button id="authTogglePasswordBtn" class="auth-pwd-toggle" type="button" aria-label="显示或隐藏密码" aria-pressed="false">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </span>
+        </label>
+        <div class="auth-secondary-row">
+          <label class="settings-switch compact-switch">
+            <input id="authRememberInput" type="checkbox" checked>
+            <span>保持本机登录状态（7 天有效）</span>
+          </label>
+        </div>
+        <p id="authLoginError" class="auth-error" role="alert" hidden></p>
+        <button id="authLoginSubmitBtn" class="primary-action auth-submit-btn" type="submit">登录工作台</button>
+      </form>
+      <p class="auth-footer-note">本机离线账号认证 · 密码经 PBKDF2-SHA256 加盐存储于本地 SQLite</p>
+    </section>
+
+    <section id="authForceChangeCard" class="auth-card" aria-labelledby="authForceChangeTitle" hidden>
+      <div class="auth-card-brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
+        <div>
+          <h2 id="authForceChangeTitle">请先修改登录密码</h2>
+          <p id="authForceChangeSummary">首次登录或密码已被重置，需要设置新密码</p>
+        </div>
+      </div>
+
+      <form id="authForceChangeForm" class="auth-form">
+        <label class="field-label">当前密码
+          <input id="authForceOldPassword" type="password" autocomplete="current-password" required>
+        </label>
+        <label class="field-label">新密码（至少 8 位）
+          <input id="authForceNewPassword" type="password" autocomplete="new-password" placeholder="请输入 8 位以上新密码" required>
+        </label>
+        <label class="field-label">确认新密码
+          <input id="authForceConfirmPassword" type="password" autocomplete="new-password" placeholder="再次输入新密码" required>
+        </label>
+        <p id="authForceChangeError" class="auth-error" role="alert" hidden></p>
+        <button id="authForceChangeSubmitBtn" class="primary-action auth-submit-btn" type="submit">保存新密码并进入</button>
+        <button id="authForceLogoutBtn" class="tool-btn" type="button">返回登录页</button>
+      </form>
+    </section>
+  </div>
+
+  <dialog id="confirmDialog" class="modal-backdrop confirm-dialog" aria-labelledby="confirmDialogTitle">
+    <section class="modal-panel confirm-panel">
+      <header class="modal-header">
+        <div class="confirm-header-main">
+          <span id="confirmDialogIcon" class="confirm-tone-icon tone-info" aria-hidden="true"></span>
+          <h2 id="confirmDialogTitle">请确认操作</h2>
+        </div>
+        <button id="confirmDialogCloseBtn" class="modal-close-icon" type="button" aria-label="关闭确认窗口">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <div class="confirm-body">
+        <p id="confirmDialogMessage" class="confirm-message"></p>
+        <div id="confirmDialogDetails" class="confirm-details" hidden></div>
+        <div id="confirmDialogList" class="confirm-list" hidden></div>
+      </div>
+      <footer id="confirmDialogFooter" class="modal-footer"></footer>
+    </section>
+  </dialog>
+
   <dialog id="runtimeDialog" class="runtime-dialog" aria-labelledby="runtimeTitle">
     <header class="runtime-heading">
-      <div>
-        <h2 id="runtimeTitle">运行时工作台</h2>
-        <p>远程容器诊断 · Arthas 4.3.5</p>
+      <div class="runtime-heading-title">
+        <span class="dialog-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="m7 9 3 2-3 2m5 0h4"/></svg>
+        </span>
+        <div>
+          <h2 id="runtimeTitle">运行时工作台</h2>
+          <p>远程容器诊断 · Arthas 4.3.5 · 实时日志、反编译、热替换与回归</p>
+        </div>
       </div>
-      <button id="runtimeClose" class="tool-btn" type="button">关闭</button>
+      <div class="runtime-heading-actions">
+        <div id="runtimeConfigBadges" class="runtime-config-badges" aria-label="当前非默认连接配置" hidden>
+          <span id="runtimeBadgeProvider" class="runtime-badge" hidden>Kubernetes</span>
+          <span id="runtimeBadgeAuth" class="runtime-badge" hidden>OpenSSH</span>
+          <span id="runtimeBadgePackage" class="runtime-badge" hidden>离线包</span>
+        </div>
+        <button id="runtimeConnToggleBtn" class="tool-btn runtime-config-toggle" type="button" aria-expanded="false" aria-controls="runtimeConnectionBox">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+          <span id="runtimeConnToggleLabel">连接配置</span>
+        </button>
+        <button id="runtimeClose" class="tool-btn icon-close-btn" type="button" aria-label="关闭运行时工作台">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          <span>关闭</span>
+        </button>
+      </div>
     </header>
-    <div class="runtime-row">
-      <label>连接方式<select id="runtimeProvider"><option value="docker">Docker</option><option value="kubernetes">Kubernetes</option></select></label>
-      <label>SSH 认证<select id="runtimeSshAuth"><option value="openssh">OpenSSH 配置</option><option value="password">账号密码</option></select></label>
-      <label class="runtime-saved-hosts">已保存的 SSH 主机<select id="runtimeSshHosts"><option value="">暂无保存的主机</option></select></label>
-      <button id="runtimeRemoveSshHost" class="tool-btn" type="button" disabled>移除主机</button>
-      <div id="runtimeKubernetes" class="runtime-row runtime-grow" hidden>
-        <label>Context<input id="runtimeKubeContext" placeholder="当前默认 Context" spellcheck="false"></label>
-        <label>命名空间<input id="runtimeKubeNamespace" value="default" spellcheck="false"></label>
-        <label>标签选择器<input id="runtimeKubeSelector" placeholder="app=my-app" spellcheck="false"></label>
-        <label>调试容器名<input id="runtimeKubeDebug" placeholder="可选" spellcheck="false"></label>
-        <label class="runtime-grow">远程 kubeconfig<input id="runtimeKubeConfig" placeholder="可选绝对路径" spellcheck="false"></label>
+    <div id="runtimeQuickBar" class="runtime-quick-bar" role="region" aria-label="快速连接工作条">
+      <div class="runtime-quick-group runtime-quick-server">
+        <label class="runtime-quick-field">
+          <span>服务器</span>
+          <select id="runtimeSshHosts"><option value="">请先配置服务器</option></select>
+        </label>
+        <button id="runtimeConnect" class="tool-btn" type="button">加载容器</button>
+      </div>
+      <span class="runtime-quick-divider" aria-hidden="true"></span>
+      <div class="runtime-quick-group runtime-quick-target">
+        <label class="runtime-quick-field">
+          <span id="runtimeContainerLabel">容器</span>
+          <select id="runtimeContainer"></select>
+        </label>
+        <label class="runtime-quick-field runtime-quick-process">
+          <span>Java 进程</span>
+          <select id="runtimeProcess"></select>
+        </label>
+      </div>
+      <div class="runtime-quick-actions">
+        <button id="runtimeAttach" class="tool-btn runtime-primary" type="button">连接 Arthas</button>
+        <button id="runtimeDetach" class="tool-btn runtime-detach-btn" type="button" hidden>
+          <span id="runtimeAttachDot" class="runtime-attach-dot" aria-hidden="true"></span>
+          <span>释放 Arthas</span>
+        </button>
       </div>
     </div>
-    <div class="runtime-target">
-      <label>SSH 主机<input id="runtimeHost" placeholder="SSH 别名或 user@host" spellcheck="false"></label>
-      <button id="runtimeConnect" class="tool-btn" type="button">加载容器</button>
-      <label>容器<select id="runtimeContainer"></select></label>
-      <label>Java 进程<select id="runtimeProcess"></select></label>
-      <button id="runtimeAttach" class="tool-btn runtime-primary" type="button">连接 Arthas</button>
-      <button id="runtimeDetach" class="tool-btn" type="button">释放 Arthas</button>
-    </div>
-    <div id="runtimePasswordFields" class="runtime-row" hidden>
-      <label>SSH 账号<input id="runtimeSshUser" autocomplete="username" spellcheck="false"></label>
-      <label>SSH 端口<input id="runtimeSshPort" type="number" min="1" max="65535" value="22"></label>
-      <label class="runtime-grow">SSH 密码<input id="runtimeSshPassword" type="password" autocomplete="off"></label>
-      <button id="runtimeSaveSshHost" class="tool-btn" type="button" disabled>保存主机</button>
-    </div>
-    <div class="runtime-row runtime-package">
-      <button id="runtimePackage" class="tool-btn" type="button">选择离线包</button>
-      <span id="runtimePackageName">默认下载并校验官方完整包</span>
-      <button id="runtimeResetPackage" class="tool-btn" type="button" hidden>使用官方下载</button>
+    <div id="runtimeConnectionBox" class="runtime-connection-box" hidden>
+      <fieldset class="runtime-config-section">
+        <legend>SSH 服务器与认证</legend>
+        <div class="runtime-ssh-primary">
+          <label class="runtime-ssh-auth-field">SSH 认证<select id="runtimeSshAuth"><option value="password" selected>账号密码</option><option value="openssh">OpenSSH 配置</option></select></label>
+          <label class="runtime-ssh-host-field">SSH 主机<input id="runtimeHost" placeholder="服务器 IP 或主机名" spellcheck="false" autocomplete="off" autocapitalize="none"></label>
+          <label id="runtimePortField" class="runtime-ssh-port-field">SSH 端口<input id="runtimeSshPort" type="number" min="1" max="65535" value="22"></label>
+        </div>
+        <div id="runtimePasswordFields" class="runtime-ssh-credentials">
+          <label class="runtime-ssh-user-field">SSH 账号<input id="runtimeSshUser" autocomplete="username" spellcheck="false" autocapitalize="none"></label>
+          <label class="runtime-ssh-pass-field">SSH 密码<input id="runtimeSshPassword" type="password" autocomplete="current-password"></label>
+          <div class="runtime-ssh-host-actions">
+            <button id="runtimeSaveSshHost" class="tool-btn runtime-primary" type="button" disabled>保存主机</button>
+            <button id="runtimeRemoveSshHost" class="tool-btn runtime-danger-btn" type="button" disabled>移除主机</button>
+          </div>
+        </div>
+      </fieldset>
+      <fieldset class="runtime-config-section">
+        <legend>运行环境与 Arthas 包</legend>
+        <div class="runtime-env-row">
+          <label class="runtime-provider-field">连接方式<select id="runtimeProvider"><option value="docker">Docker</option><option value="kubernetes">Kubernetes</option></select></label>
+          <div class="runtime-package-field">
+            <span class="runtime-field-caption">Arthas 离线包</span>
+            <div class="runtime-package-controls">
+              <button id="runtimePackage" class="tool-btn" type="button">选择离线包</button>
+              <span id="runtimePackageName" class="runtime-package-name">默认下载并校验官方完整包</span>
+              <button id="runtimeResetPackage" class="tool-btn" type="button" hidden>使用官方下载</button>
+            </div>
+          </div>
+        </div>
+        <div id="runtimeKubernetes" class="runtime-k8s-grid" hidden>
+          <label>Context<input id="runtimeKubeContext" placeholder="当前默认 Context" spellcheck="false"></label>
+          <label>命名空间<input id="runtimeKubeNamespace" value="default" spellcheck="false"></label>
+          <label>标签选择器<input id="runtimeKubeSelector" placeholder="app=my-app" spellcheck="false"></label>
+          <label>调试容器名<input id="runtimeKubeDebug" placeholder="可选" spellcheck="false"></label>
+          <label>远程 kubeconfig<input id="runtimeKubeConfig" placeholder="可选绝对路径" spellcheck="false"></label>
+        </div>
+      </fieldset>
     </div>
     <p id="runtimeStatus" class="runtime-status" role="status"></p>
     <p id="runtimeError" class="runtime-error" role="alert" tabindex="-1" hidden></p>
@@ -468,6 +621,13 @@
           <h2 id="diffDialogTitle">导出前差异确认</h2>
           <p id="diffDialogSummary">比较导入基线、当前文件和已编译 class</p>
         </div>
+        <div class="modal-header-actions">
+          <button id="diffExpandAllBtn" class="tool-btn" type="button">全部展开</button>
+          <button id="diffCollapseAllBtn" class="tool-btn" type="button">全部折叠</button>
+          <button class="modal-close-icon" type="button" data-close-dialog="diffDialog" aria-label="关闭差异确认">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
       </header>
       <div id="diffContent" class="diff-content"></div>
       <form class="modal-footer" method="dialog">
@@ -477,13 +637,21 @@
     </section>
   </dialog>
   <div id="projectHistoryDialog" class="modal-backdrop" aria-hidden="true">
-    <section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="projectHistoryDialogTitle">
+    <section class="modal-panel settings-panel history-modal-panel" role="dialog" aria-modal="true" aria-labelledby="projectHistoryDialogTitle">
       <header class="modal-header">
         <div>
           <h2 id="projectHistoryDialogTitle">项目历史</h2>
-          <p>查看最近的操作时间线、结构分析和导出校验记录</p>
+          <p>查看操作时间线（含操作人）、结构分析快照与导出校验记录</p>
         </div>
+        <button class="modal-close-icon" type="button" data-close-modal="projectHistoryDialog" aria-label="关闭项目历史">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
       </header>
+      <nav id="projectHistoryTabs" class="modal-tabs" aria-label="项目历史分类">
+        <button class="modal-tab-btn" type="button" data-history-tab="operations" aria-pressed="true">操作时间线</button>
+        <button class="modal-tab-btn" type="button" data-history-tab="analyses" aria-pressed="false">结构分析历史</button>
+        <button class="modal-tab-btn" type="button" data-history-tab="validations" aria-pressed="false">导出校验历史</button>
+      </nav>
       <div id="projectHistoryContent" class="project-history-content"></div>
       <footer class="modal-footer">
         <button id="closeProjectHistoryBtn" class="tool-btn" type="button">关闭</button>
@@ -497,12 +665,17 @@
           <h2 id="decompileDialogTitle">选择需要反编译的 Jar</h2>
           <p id="decompileDialogMeta">解析 pom.xml 后确认反编译范围</p>
         </div>
+        <button class="modal-close-icon" type="button" data-close-modal="decompileDialog" aria-label="取消导入">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
       </header>
       <div id="decompileDialogSummary" class="modal-summary"></div>
-      <div class="modal-actions-row">
+      <div class="modal-actions-row decompile-toolbar">
+        <input id="decompileFilterInput" class="modal-filter-input" type="search" placeholder="筛选 Jar 名称、路径或推荐原因...">
         <button id="selectRecommendedBtn" class="tool-btn" type="button">推荐选择</button>
         <button id="selectAllJarsBtn" class="tool-btn" type="button">全选</button>
         <button id="clearJarSelectionBtn" class="tool-btn" type="button">清空</button>
+        <span id="decompileSelectedBadge" class="count-badge">0</span>
       </div>
       <div id="decompileCandidateList" class="candidate-list"></div>
       <footer class="modal-footer">
@@ -512,93 +685,255 @@
     </section>
   </div>
   <div id="settingsDialog" class="modal-backdrop" aria-hidden="true">
-    <section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settingsDialogTitle">
+    <section class="modal-panel settings-panel settings-tabbed-panel" role="dialog" aria-modal="true" aria-labelledby="settingsDialogTitle">
       <header class="modal-header">
         <div>
           <h2 id="settingsDialogTitle">开发能力配置</h2>
           <p id="settingsDialogSummary">分别配置项目编译 JDK、Java 语言服务器和 AI 代码助手</p>
         </div>
+        <button class="modal-close-icon" type="button" data-close-modal="settingsDialog" aria-label="关闭开发能力配置">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
       </header>
-      <div class="settings-grid">
-        <section class="settings-card">
-          <div class="section-header">JDK 安装目录</div>
-          <div class="settings-row">
-            <input id="jdkHomeInput" type="text" placeholder="例如：C:\\Program Files\\Java\\jdk-17">
-            <button id="browseJdkBtn" class="tool-btn" type="button">浏览</button>
-          </div>
-          <div id="jdkSettingsTip" class="settings-tip"></div>
-          <div class="settings-status">
-            <div class="settings-status-item">
-              <span class="settings-status-label">内置 JDK 版本</span>
-              <span id="bundledJdkVersion" role="status"></span>
+      <nav id="settingsTabs" class="modal-tabs" aria-label="开发能力分组">
+        <button class="modal-tab-btn" type="button" data-settings-tab="jdk" aria-pressed="true">
+          <span id="settingsDotJdk" class="tab-status-dot" aria-hidden="true"></span>
+          <span>编译 JDK</span>
+        </button>
+        <button class="modal-tab-btn" type="button" data-settings-tab="jdtls" aria-pressed="false">
+          <span id="settingsDotJdtls" class="tab-status-dot" aria-hidden="true"></span>
+          <span>Java 代码智能（JDT LS）</span>
+        </button>
+        <button class="modal-tab-btn" type="button" data-settings-tab="ai" aria-pressed="false">
+          <span id="settingsDotAi" class="tab-status-dot" aria-hidden="true"></span>
+          <span>AI 代码助手</span>
+        </button>
+      </nav>
+      <div class="settings-tab-body">
+        <div class="settings-pane settings-grid" data-settings-pane="jdk">
+          <section class="settings-card">
+            <div class="section-header">JDK 安装目录</div>
+            <div class="settings-row">
+              <input id="jdkHomeInput" type="text" placeholder="例如：C:\\Program Files\\Java\\jdk-17">
+              <button id="browseJdkBtn" class="tool-btn" type="button">浏览</button>
             </div>
-          </div>
-        </section>
-        <section class="settings-card">
-          <div class="section-header">当前状态</div>
-          <div id="jdkSettingsStatus" class="settings-status"></div>
-        </section>
-        <section class="settings-card development-card">
-          <label class="settings-switch">
-            <input id="languageServerEnabledInput" type="checkbox">
-            <span>启用 Java 代码智能（Eclipse JDT LS）</span>
-          </label>
-          <p class="settings-tip">提供实时错误、语义补全、悬浮文档、跳转、快速修复和整理 import。当前 JDT LS 运行时至少需要 Java 21，不影响项目自身 Java 8/17 编译目标。</p>
-          <label class="field-label">JDT LS 解压目录
-            <span class="settings-row">
-              <input id="jdtLsHomeInput" type="text" placeholder="包含 plugins 和 config_win 等目录">
-              <button id="browseJdtLsBtn" class="tool-btn" type="button">浏览</button>
-            </span>
-          </label>
-          <label class="field-label">JDT LS 运行 JDK
-            <span class="settings-row">
-              <input id="jdtLsJavaHomeInput" type="text" placeholder="Java 21 或更高版本的 JDK 目录">
-              <button id="browseJdtLsJavaBtn" class="tool-btn" type="button">浏览</button>
-            </span>
-          </label>
-        </section>
-        <section class="settings-card development-card">
-          <label class="settings-switch">
-            <input id="aiEnabledInput" type="checkbox">
-            <span>启用 AI 代码助手</span>
-          </label>
-          <p class="settings-tip">AI 操作会把你明确选择的代码或当前文件发送到下面的端点。HTTP 明文传输请求，API Key 由系统安全存储加密保存。</p>
-          <div class="development-settings-grid">
-            <label class="field-label">接口协议
-              <select id="aiProtocolSelect">
-                <option value="responses" data-endpoint-example="https://api.openai.com/v1/responses">OpenAI Responses API</option>
-                <option value="chat-completions" data-endpoint-example="https://api.openai.com/v1/chat/completions">OpenAI 兼容 Chat Completions</option>
-                <option value="anthropic-messages" data-endpoint-example="http://127.0.0.1:8000/v1/messages">Anthropic 兼容 Messages API</option>
-              </select>
+            <div id="jdkSettingsTip" class="settings-tip"></div>
+            <div class="settings-status">
+              <div class="settings-status-item">
+                <span class="settings-status-label">内置 JDK 版本</span>
+                <span id="bundledJdkVersion" role="status"></span>
+              </div>
+            </div>
+          </section>
+          <section class="settings-card">
+            <div class="section-header">当前状态</div>
+            <div id="jdkSettingsStatus" class="settings-status"></div>
+          </section>
+        </div>
+        <div class="settings-pane" data-settings-pane="jdtls" hidden>
+          <section class="settings-card development-card">
+            <label class="settings-switch">
+              <input id="languageServerEnabledInput" type="checkbox">
+              <span>启用 Java 代码智能（Eclipse JDT LS）</span>
             </label>
-            <label class="field-label">模型
-              <input id="aiModelInput" type="text" placeholder="填写端点实际支持的模型 ID">
+            <p class="settings-tip">提供实时错误、语义补全、悬浮文档、跳转、快速修复和整理 import。当前 JDT LS 运行时至少需要 Java 21，不影响项目自身 Java 8/17 编译目标。</p>
+            <label class="field-label">JDT LS 解压目录
+              <span class="settings-row">
+                <input id="jdtLsHomeInput" type="text" placeholder="包含 plugins 和 config_win 等目录">
+                <button id="browseJdtLsBtn" class="tool-btn" type="button">浏览</button>
+              </span>
             </label>
-            <label class="field-label field-wide">接口地址（支持以 /v1 结尾的基础地址）
-              <input id="aiEndpointInput" type="url">
+            <label class="field-label">JDT LS 运行 JDK
+              <span class="settings-row">
+                <input id="jdtLsJavaHomeInput" type="text" placeholder="Java 21 或更高版本的 JDK 目录">
+                <button id="browseJdtLsJavaBtn" class="tool-btn" type="button">浏览</button>
+              </span>
             </label>
-            <div id="aiMessagesAuthField" class="field-wide" hidden>
-              <label class="field-label">鉴权方式
-                <select id="aiMessagesAuthSelect">
-                  <option value="x-api-key">x-api-key</option>
-                  <option value="bearer">Authorization Bearer</option>
+          </section>
+        </div>
+        <div class="settings-pane" data-settings-pane="ai" hidden>
+          <section class="settings-card development-card">
+            <label class="settings-switch">
+              <input id="aiEnabledInput" type="checkbox">
+              <span>启用 AI 代码助手</span>
+            </label>
+            <p class="settings-tip">AI 操作会把你明确选择的代码或当前文件发送到下面的端点。HTTP 明文传输请求，API Key 由系统安全存储加密保存。</p>
+            <div class="development-settings-grid">
+              <label class="field-label">接口协议
+                <select id="aiProtocolSelect">
+                  <option value="responses" data-endpoint-example="https://api.openai.com/v1/responses">OpenAI Responses API</option>
+                  <option value="chat-completions" data-endpoint-example="https://api.openai.com/v1/chat/completions">OpenAI 兼容 Chat Completions</option>
+                  <option value="anthropic-messages" data-endpoint-example="http://127.0.0.1:8000/v1/messages">Anthropic 兼容 Messages API</option>
                 </select>
               </label>
+              <label class="field-label">模型
+                <input id="aiModelInput" type="text" placeholder="填写端点实际支持的模型 ID">
+              </label>
+              <label class="field-label field-wide">接口地址（支持以 /v1 结尾的基础地址）
+                <input id="aiEndpointInput" type="url">
+              </label>
+              <div id="aiMessagesAuthField" class="field-wide" hidden>
+                <label class="field-label">鉴权方式
+                  <select id="aiMessagesAuthSelect">
+                    <option value="x-api-key">x-api-key</option>
+                    <option value="bearer">Authorization Bearer</option>
+                  </select>
+                </label>
+              </div>
+              <label class="field-label field-wide">API Key
+                <input id="aiApiKeyInput" type="password" autocomplete="new-password" placeholder="留空保留已有密钥；本机或内网 IPv4 无鉴权时可不填">
+              </label>
             </div>
-            <label class="field-label field-wide">API Key
-              <input id="aiApiKeyInput" type="password" autocomplete="new-password" placeholder="留空保留已有密钥；本机或内网 IPv4 无鉴权时可不填">
+            <label class="settings-switch compact-switch">
+              <input id="clearAiApiKeyInput" type="checkbox">
+              <span>清除已保存的 API Key</span>
             </label>
-          </div>
-          <label class="settings-switch compact-switch">
-            <input id="clearAiApiKeyInput" type="checkbox">
-            <span>清除已保存的 API Key</span>
-          </label>
-          <div id="developmentSettingsStatus" class="settings-tip"></div>
-        </section>
+            <div id="developmentSettingsStatus" class="settings-tip"></div>
+          </section>
+        </div>
       </div>
       <footer class="modal-footer">
         <button id="closeSettingsBtn" class="tool-btn" type="button">取消</button>
         <button id="saveJdkSettingsBtn" class="primary-action modal-primary" type="button">保存并校验</button>
+      </footer>
+    </section>
+  </div>
+  <div id="changePasswordDialog" class="modal-backdrop" aria-hidden="true">
+    <section class="modal-panel compact-modal-panel" role="dialog" aria-modal="true" aria-labelledby="changePasswordDialogTitle">
+      <header class="modal-header">
+        <div>
+          <h2 id="changePasswordDialogTitle">修改登录密码</h2>
+          <p>修改成功后将同步吊销当前账号在其他会话的登录状态</p>
+        </div>
+        <button class="modal-close-icon" type="button" data-close-modal="changePasswordDialog" aria-label="关闭修改密码">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <form id="changePasswordForm" class="auth-form">
+        <label class="field-label">当前密码
+          <input id="currentPasswordInput" type="password" autocomplete="current-password" required>
+        </label>
+        <label class="field-label">新密码（至少 8 位）
+          <input id="newPasswordInput" type="password" autocomplete="new-password" placeholder="请输入 8 位以上新密码" required>
+        </label>
+        <label class="field-label">确认新密码
+          <input id="confirmPasswordInput" type="password" autocomplete="new-password" placeholder="再次输入新密码" required>
+        </label>
+        <p id="changePasswordError" class="auth-error" role="alert" hidden></p>
+        <footer class="modal-footer">
+          <button id="closeChangePasswordBtn" class="tool-btn" type="button">取消</button>
+          <button id="submitChangePasswordBtn" class="primary-action modal-primary" type="submit">保存新密码</button>
+        </footer>
+      </form>
+    </section>
+  </div>
+  <div id="userManagementDialog" class="modal-backdrop" aria-hidden="true">
+    <section class="modal-panel users-panel" role="dialog" aria-modal="true" aria-labelledby="userManagementDialogTitle">
+      <header class="modal-header">
+        <div>
+          <h2 id="userManagementDialogTitle">本地用户管理</h2>
+          <p>管理系统管理员与普通研发账号；普通用户无法修改全局开发能力或清理工作区</p>
+        </div>
+        <button class="modal-close-icon" type="button" data-close-modal="userManagementDialog" aria-label="关闭用户管理">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <div class="user-toolbar">
+        <input id="userSearchInput" type="search" placeholder="搜索用户名或显示名称...">
+        <select id="userRoleFilter" aria-label="按角色筛选">
+          <option value="">全部角色</option>
+          <option value="ADMIN">管理员</option>
+          <option value="USER">普通用户</option>
+        </select>
+        <select id="userStatusFilter" aria-label="按状态筛选">
+          <option value="">全部状态</option>
+          <option value="ENABLED">已启用</option>
+          <option value="DISABLED">已禁用</option>
+        </select>
+        <span id="userCountSummary" class="count-badge">0</span>
+        <button id="openCreateUserBtn" class="primary-action" type="button">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span>新增用户</span>
+        </button>
+      </div>
+      <div>
+        <section id="userFormPanel" class="user-subpanel" hidden>
+          <div class="user-subpanel-header">
+            <h3 id="userFormTitle">新增本地用户</h3>
+          </div>
+          <form id="userForm" class="auth-form">
+            <div class="user-form-grid">
+              <label class="field-label">用户名（3-32 位字母/数字/._-）
+                <input id="userFormUsername" type="text" spellcheck="false" placeholder="例如：dev_zhang" required>
+              </label>
+              <label class="field-label">显示名称
+                <input id="userFormDisplayName" type="text" placeholder="例如：张三" required>
+              </label>
+              <label class="field-label">角色权限
+                <select id="userFormRole">
+                  <option value="USER">普通用户（日常编辑、编译、导出与诊断）</option>
+                  <option value="ADMIN">管理员（含用户管理、开发配置与清理）</option>
+                </select>
+              </label>
+              <label id="userFormStatusField" class="field-label" hidden>账号状态
+                <select id="userFormStatus">
+                  <option value="ENABLED">已启用</option>
+                  <option value="DISABLED">已禁用</option>
+                </select>
+              </label>
+              <label id="userFormPasswordField" class="field-label">初始密码（至少 8 位）
+                <input id="userFormPassword" type="password" autocomplete="new-password" placeholder="输入初始登录密码">
+              </label>
+            </div>
+            <label id="userFormMustChangeField" class="settings-switch compact-switch">
+              <input id="userFormMustChange" type="checkbox" checked>
+              <span>要求该用户首次登录时必须修改密码</span>
+            </label>
+            <p id="userFormError" class="auth-error" role="alert" hidden></p>
+            <div class="user-subpanel-actions">
+              <button id="cancelUserFormBtn" class="tool-btn" type="button">取消</button>
+              <button id="saveUserFormBtn" class="primary-action" type="submit">保存账号</button>
+            </div>
+          </form>
+        </section>
+        <section id="resetPasswordPanel" class="user-subpanel" hidden>
+          <div class="user-subpanel-header">
+            <h3>重置用户密码</h3>
+          </div>
+          <p id="resetPasswordTarget" class="settings-tip"></p>
+          <form id="resetPasswordForm" class="auth-form">
+            <div class="user-form-grid">
+              <label class="field-label">新临时密码（至少 8 位）
+                <input id="resetPasswordInput" type="password" autocomplete="new-password" required>
+              </label>
+              <label class="field-label">确认新密码
+                <input id="resetPasswordConfirmInput" type="password" autocomplete="new-password" required>
+              </label>
+            </div>
+            <p id="resetPasswordError" class="auth-error" role="alert" hidden></p>
+            <div class="user-subpanel-actions">
+              <button id="cancelResetPasswordBtn" class="tool-btn" type="button">取消</button>
+              <button id="confirmResetPasswordBtn" class="primary-action" type="submit">确认重置</button>
+            </div>
+          </form>
+        </section>
+      </div>
+      <div class="user-table-wrap">
+        <table class="user-table">
+          <thead>
+            <tr>
+              <th>账号</th>
+              <th>角色</th>
+              <th>状态</th>
+              <th>最近登录</th>
+              <th style="text-align:right">操作</th>
+            </tr>
+          </thead>
+          <tbody id="userTableBody"></tbody>
+        </table>
+      </div>
+      <footer class="modal-footer">
+        <button id="closeUserManagementBtn" class="tool-btn" type="button">关闭</button>
       </footer>
     </section>
   </div>
@@ -609,6 +944,9 @@
           <h2 id="aiAssistantDialogTitle">AI 代码助手</h2>
           <p id="aiContextSummary">先打开文件，再选择要解释或修改的代码</p>
         </div>
+        <button class="modal-close-icon" type="button" data-close-modal="aiAssistantDialog" aria-label="关闭 AI 代码助手">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
       </header>
       <div class="ai-controls">
         <label class="field-label">操作
@@ -627,7 +965,7 @@
       <footer class="modal-footer">
         <button id="closeAiAssistantBtn" class="tool-btn" type="button">关闭</button>
         <button id="applyAiResultBtn" class="tool-btn" type="button" disabled>应用修改</button>
-        <button id="runAiAssistantBtn" class="primary-action modal-primary" type="button">运行 AI</button>
+        <button id="runAiAssistantBtn" class="primary-action modal-primary" type="button"><span class="btn-label">运行 AI</span></button>
       </footer>
     </section>
   </div>
@@ -638,6 +976,9 @@
           <h2 id="projectSettingsDialogTitle">项目设置</h2>
           <p>目标 Java 版本由原包 class 决定；其他选项仅作用于当前项目</p>
         </div>
+        <button class="modal-close-icon" type="button" data-close-modal="projectSettingsDialog" aria-label="关闭项目设置">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
       </header>
       <div class="product-settings-grid">
         <label class="field-label">目标 Java 版本
@@ -681,6 +1022,9 @@
           <h2 id="errorGuideDialogTitle">错误排查向导</h2>
           <p>按错误现象核对检查项，再执行对应处理动作</p>
         </div>
+        <button class="modal-close-icon" type="button" data-close-modal="errorGuideDialog" aria-label="关闭错误排查向导">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
       </header>
       <div id="errorGuideContent" class="error-guide-content"></div>
       <footer class="modal-footer">
@@ -688,121 +1032,337 @@
       </footer>
     </section>
   </div>
-  <div class="app-shell">
-    <aside class="sidebar">
-      <button id="sidebarToggleBtn" class="tool-btn sidebar-toggle" type="button" aria-expanded="true" aria-controls="sidebarContent" aria-label="收起项目栏" title="收起项目栏"></button>
-      <div id="sidebarContent" class="sidebar-content">
-        <div class="brand">
-          <div class="brand-mark">J</div>
-          <div>
-            <h1>JarPatch Studio</h1>
-            <p>Jar / Spring Boot / War 修复工作台</p>
-          </div>
-        </div>
-        <button id="openArchiveBtn" class="primary-action">打开 Jar/War</button>
-        <section class="panel">
-          <div class="panel-title">项目历史</div>
-          <div id="projectList" class="project-list"></div>
-        </section>
-      </div>
-    </aside>
-
-    <main class="workspace">
-      <header class="toolbar">
-        <div>
-          <div id="currentProjectName" class="project-name">未打开项目</div>
-          <div id="currentProjectMeta" class="project-meta">请选择一个 Jar 或 War 文件开始</div>
-        </div>
-        <div class="toolbar-actions">
-          <button id="analyzeBtn" class="tool-btn" disabled>分析</button>
-          <button id="diffBtn" class="tool-btn" disabled>差异</button>
-          <button id="compileBtn" class="tool-btn" disabled>编译</button>
-          <button id="exportBtn" class="tool-btn" disabled>导出</button>
-          <button id="projectSettingsBtn" class="tool-btn" type="button" disabled>项目设置</button>
-          <button id="projectHistoryBtn" class="tool-btn" type="button" disabled>项目历史</button>
-          <button id="cleanupWorkspaceBtn" class="tool-btn" type="button" disabled>清理工作区</button>
-          <button id="orphanWorkspacesBtn" class="tool-btn" type="button">孤立工作区</button>
-          <button id="errorGuideBtn" class="tool-btn" type="button">排错向导</button>
-          <button id="diagnosticBtn" class="tool-btn" type="button">导出诊断</button>
-          <button id="settingsBtn" class="tool-btn" type="button">⚙ 开发能力</button>
-          <button id="runtimeBtn" class="tool-btn" type="button" aria-haspopup="dialog" aria-controls="runtimeDialog">运行时工作台</button>
-          <button id="helpBtn" class="tool-btn help-button" type="button" aria-haspopup="dialog" aria-controls="helpDialog">帮助</button>
-        </div>
-      </header>
-
-      <section class="task-bar" aria-label="任务状态">
-        <div class="task-summary">
-          <div id="taskStatusText" class="task-status-text">未启动任务</div>
-          <div id="taskStatusDetail" class="task-status-detail">先创建任务再连接实时日志</div>
-        </div>
-        <button id="cancelTaskBtn" class="tool-btn task-cancel" type="button" disabled>取消任务</button>
-      </section>
-
-      <section id="contentGrid" class="content-grid">
-        <aside class="tree-panel">
-          <div class="section-header">文件树</div>
-          <div class="search-bar">
-            <input id="searchInput" type="search" placeholder="搜索文件名或内容">
-            <button id="searchBtn" class="tool-btn" disabled>搜索</button>
-          </div>
-          <div id="searchResults" class="search-results"></div>
-          <div id="fileTree" class="file-tree empty">暂无文件</div>
-        </aside>
-
-        <div id="treeResizeHandle" class="tree-resize-handle" role="separator" aria-label="调整文件树宽度" aria-orientation="vertical"></div>
-
-        <section class="editor-panel">
-          <div class="editor-header">
-            <div class="editor-file-summary">
-              <div id="activeFileName" class="active-file">未选择文件</div>
-              <div id="activeFileKind" class="file-kind">可编辑 Java 与文本资源</div>
-            </div>
-            <div class="editor-actions">
-              <button id="quickFixBtn" class="tool-btn" type="button" disabled>快速修复</button>
-              <button id="organizeImportsBtn" class="tool-btn" type="button" disabled>整理 import</button>
-              <button id="aiInlineBtn" class="tool-btn" type="button" disabled>AI 补全</button>
-              <button id="aiAssistantBtn" class="tool-btn" type="button" disabled>AI 助手</button>
-              <label class="editor-encoding">文件编码
-                <select id="fileEncodingSelect" disabled>
-                  <option value="UTF-8">UTF-8</option>
-                  <option value="GB18030">GB18030</option>
-                  <option value="GBK">GBK</option>
-                  <option value="UTF-16LE">UTF-16LE</option>
-                  <option value="UTF-16BE">UTF-16BE</option>
-                </select>
-              </label>
-              <button id="unicodePreviewBtn" class="tool-btn" type="button" aria-pressed="false" disabled>中文预览</button>
-              <button id="saveBtn" class="tool-btn" disabled>保存</button>
-            </div>
-          </div>
-          <div id="editorIntelligenceStatus" class="editor-intelligence-status" data-state="idle">Monaco 编辑器正在初始化</div>
-          <div id="editor" class="monaco-editor-host disabled" aria-label="代码编辑器"></div>
-          <textarea id="unicodePreview" aria-label="中文 Unicode 转义只读预览" spellcheck="false" wrap="off" readonly hidden></textarea>
-        </section>
-
-        <button id="analysisToggleBtn" class="analysis-toggle" type="button" aria-expanded="false" aria-controls="analysisPanel">
-          <span>分析与风险</span>
-          <strong id="analysisBadge">未分析</strong>
+  <div class="app-frame">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <button id="sidebarToggleBtn" class="tool-btn sidebar-toggle" type="button" aria-expanded="true" aria-controls="sidebarContent" aria-label="收起项目栏" title="收起项目栏"></button>
+        <button id="sidebarQuickOpenBtn" class="tool-btn sidebar-quick-open" type="button" aria-label="打开 Jar / War" title="打开 Jar / War" hidden>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         </button>
-
-        <aside id="analysisPanel" class="analysis-panel" aria-hidden="true">
-          <div class="section-header analysis-header">
-            <span>分析与风险</span>
-            <button id="analysisCloseBtn" class="text-action" type="button">收起</button>
+        <div id="sidebarContent" class="sidebar-content">
+          <div class="brand">
+            <div class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2 3 7l9 5 9-5-9-5Z"/>
+                <path d="m3 12 9 5 9-5"/>
+                <path d="m3 17 9 5 9-5"/>
+              </svg>
+            </div>
+            <div class="brand-copy">
+              <h1>JarPatch Studio</h1>
+              <p>Java 归档反编译与补丁工作台</p>
+            </div>
           </div>
-          <div id="analysisResult" class="analysis-result empty">执行分析后显示包结构、依赖和导出风险</div>
-        </aside>
-      </section>
+          <button id="openArchiveBtn" class="primary-action" type="button">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14"/>
+            </svg>
+            <span class="btn-label">打开 Jar / War</span>
+          </button>
+          <section class="panel">
+            <div class="panel-header-row">
+              <span class="panel-title">项目历史</span>
+              <span id="projectCountBadge" class="count-badge">0</span>
+            </div>
+            <div class="sidebar-filter-wrap">
+              <svg class="search-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <input id="projectSearchInput" type="search" placeholder="筛选历史项目...">
+            </div>
+            <div id="projectList" class="project-list"></div>
+          </section>
+        </div>
+      </aside>
 
-      <section class="log-panel">
-        <div class="section-header">执行日志</div>
-        <pre id="logOutput"></pre>
-      </section>
-    </main>
+      <main class="workspace">
+        <header class="toolbar">
+          <div class="project-identity">
+            <div class="project-title-row">
+              <span id="currentProjectBadge" class="pkg-badge" hidden></span>
+              <div id="currentProjectName" class="project-name">未打开项目</div>
+            </div>
+            <div id="currentProjectMeta" class="project-meta">请选择一个 Jar 或 War 文件开始</div>
+          </div>
+          <div class="toolbar-actions">
+            <div class="toolbar-group" role="group" aria-label="核心工作流">
+              <button id="analyzeBtn" class="tool-btn" type="button" disabled title="分析包结构、依赖与签名风险">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M11 8v6M8 11h6"/></svg>
+                <span class="btn-label">分析</span>
+              </button>
+              <button id="compileBtn" class="tool-btn" type="button" disabled title="编译已修改的 Java 源码">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 6-6 6 6 6M16 6l6 6-6 6M14 4l-4 16"/></svg>
+                <span class="btn-label">编译</span>
+              </button>
+              <button id="diffBtn" class="tool-btn" type="button" disabled title="查看与导入基线的源码、资源和 class 差异">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M4 7h5M6.5 4.5v5M15 17h5M15 7h5"/></svg>
+                <span class="btn-label">差异</span>
+              </button>
+              <button id="exportBtn" class="tool-btn tool-btn-accent" type="button" disabled title="校验并导出修改后的 Jar 或 War">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></svg>
+                <span class="btn-label">导出</span>
+              </button>
+            </div>
+            <span class="toolbar-divider" aria-hidden="true"></span>
+            <div class="toolbar-group" role="group" aria-label="扩展工作台与配置">
+              <button id="runtimeBtn" class="tool-btn tool-btn-runtime" type="button" aria-haspopup="dialog" aria-controls="runtimeDialog" title="远程容器诊断、在线反编译与热替换">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="m7 9 3 2-3 2m5 0h4"/></svg>
+                <span class="btn-label">运行时工作台</span>
+              </button>
+              <button id="settingsBtn" class="tool-btn" type="button" title="配置编译 JDK、Eclipse JDT LS 和 AI 代码助手（管理员）">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+                <span class="btn-label">开发能力</span>
+              </button>
+              <div id="moreToolsMenu" class="toolbar-dropdown">
+                <button id="moreToolsBtn" class="tool-btn" type="button" aria-expanded="false" aria-haspopup="menu" aria-controls="moreToolsPopover" title="项目管理、工作区清理与排错工具">
+                  <span class="btn-label">更多</span>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <div id="moreToolsPopover" class="dropdown-popover" role="menu" hidden>
+                  <div class="dropdown-group-label">当前项目</div>
+                  <button id="projectSettingsBtn" class="dropdown-item" type="button" role="menuitem" disabled>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                    <span>项目设置</span>
+                  </button>
+                  <button id="projectHistoryBtn" class="dropdown-item" type="button" role="menuitem" disabled>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                    <span>项目历史与校验</span>
+                  </button>
+                  <button id="cleanupWorkspaceBtn" class="dropdown-item dropdown-item-danger" type="button" role="menuitem" disabled>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+                    <span>清理当前工作区</span>
+                  </button>
+                  <div class="dropdown-sep" role="separator"></div>
+                  <div class="dropdown-group-label">维护与排查</div>
+                  <button id="orphanWorkspacesBtn" class="dropdown-item" type="button" role="menuitem">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    <span>扫描孤立工作区</span>
+                  </button>
+                  <button id="errorGuideBtn" class="dropdown-item" type="button" role="menuitem">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+                    <span>错误排查向导</span>
+                  </button>
+                  <button id="diagnosticBtn" class="dropdown-item" type="button" role="menuitem">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>
+                    <span>导出脱敏诊断</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <span class="toolbar-divider" aria-hidden="true"></span>
+            <div class="toolbar-group" role="group" aria-label="外观、帮助与账号">
+              <button id="themeToggleBtn" class="tool-btn icon-only-btn" type="button" aria-label="切换浅色主题" title="切换浅色/深色主题">
+                <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2M20 12h2m-17.07 7.07 1.41-1.41m11.32-11.32 1.41-1.41"/></svg>
+                <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+              </button>
+              <button id="helpBtn" class="tool-btn help-button" type="button" aria-haspopup="dialog" aria-controls="helpDialog" title="打开离线图文使用手册">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/></svg>
+                <span class="btn-label">帮助</span>
+              </button>
+              <div id="userMenu" class="user-menu" hidden>
+                <button id="userMenuBtn" class="user-pill-btn" type="button" aria-expanded="false" aria-haspopup="menu" aria-controls="userMenuPopover">
+                  <span id="userMenuAvatar" class="user-avatar" aria-hidden="true">A</span>
+                  <span id="userMenuName" class="user-pill-name">管理员</span>
+                  <span id="userMenuRole" class="user-role-tag role-admin">管理员</span>
+                </button>
+                <div id="userMenuPopover" class="dropdown-popover user-menu-popover" role="menu" hidden>
+                  <div class="user-menu-header">
+                    <strong id="userMenuHeaderName">系统管理员</strong>
+                    <span id="userMenuHeaderMeta">@admin · 管理员</span>
+                  </div>
+                  <div class="dropdown-sep" role="separator"></div>
+                  <button id="openUserManagementBtn" class="dropdown-item" type="button" role="menuitem">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span>用户管理</span>
+                  </button>
+                  <button id="openChangePasswordBtn" class="dropdown-item" type="button" role="menuitem">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <span>修改我的密码</span>
+                  </button>
+                  <div class="dropdown-sep" role="separator"></div>
+                  <button id="logoutBtn" class="dropdown-item dropdown-item-danger" type="button" role="menuitem">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+                    <span>退出登录</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <section id="taskBar" class="task-bar" data-state="idle" aria-label="任务状态">
+          <div class="task-summary">
+            <span class="task-dot" aria-hidden="true"></span>
+            <div id="taskStatusText" class="task-status-text">未启动任务</div>
+            <div id="taskStatusDetail" class="task-status-detail">先创建任务再连接实时日志</div>
+          </div>
+          <div class="task-bar-right">
+            <div class="task-progress-track" aria-hidden="true">
+              <div id="taskProgressFill" class="task-progress-fill"></div>
+            </div>
+            <button id="cancelTaskBtn" class="tool-btn task-cancel" type="button" disabled>取消任务</button>
+          </div>
+        </section>
+
+        <section id="contentGrid" class="content-grid">
+          <aside class="tree-panel">
+            <div class="panel-header-row tree-panel-header">
+              <div class="section-header">文件浏览器</div>
+              <div class="tree-header-actions">
+                <button id="compactFoldersBtn" class="mini-icon-btn active" type="button" aria-pressed="true" title="合并单子目录包路径（如 com.example）" aria-label="切换包路径合并">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h6l2 2h8v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z"/><path d="M9 14h6"/></svg>
+                </button>
+                <button id="collapseTreeBtn" class="mini-icon-btn" type="button" title="折叠所有目录" aria-label="折叠所有目录" disabled>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 15 5-5 5 5M7 9l5-5 5 5"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="search-bar">
+              <div class="search-input-wrap">
+                <svg class="search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                <input id="searchInput" type="search" placeholder="搜索文件名或内容（Enter）">
+                <button id="clearSearchBtn" class="search-clear-btn" type="button" aria-label="清空搜索结果" title="清空搜索" hidden>
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <button id="searchBtn" class="tool-btn" type="button" disabled>搜索</button>
+            </div>
+            <div id="searchResults" class="search-results"></div>
+            <div id="fileTree" class="file-tree empty">暂无文件</div>
+          </aside>
+
+          <div id="treeResizeHandle" class="tree-resize-handle" role="separator" aria-label="调整文件树宽度" aria-orientation="vertical"></div>
+
+          <section class="editor-panel">
+            <div id="editorTabs" class="editor-tabs" role="tablist" aria-label="已打开文件标签" hidden></div>
+            <div class="editor-header">
+              <div class="editor-file-summary">
+                <span id="activeFileDirtyDot" class="dirty-dot" hidden title="存在未保存修改"></span>
+                <div id="editorBreadcrumb" class="editor-breadcrumb">
+                  <span id="activeFileName" class="active-file">未选择文件</span>
+                </div>
+                <button id="copyFilePathBtn" class="mini-icon-btn" type="button" title="复制当前文件相对路径" aria-label="复制当前文件相对路径" hidden>
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </button>
+                <div id="activeFileKind" class="file-kind">可编辑 Java 与文本资源</div>
+              </div>
+              <div class="editor-actions">
+                <button id="quickFixBtn" class="editor-btn" type="button" disabled title="打开 Java 快速修复菜单">快速修复</button>
+                <button id="organizeImportsBtn" class="editor-btn" type="button" disabled title="使用 JDT LS 自动整理 import">整理 import</button>
+                <button id="aiInlineBtn" class="editor-btn" type="button" disabled title="显式触发一次 AI 行内补全（Alt+\）">AI 补全</button>
+                <button id="aiAssistantBtn" class="editor-btn" type="button" disabled title="解释、修复或重构当前选区或文件">AI 助手</button>
+                <span class="editor-divider" aria-hidden="true"></span>
+                <button id="unicodePreviewBtn" class="editor-btn" type="button" aria-pressed="false" disabled title="只读预览中文 Unicode 转义字符">
+                  <span class="btn-label">中文预览</span>
+                </button>
+                <button id="saveBtn" class="editor-btn editor-save-btn" type="button" disabled title="保存当前文件（Ctrl+S）">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+                  <span class="btn-label">保存</span>
+                </button>
+              </div>
+            </div>
+            <div class="editor-stage">
+              <div id="editorEmptyState" class="editor-empty-state">
+                <div class="empty-hero-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2 3 7l9 5 9-5-9-5Z"/>
+                    <path d="m3 12 9 5 9-5"/>
+                    <path d="m3 17 9 5 9-5"/>
+                  </svg>
+                </div>
+                <h2 id="emptyStateTitle">欢迎使用 JarPatch Studio</h2>
+                <p id="emptyStateDesc">导入本地 Jar、Spring Boot Jar 或 War 包，浏览反编译源码、修改配置或代码、校验差异并安全导出新包。</p>
+                <div id="emptyStateActions" class="empty-actions">
+                  <button id="emptyOpenArchiveBtn" class="primary-action" type="button">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                    <span class="btn-label">打开 Jar / War</span>
+                  </button>
+                  <button id="emptyOpenRuntimeBtn" class="tool-btn" type="button">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="m7 9 3 2-3 2m5 0h4"/></svg>
+                    <span class="btn-label">运行时工作台</span>
+                  </button>
+                </div>
+                <div class="empty-shortcuts">
+                  <span><kbd>Ctrl</kbd> + <kbd>S</kbd> 保存文件</span>
+                  <span><kbd>Alt</kbd> + <kbd>\</kbd> AI 行内补全</span>
+                  <span><kbd>Enter</kbd> 搜索源码与资源</span>
+                </div>
+              </div>
+              <div id="editor" class="monaco-editor-host disabled" aria-label="代码编辑器"></div>
+              <div id="unicodePreviewPanel" class="unicode-preview-panel" hidden>
+                <div class="unicode-preview-bar">
+                  <div class="unicode-preview-meta">
+                    <span class="unicode-preview-badge">只读中文预览</span>
+                    <span id="unicodePreviewSummary" class="unicode-preview-summary" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="unicode-preview-controls">
+                    <span id="unicodePreviewMatchStatus" class="unicode-preview-match-status"></span>
+                    <button id="unicodePreviewPrevBtn" class="preview-nav-btn" type="button" title="跳转到上一处中文转义" aria-label="上一处中文转义">上一处</button>
+                    <button id="unicodePreviewNextBtn" class="preview-nav-btn" type="button" title="跳转到下一处中文转义" aria-label="下一处中文转义">下一处</button>
+                  </div>
+                </div>
+                <div id="unicodePreview" class="monaco-editor-host unicode-preview-editor"></div>
+              </div>
+            </div>
+          </section>
+
+          <button id="analysisToggleBtn" class="analysis-toggle" type="button" aria-expanded="false" aria-controls="analysisPanel">
+            <span>分析与风险</span>
+            <strong id="analysisBadge">未分析</strong>
+          </button>
+
+          <aside id="analysisPanel" class="analysis-panel" aria-hidden="true">
+            <div class="section-header analysis-header">
+              <span>分析与风险</span>
+              <button id="analysisCloseBtn" class="text-action" type="button">收起</button>
+            </div>
+            <div id="analysisResult" class="analysis-result empty">执行分析后显示包结构、依赖和导出风险</div>
+          </aside>
+        </section>
+
+        <div id="logResizeHandle" class="log-resize-handle" role="separator" aria-label="调整执行日志高度" aria-orientation="horizontal"></div>
+
+        <section id="logPanel" class="log-panel">
+          <div class="log-header">
+            <div class="section-header">执行日志</div>
+            <div class="log-actions">
+              <button id="copyLogBtn" class="mini-text-btn" type="button" title="复制全部执行日志">复制</button>
+              <button id="clearLogBtn" class="mini-text-btn" type="button" title="清空当前执行日志">清空</button>
+              <button id="toggleLogBtn" class="mini-text-btn" type="button" aria-expanded="true" title="折叠或展开日志面板">收起</button>
+            </div>
+          </div>
+          <pre id="logOutput"></pre>
+        </section>
+      </main>
+    </div>
+
+    <footer id="ideStatusBar" class="ide-status-bar" aria-label="工作台状态栏">
+      <div class="status-bar-left">
+        <div id="editorIntelligenceStatus" class="editor-intelligence-status" data-state="idle">
+          <span class="intel-dot" aria-hidden="true"></span>
+          <span id="editorIntelligenceText">Monaco 编辑器正在初始化</span>
+        </div>
+      </div>
+      <div class="status-bar-right">
+        <span id="statusCursorPos" class="status-item" hidden>行 1, 列 1</span>
+        <span id="statusLanguage" class="status-item" hidden>Plain Text</span>
+        <label class="status-encoding" title="仅资源文件可切换编码，Java 源码固定 UTF-8">
+          <span>编码</span>
+          <select id="fileEncodingSelect" disabled>
+            <option value="UTF-8">UTF-8</option>
+            <option value="GB18030">GB18030</option>
+            <option value="GBK">GBK</option>
+            <option value="UTF-16LE">UTF-16LE</option>
+            <option value="UTF-16BE">UTF-16BE</option>
+          </select>
+        </label>
+        <span id="statusCurrentUser" class="status-item status-user">未登录</span>
+      </div>
+    </footer>
   </div>
 
   <script src="generated/editor-bridge.js"></script>
   <script src="api-client.js"></script>
+  <script src="ui-dialogs.js"></script>
+  <script src="auth-renderer.js"></script>
   <script src="renderer.js"></script>
   <script src="runtime-analysis-renderer.js"></script>
   <script src="runtime-integrations-renderer.js"></script>

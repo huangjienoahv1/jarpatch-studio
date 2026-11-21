@@ -3,6 +3,7 @@ package com.jarpatch.repository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jarpatch.config.UserContext;
 import com.jarpatch.model.ProjectSettings;
 import com.jarpatch.common.JarPatchConstants;
 import org.springframework.dao.EmptyResultDataAccessException;
@@ -83,16 +84,19 @@ public class ProjectSettingsRepository {
      * @throws JsonProcessingException 嵌套 Jar 清单无法序列化时抛出
      */
     public void upsert(ProjectSettings settings, String now) throws JsonProcessingException {
+        String operator = UserContext.currentUsername();
         jdbcTemplate.update("INSERT INTO project_settings " +
                         "(project_id, default_export_directory, selected_nested_jars_json, max_editable_file_bytes, " +
-                        "default_encoding, ui_preferences_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+                        "default_encoding, ui_preferences_json, creator, updater, created_at, updated_at) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
                         "ON CONFLICT(project_id) DO UPDATE SET default_export_directory = excluded.default_export_directory, " +
                         "selected_nested_jars_json = excluded.selected_nested_jars_json, " +
                         "max_editable_file_bytes = excluded.max_editable_file_bytes, " +
                         "default_encoding = excluded.default_encoding, " +
-                        "ui_preferences_json = excluded.ui_preferences_json, updated_at = excluded.updated_at",
+                        "ui_preferences_json = excluded.ui_preferences_json, updater = excluded.updater, " +
+                        "updated_at = excluded.updated_at",
                 settings.getProjectId(), settings.getDefaultExportDirectory(),
                 objectMapper.writeValueAsString(settings.getSelectedNestedJars()), settings.getMaxEditableFileBytes(),
-                settings.getDefaultEncoding(), settings.getUiPreferencesJson(), now, now);
+                settings.getDefaultEncoding(), settings.getUiPreferencesJson(), operator, operator, now, now);
     }
 }

@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('jarPatch', {
   saveDiagnostic: (defaultName, content) => ipcRenderer.invoke('dialog:saveDiagnostic', defaultName, content),
   pickDirectory: (defaultPath, title) => ipcRenderer.invoke('dialog:pickDirectory', defaultPath, title),
   getBackendConnection: () => ipcRenderer.invoke('backend:connection'),
+  setSessionToken: (token) => ipcRenderer.invoke('auth:setSessionToken', token),
   getDevelopmentSettings: () => ipcRenderer.invoke('development:getSettings'),
   getBundledJdkVersion: () => ipcRenderer.invoke('development:getBundledJdkVersion'),
   saveDevelopmentSettings: (settings) => ipcRenderer.invoke('development:saveSettings', settings),

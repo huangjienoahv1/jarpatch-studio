@@ -1,0 +1,657 @@
+/* ==========================================================================
+   JarPatch Studio — 登录界面、用户菜单、用户管理与内置确认弹窗样式
+   100% 兼容 Chromium 108 (Electron 22 / Win7) 与现代 Electron
+   ========================================================================== */
+
+/* 全屏登录与强制改密覆盖层 */
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.16), transparent 42%),
+    radial-gradient(circle at 82% 78%, rgba(167, 139, 250, 0.14), transparent 44%),
+    var(--bg-canvas);
+}
+
+.auth-overlay[hidden] {
+  display: none;
+}
+
+.auth-theme-corner {
+  position: fixed;
+  top: 18px;
+  right: 20px;
+}
+
+.auth-card {
+  width: min(420px, calc(100vw - 36px));
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+  padding: 28px 26px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.auth-card[hidden] {
+  display: none;
+}
+
+.auth-card-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.auth-card-brand .brand-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+}
+
+.auth-card-brand h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.auth-card-brand p {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.auth-password-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-password-wrap input {
+  padding-right: 36px;
+}
+
+.auth-pwd-toggle {
+  position: absolute;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.auth-pwd-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.auth-error {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--danger-border);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.auth-error[hidden] {
+  display: none;
+}
+
+.auth-hint-box {
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.auth-hint-box[hidden] {
+  display: none;
+}
+
+.auth-hint-box .tool-btn {
+  align-self: flex-start;
+  height: 28px;
+  font-size: 12px;
+}
+
+.auth-submit-btn {
+  width: 100%;
+  height: 40px;
+  margin-top: 2px;
+}
+
+.auth-secondary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.auth-footer-note {
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* 右上角用户头像与身份菜单 */
+.user-menu {
+  position: relative;
+}
+
+.user-menu[hidden] {
+  display: none;
+}
+
+.user-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 9px 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-elevated);
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.user-pill-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--line-strong);
+}
+
+.user-avatar,
+.user-mini-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  flex: 0 0 auto;
+}
+
+.user-avatar.avatar-admin,
+.user-mini-avatar.avatar-admin {
+  background: linear-gradient(135deg, #8b5cf6, #3b82f6);
+}
+
+.user-pill-name {
+  max-width: 96px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-role-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.user-role-tag.role-admin {
+  background: var(--runtime-soft);
+  color: var(--runtime-tint);
+  border: 1px solid var(--runtime-border);
+}
+
+.user-role-tag.role-user {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  border: 1px solid var(--accent-border);
+}
+
+.user-menu-popover {
+  min-width: 224px;
+}
+
+.user-menu-header {
+  padding: 8px 10px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-menu-header strong {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.user-menu-header span {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+/* 用户管理弹窗 */
+.users-panel {
+  width: min(980px, calc(100vw - 48px));
+  max-height: min(820px, calc(100vh - 44px));
+  grid-template-rows: auto auto auto minmax(200px, 1fr) auto;
+}
+
+.user-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.user-toolbar input,
+.user-toolbar select {
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--text);
+  padding: 0 10px;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.user-toolbar input {
+  flex: 1 1 220px;
+}
+
+.user-toolbar input:focus,
+.user-toolbar select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.user-toolbar .primary-action {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  margin-left: auto;
+}
+
+.user-subpanel {
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.user-subpanel[hidden] {
+  display: none;
+}
+
+.user-subpanel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.user-subpanel-header h3 {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.user-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.user-subpanel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.user-subpanel-actions .primary-action,
+.user-subpanel-actions .tool-btn {
+  height: 32px;
+  font-size: 12.5px;
+}
+
+.user-table-wrap {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.user-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.user-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 9px 12px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.user-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line-subtle);
+  vertical-align: middle;
+}
+
+.user-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.user-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.user-cell-account {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.user-cell-account strong {
+  display: block;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.user-cell-account span {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+.self-tag {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.user-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.user-status-pill i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.user-status-pill.status-enabled {
+  color: var(--success);
+}
+
+.user-status-pill.status-enabled i {
+  background: var(--success);
+}
+
+.user-status-pill.status-disabled {
+  color: var(--danger);
+}
+
+.user-status-pill.status-disabled i {
+  background: var(--danger);
+}
+
+.user-time-cell {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.user-actions-cell {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.user-actions-cell .mini-text-btn + .mini-text-btn {
+  margin-left: 4px;
+}
+
+.user-btn-danger:hover {
+  background: var(--danger-soft) !important;
+  color: var(--danger) !important;
+}
+
+.user-btn-warn:hover {
+  background: var(--warn-soft) !important;
+  color: var(--warn) !important;
+}
+
+.user-btn-success:hover {
+  background: var(--success-soft) !important;
+  color: var(--success) !important;
+}
+
+.user-empty-cell {
+  text-align: center;
+  padding: 28px !important;
+  color: var(--muted);
+}
+
+/* 个人修改密码小弹窗 */
+.compact-modal-panel {
+  width: min(460px, calc(100vw - 44px));
+  grid-template-rows: auto auto auto;
+}
+
+/* ==========================================================================
+   内置主题化确认弹窗 (#confirmDialog)
+   ========================================================================== */
+
+.confirm-dialog {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  color: var(--text);
+}
+
+.confirm-dialog[open] {
+  display: flex;
+}
+
+.confirm-dialog::backdrop {
+  background: transparent;
+}
+
+.confirm-panel {
+  width: min(540px, calc(100vw - 40px));
+  max-height: min(680px, calc(100vh - 48px));
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+}
+
+.confirm-header-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.confirm-tone-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.confirm-tone-icon.tone-info {
+  background: var(--info-soft);
+  color: var(--info);
+  border: 1px solid var(--accent-border);
+}
+
+.confirm-tone-icon.tone-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border: 1px solid var(--warn-border);
+}
+
+.confirm-tone-icon.tone-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid var(--danger-border);
+}
+
+.confirm-body {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.confirm-message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-line;
+}
+
+.confirm-details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.confirm-details[hidden] {
+  display: none;
+}
+
+.confirm-detail-row {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 12px;
+}
+
+.confirm-detail-label {
+  color: var(--muted);
+}
+
+.confirm-detail-value {
+  color: var(--text);
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.confirm-list {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.confirm-list[hidden] {
+  display: none;
+}
+
+.confirm-list-item {
+  padding: 8px 10px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.confirm-list-item strong {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  word-break: break-all;
+}
+
+.confirm-list-item span {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.confirm-btn-danger {
+  border-color: var(--danger) !important;
+  background: var(--danger) !important;
+  color: #ffffff !important;
+  font-weight: 600;
+}
+
+.confirm-btn-danger:hover:not(:disabled) {
+  opacity: 0.92;
+}

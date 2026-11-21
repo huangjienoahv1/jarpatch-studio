@@ -27,6 +27,99 @@ const MESSAGE_JAVA_DIAGNOSTICS_PREFIX = 'Java 智能：';
 const MESSAGE_JAVA_DIAGNOSTICS_ERROR_SUFFIX = ' 个错误，';
 const MESSAGE_JAVA_DIAGNOSTICS_WARNING_SUFFIX = ' 个警告';
 const MARKER_SOURCE_JAVA = 'Java';
+const UI_THEME_DARK = 'dark';
+const UI_THEME_LIGHT = 'light';
+const MONACO_THEME_DARK = 'jarpatch-dark';
+const MONACO_THEME_LIGHT = 'jarpatch-light';
+const EDITOR_TOP_BOTTOM_PADDING = 10;
+const UNICODE_PREVIEW_ARIA_LABEL = '中文 Unicode 转义只读预览';
+const UNICODE_PREVIEW_FONT_FAMILY = '"JetBrains Mono", "Cascadia Code", "Cascadia Mono", Consolas, monospace';
+const UNICODE_PREVIEW_FONT_SIZE = 13.5;
+const UNICODE_PREVIEW_LINE_HEIGHT = 22;
+const UNICODE_PREVIEW_TAB_SIZE = 4;
+const UNICODE_PREVIEW_DECORATION_CLASS = 'unicode-preview-decoded-inline';
+const UNICODE_PREVIEW_ACTIVE_DECORATION_CLASS = 'unicode-preview-decoded-active';
+const UNICODE_PREVIEW_RULER_COLOR_LIGHT = '#16a34a';
+const UNICODE_PREVIEW_RULER_COLOR_DARK = '#4ade80';
+const UNICODE_PREVIEW_HOVER_LABEL = '已从 Unicode 转义解码为中文（只读预览，未修改原文件）';
+const UNICODE_PREVIEW_NO_ACTIVE_INDEX = -1;
+const UNICODE_PREVIEW_FIRST_INDEX = 0;
+
+let currentMonacoTheme = MONACO_THEME_DARK;
+
+/**
+ * 注册与 JarPatch Studio 工作台深浅色主题严格匹配的 Monaco 编辑器配色。
+ */
+function registerStudioMonacoThemes() {
+  monaco.editor.defineTheme(MONACO_THEME_DARK, {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [],
+    colors: {
+      'editor.background': '#0d1117',
+      'editor.foreground': '#e6edf3',
+      'editor.lineHighlightBackground': '#151c28',
+      'editor.lineHighlightBorder': '#1d2738',
+      'editor.selectionBackground': '#264f78',
+      'editor.inactiveSelectionBackground': '#1c3148',
+      'editorLineNumber.foreground': '#4f6078',
+      'editorLineNumber.activeForeground': '#93c5fd',
+      'editorGutter.background': '#0d1117',
+      'editorWidget.background': '#161d28',
+      'editorWidget.border': '#293548',
+      'editorHoverWidget.background': '#161d28',
+      'editorHoverWidget.border': '#33435b',
+      'editorSuggestWidget.background': '#161d28',
+      'editorSuggestWidget.border': '#33435b',
+      'editorSuggestWidget.selectedBackground': '#1f324d',
+      'editorIndentGuide.background1': '#1d2736',
+      'editorIndentGuide.activeBackground1': '#364a66',
+      'scrollbarSlider.background': '#47556955',
+      'scrollbarSlider.hoverBackground': '#64748b88',
+      'scrollbarSlider.activeBackground': '#94a3b8aa'
+    }
+  });
+  monaco.editor.defineTheme(MONACO_THEME_LIGHT, {
+    base: 'vs',
+    inherit: true,
+    rules: [],
+    colors: {
+      'editor.background': '#ffffff',
+      'editor.foreground': '#0f172a',
+      'editor.lineHighlightBackground': '#f4f7fc',
+      'editor.lineHighlightBorder': '#e6edf7',
+      'editor.selectionBackground': '#bfdbfe',
+      'editor.inactiveSelectionBackground': '#e2e8f0',
+      'editorLineNumber.foreground': '#94a3b8',
+      'editorLineNumber.activeForeground': '#2563eb',
+      'editorGutter.background': '#ffffff',
+      'editorWidget.background': '#ffffff',
+      'editorWidget.border': '#d4deec',
+      'editorHoverWidget.background': '#ffffff',
+      'editorHoverWidget.border': '#cbd5e1',
+      'editorSuggestWidget.background': '#ffffff',
+      'editorSuggestWidget.border': '#cbd5e1',
+      'editorSuggestWidget.selectedBackground': '#e8f0fe',
+      'editorIndentGuide.background1': '#e8eef6',
+      'editorIndentGuide.activeBackground1': '#bfd0e8',
+      'scrollbarSlider.background': '#94a3b84d',
+      'scrollbarSlider.hoverBackground': '#64748b7a',
+      'scrollbarSlider.activeBackground': '#47556999'
+    }
+  });
+}
+
+/**
+ * 同步切换所有 Monaco 编辑器实例（主编辑器、差异对比、运行时反编译）的主题。
+ *
+ * @param {string} mode 界面主题模式（dark 或 light）
+ */
+function setEditorTheme(mode) {
+  currentMonacoTheme = mode === UI_THEME_LIGHT ? MONACO_THEME_LIGHT : MONACO_THEME_DARK;
+  monaco.editor.setTheme(currentMonacoTheme);
+}
+
+registerStudioMonacoThemes();
 
 self.MonacoEnvironment = {
   getWorkerUrl: () => './generated/editor-worker.js'
@@ -291,12 +384,26 @@ class JavaLanguageClient {
   }
 
   /**
+   * 判断指定模型是否为当前主编辑器向 JDT LS 打开的真实文档模型。
+   * 避免只读中文预览、差异视图和运行时在线反编译等内存模型向语言服务器发送无效请求。
+   *
+   * @param {monaco.editor.ITextModel} model 待校验模型
+   * @returns {boolean} 属于当前受管主文档模型时返回 true
+   */
+  isManagedDocumentModel(model) {
+    return Boolean(this.initialized && model && model === this.facade.model && model.uri.toString() === this.documentUri);
+  }
+
+  /**
    * 注册当前语言服务器会话对应的 Monaco 语义能力。
    */
   registerProviders() {
     this.disposables.push(monaco.languages.registerCompletionItemProvider('java', {
       triggerCharacters: ['.', '@', '#'],
       provideCompletionItems: async (model, position, context, token) => {
+        if (!this.isManagedDocumentModel(model)) {
+          return { suggestions: [] };
+        }
         await this.syncDocumentChange(model);
         if (token.isCancellationRequested) {
           return { suggestions: [] };
@@ -324,6 +431,9 @@ class JavaLanguageClient {
 
     this.disposables.push(monaco.languages.registerHoverProvider('java', {
       provideHover: async (model, position) => {
+        if (!this.isManagedDocumentModel(model)) {
+          return null;
+        }
         const hover = await this.request('textDocument/hover', {
           textDocument: { uri: model.uri.toString() },
           position: toLspPosition(position)
@@ -337,6 +447,9 @@ class JavaLanguageClient {
 
     this.disposables.push(monaco.languages.registerDefinitionProvider('java', {
       provideDefinition: async (model, position) => {
+        if (!this.isManagedDocumentModel(model)) {
+          return [];
+        }
         const definitions = await this.request('textDocument/definition', {
           textDocument: { uri: model.uri.toString() },
           position: toLspPosition(position)
@@ -351,6 +464,9 @@ class JavaLanguageClient {
 
     this.disposables.push(monaco.languages.registerCodeActionProvider('java', {
       provideCodeActions: async (model, range, context) => {
+        if (!this.isManagedDocumentModel(model)) {
+          return { actions: [], dispose() {} };
+        }
         const actions = await this.request('textDocument/codeAction', {
           textDocument: { uri: model.uri.toString() },
           range: toLspRange(range),
@@ -371,6 +487,9 @@ class JavaLanguageClient {
 
     this.disposables.push(monaco.languages.registerDocumentFormattingEditProvider('java', {
       provideDocumentFormattingEdits: async (model, options) => {
+        if (!this.isManagedDocumentModel(model)) {
+          return [];
+        }
         const edits = await this.request('textDocument/formatting', {
           textDocument: { uri: model.uri.toString() },
           options: { tabSize: options.tabSize, insertSpaces: options.insertSpaces }
@@ -672,16 +791,18 @@ class MonacoEditorFacade {
     this.readOnly = true;
     this.inputListeners = new Set();
     this.statusListener = () => {};
+    this.cursorListener = () => {};
     this.aiCompletionProvider = null;
     this.programmaticChange = false;
     this.editor = monaco.editor.create(container, {
-      theme: 'vs-dark',
+      theme: currentMonacoTheme,
       language: DEFAULT_LANGUAGE,
       automaticLayout: true,
       readOnly: true,
-      fontFamily: 'JetBrains Mono, Consolas, monospace',
-      fontSize: 14,
+      fontFamily: '"JetBrains Mono", "Cascadia Code", "Cascadia Mono", Consolas, monospace',
+      fontSize: 13.5,
       lineHeight: 22,
+      padding: { top: EDITOR_TOP_BOTTOM_PADDING, bottom: EDITOR_TOP_BOTTOM_PADDING },
       minimap: { enabled: true },
       bracketPairColorization: { enabled: true },
       guides: { bracketPairs: true, indentation: true },
@@ -693,6 +814,9 @@ class MonacoEditorFacade {
       suggestOnTriggerCharacters: true,
       inlineSuggest: { enabled: true },
       renderValidationDecorations: 'on',
+      renderLineHighlight: 'all',
+      roundedSelection: true,
+      cursorBlinking: 'smooth',
       scrollBeyondLastLine: false,
       smoothScrolling: true,
       tabSize: 4,
@@ -701,6 +825,11 @@ class MonacoEditorFacade {
     });
     this.languageClient = new JavaLanguageClient(this, (status) => this.statusListener(status));
     this.editor.onDidChangeModelContent(() => this.handleModelContentChanged());
+    this.editor.onDidChangeCursorPosition((event) => {
+      if (event && event.position) {
+        this.cursorListener({ lineNumber: event.position.lineNumber, column: event.position.column });
+      }
+    });
     this.editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.Backslash, () => this.triggerAiCompletion());
     this.registerAiInlineProvider();
   }
@@ -735,6 +864,10 @@ class MonacoEditorFacade {
       this.programmaticChange = false;
     }
     this.languageClient.openDocument(nextModel);
+    const position = this.editor.getPosition();
+    if (position) {
+      this.cursorListener({ lineNumber: position.lineNumber, column: position.column });
+    }
   }
 
   /**
@@ -747,6 +880,7 @@ class MonacoEditorFacade {
     }
     this.editor.setModel(null);
     monaco.editor.removeAllMarkers(LANGUAGE_SERVER_OWNER);
+    this.cursorListener(null);
   }
 
   /**
@@ -775,6 +909,34 @@ class MonacoEditorFacade {
    */
   onLanguageStatus(listener) {
     this.statusListener = listener;
+  }
+
+  /**
+   * 注册编辑器光标行列变化监听，供底部 IDE 状态栏实时展示。
+   *
+   * @param {(position: {lineNumber: number, column: number}|null) => void} listener 光标监听器
+   */
+  onCursorChange(listener) {
+    this.cursorListener = typeof listener === 'function' ? listener : () => {};
+  }
+
+  /**
+   * 获取当前文档的 Monaco 语言标识。
+   *
+   * @returns {string} 语言标识
+   */
+  getLanguageId() {
+    return this.model ? this.model.getLanguageId() : DEFAULT_LANGUAGE;
+  }
+
+  /**
+   * 获取当前编辑器光标所在行列号，供只读中文预览退出后恢复底部状态栏显示。
+   *
+   * @returns {{lineNumber: number, column: number}|null} 当前光标位置
+   */
+  getCursorPosition() {
+    const position = this.editor.getPosition();
+    return position ? { lineNumber: position.lineNumber, column: position.column } : null;
   }
 
   /**
@@ -1038,6 +1200,7 @@ function createDiffView(container, diff) {
   const original = monaco.editor.createModel(diff.originalContent ?? '', language);
   const modified = monaco.editor.createModel(diff.currentContent ?? '', language);
   const editor = monaco.editor.createDiffEditor(container, {
+    theme: currentMonacoTheme,
     automaticLayout: true,
     readOnly: true,
     originalEditable: false,
@@ -1053,7 +1216,7 @@ function createDiffView(container, diff) {
     diffWordWrap: 'on',
     minimap: { enabled: false },
     scrollBeyondLastLine: false,
-    fontFamily: 'JetBrains Mono, Consolas, monospace',
+    fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
     fontSize: 13
   });
   editor.setModel({ original, modified });
@@ -1244,12 +1407,15 @@ function createRuntimeJavaView(container, content, onChange) {
   const editable = Boolean(onChange);
   const editor = monaco.editor.create(container, {
     model,
+    theme: currentMonacoTheme,
     readOnly: !editable,
     domReadOnly: !editable,
     ariaLabel: '在线反编译源码',
     automaticLayout: true,
     minimap: { enabled: false },
+    padding: { top: EDITOR_TOP_BOTTOM_PADDING, bottom: EDITOR_TOP_BOTTOM_PADDING },
     scrollBeyondLastLine: false,
+    fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
     fontSize: 13
   });
   const change = onChange && model.onDidChangeContent(onChange);
@@ -1261,9 +1427,265 @@ function createRuntimeJavaView(container, content, onChange) {
   };
 }
 
+/**
+ * 创建独立的只读 Monaco 中文预览视图。
+ * 入口由 renderer.js 在用户首次点击“中文预览”时创建，渲染数据落在独立内存文本模型中，
+ * 不关联真实文件 URI，不触碰主编辑器原文、撤销栈或 JDT LS 会话。
+ *
+ * @author 黄杰
+ * @param {HTMLElement} container 只读预览编辑器容器
+ * @returns {object} 只读预览视图控制器
+ */
+function createUnicodePreviewView(container) {
+  let model = null;
+  let currentRanges = [];
+  let activeIndex = UNICODE_PREVIEW_NO_ACTIVE_INDEX;
+  let cursorListener = () => {};
+
+  const editor = monaco.editor.create(container, {
+    theme: currentMonacoTheme,
+    language: DEFAULT_LANGUAGE,
+    readOnly: true,
+    domReadOnly: true,
+    ariaLabel: UNICODE_PREVIEW_ARIA_LABEL,
+    automaticLayout: true,
+    fontFamily: UNICODE_PREVIEW_FONT_FAMILY,
+    fontSize: UNICODE_PREVIEW_FONT_SIZE,
+    lineHeight: UNICODE_PREVIEW_LINE_HEIGHT,
+    padding: { top: EDITOR_TOP_BOTTOM_PADDING, bottom: EDITOR_TOP_BOTTOM_PADDING },
+    minimap: { enabled: true },
+    bracketPairColorization: { enabled: true },
+    guides: { bracketPairs: true, indentation: true },
+    glyphMargin: false,
+    folding: true,
+    renderLineHighlight: 'all',
+    roundedSelection: true,
+    scrollBeyondLastLine: false,
+    smoothScrolling: true,
+    tabSize: UNICODE_PREVIEW_TAB_SIZE,
+    wordWrap: 'off'
+  });
+
+  const decorations = editor.createDecorationsCollection();
+  const cursorDisposable = editor.onDidChangeCursorPosition((event) => {
+    if (event && event.position) {
+      cursorListener({ lineNumber: event.position.lineNumber, column: event.position.column });
+    }
+  });
+
+  /**
+   * 按当前解码区间与聚焦索引刷新内联高亮、小地图与滚动条标尺标记。
+   */
+  function applyDecorations() {
+    if (!model || !currentRanges.length) {
+      decorations.clear();
+      return;
+    }
+    const nextDecorations = currentRanges.map((item, index) => ({
+      range: new monaco.Range(
+        item.startLineNumber,
+        item.startColumn,
+        item.endLineNumber,
+        item.endColumn
+      ),
+      options: {
+        inlineClassName: index === activeIndex
+          ? UNICODE_PREVIEW_ACTIVE_DECORATION_CLASS
+          : UNICODE_PREVIEW_DECORATION_CLASS,
+        hoverMessage: { value: UNICODE_PREVIEW_HOVER_LABEL },
+        overviewRuler: {
+          color: UNICODE_PREVIEW_RULER_COLOR_LIGHT,
+          darkColor: UNICODE_PREVIEW_RULER_COLOR_DARK,
+          position: monaco.editor.OverviewRulerLane.Center
+        },
+        minimap: {
+          color: UNICODE_PREVIEW_RULER_COLOR_LIGHT,
+          darkColor: UNICODE_PREVIEW_RULER_COLOR_DARK,
+          position: monaco.editor.MinimapPosition.Inline
+        }
+      }
+    }));
+    decorations.set(nextDecorations);
+  }
+
+  /**
+   * 查找当前可视行区间内首个解码中文区间的索引。
+   *
+   * @returns {number} 命中索引；当前视口内没有解码内容时返回 -1
+   */
+  function findFirstVisibleRangeIndex() {
+    const visibleRanges = editor.getVisibleRanges();
+    if (!visibleRanges.length || !currentRanges.length) {
+      return UNICODE_PREVIEW_NO_ACTIVE_INDEX;
+    }
+    for (let index = UNICODE_PREVIEW_FIRST_INDEX; index < currentRanges.length; index++) {
+      const target = currentRanges[index];
+      const visible = visibleRanges.some((range) => target.endLineNumber >= range.startLineNumber
+        && target.startLineNumber <= range.endLineNumber);
+      if (visible) {
+        return index;
+      }
+    }
+    return UNICODE_PREVIEW_NO_ACTIVE_INDEX;
+  }
+
+  /**
+   * 替换预览编辑器使用的独立内存模型并及时释放旧模型。
+   *
+   * @param {string} content 解码后的只读文本
+   * @param {string} language Monaco 语言标识
+   */
+  function replaceModel(content, language) {
+    const nextModel = monaco.editor.createModel(content || '', language || DEFAULT_LANGUAGE);
+    const previousModel = model;
+    model = nextModel;
+    editor.setModel(nextModel);
+    if (previousModel) {
+      previousModel.dispose();
+    }
+  }
+
+  /**
+   * 聚焦并居中定位到指定索引的解码中文片段。
+   *
+   * @param {number} index 目标区间索引（支持循环越界索引）
+   * @returns {number} 规范化后的当前活动索引
+   */
+  function revealRange(index) {
+    if (!currentRanges.length) {
+      activeIndex = UNICODE_PREVIEW_NO_ACTIVE_INDEX;
+      applyDecorations();
+      return UNICODE_PREVIEW_NO_ACTIVE_INDEX;
+    }
+    const normalizedIndex = ((index % currentRanges.length) + currentRanges.length) % currentRanges.length;
+    activeIndex = normalizedIndex;
+    applyDecorations();
+    const target = currentRanges[activeIndex];
+    const monacoRange = new monaco.Range(
+      target.startLineNumber,
+      target.startColumn,
+      target.endLineNumber,
+      target.endColumn
+    );
+    editor.revealRangeInCenter(monacoRange);
+    editor.setPosition({ lineNumber: target.startLineNumber, column: target.startColumn });
+    return activeIndex;
+  }
+
+  return {
+    /**
+     * 打开只读中文预览：先完成可见态布局并恢复原滚动位置，若当前视口无解码内容则自动居中定位到首处。
+     *
+     * @param {object} options 预览文本、语言标识、解码区间和原编辑器滚动位置
+     * @returns {{activeIndex: number, autoScrolled: boolean}} 当前高亮索引与是否自动滚动
+     */
+    open({ content, language, ranges, initialScrollTop }) {
+      currentRanges = Array.isArray(ranges) ? ranges : [];
+      activeIndex = currentRanges.length ? UNICODE_PREVIEW_FIRST_INDEX : UNICODE_PREVIEW_NO_ACTIVE_INDEX;
+      replaceModel(content, language);
+      // 容器显示后立即执行布局，再恢复滚动位置，彻底避免隐藏态下 scrollTop 被浏览器丢弃的问题。
+      editor.layout();
+      editor.setScrollTop(initialScrollTop || 0);
+      const visibleIndex = findFirstVisibleRangeIndex();
+      if (visibleIndex >= UNICODE_PREVIEW_FIRST_INDEX) {
+        activeIndex = visibleIndex;
+        applyDecorations();
+        const visibleTarget = currentRanges[activeIndex];
+        editor.setPosition({ lineNumber: visibleTarget.startLineNumber, column: visibleTarget.startColumn });
+        return { activeIndex, autoScrolled: false };
+      }
+      if (currentRanges.length) {
+        revealRange(UNICODE_PREVIEW_FIRST_INDEX);
+        return { activeIndex: UNICODE_PREVIEW_FIRST_INDEX, autoScrolled: true };
+      }
+      applyDecorations();
+      return { activeIndex: UNICODE_PREVIEW_NO_ACTIVE_INDEX, autoScrolled: false };
+    },
+
+    /**
+     * 在保持当前阅读滚动位置的前提下刷新预览文本与高亮装饰（例如预览态触发保存后）。
+     *
+     * @param {object} options 预览文本、语言标识和解码区间
+     * @returns {number} 更新后的活动索引
+     */
+    updateContent({ content, language, ranges }) {
+      const previousScrollTop = editor.getScrollTop();
+      const previousIndex = activeIndex;
+      currentRanges = Array.isArray(ranges) ? ranges : [];
+      activeIndex = currentRanges.length
+        ? Math.min(Math.max(previousIndex, UNICODE_PREVIEW_FIRST_INDEX), currentRanges.length - 1)
+        : UNICODE_PREVIEW_NO_ACTIVE_INDEX;
+      replaceModel(content, language);
+      editor.layout();
+      editor.setScrollTop(previousScrollTop);
+      applyDecorations();
+      return activeIndex;
+    },
+
+    revealRange,
+
+    /**
+     * 读取预览视图当前纵向滚动像素位置，供“返回原文”同步回主编辑器。
+     *
+     * @returns {number} 纵向滚动像素
+     */
+    getScrollTop() {
+      return editor.getScrollTop();
+    },
+
+    /**
+     * 手动触发预览编辑器重新布局。
+     */
+    layout() {
+      editor.layout();
+    },
+
+    /**
+     * 聚焦预览编辑器以便键盘滚动和 Ctrl+F 查找。
+     */
+    focus() {
+      editor.focus();
+    },
+
+    /**
+     * 注册预览编辑器光标变化监听，实时同步底部 IDE 状态栏行列显示。
+     *
+     * @param {(position: {lineNumber: number, column: number}|null) => void} listener 光标监听器
+     */
+    onCursorChange(listener) {
+      cursorListener = typeof listener === 'function' ? listener : () => {};
+    },
+
+    /**
+     * 退出只读预览时清空高亮装饰并释放临时内存模型。
+     */
+    clear() {
+      currentRanges = [];
+      activeIndex = UNICODE_PREVIEW_NO_ACTIVE_INDEX;
+      decorations.clear();
+      editor.setModel(null);
+      if (model) {
+        model.dispose();
+        model = null;
+      }
+    },
+
+    /**
+     * 彻底销毁只读预览编辑器实例及监听订阅。
+     */
+    dispose() {
+      this.clear();
+      cursorDisposable.dispose();
+      editor.dispose();
+    }
+  };
+}
+
 window.jarPatchEditor = Object.freeze({
   create: (container) => new MonacoEditorFacade(container),
   createDiffView,
   createRuntimeJavaView,
-  detectLanguage
+  createUnicodePreviewView,
+  detectLanguage,
+  setTheme: setEditorTheme
 });

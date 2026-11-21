@@ -17,6 +17,9 @@ public class LocalAccessProperties {
 
     public static final String TOKEN_HEADER = "X-JarPatch-Token";
     public static final String TOKEN_QUERY_PARAMETER = "token";
+    public static final String SESSION_HEADER = "X-JarPatch-Session";
+    public static final String SESSION_QUERY_PARAMETER = "session";
+    public static final String TASK_ID_HEADER = "X-Task-Id";
     private static final String MESSAGE_TOKEN_REQUIRED = "本地访问令牌不能为空，必须由桌面端启动后端";
     private static final String MESSAGE_INSTANCE_REQUIRED = "本地实例 ID 不能为空，必须由桌面端启动后端";
 

@@ -36,6 +36,7 @@ public class DatabaseInitializer {
     private static final int MIGRATION_PRODUCTIZATION = 4;
     private static final int MIGRATION_HISTORY_AND_ENCODING = 5;
     private static final int MIGRATION_FILE_ENCODING_SELECTIONS = 6;
+    private static final int MIGRATION_USER_AUTH_MANAGEMENT = 7;
 
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
@@ -84,6 +85,8 @@ public class DatabaseInitializer {
         applyMigration(MIGRATION_HISTORY_AND_ENCODING, "history_and_encoding", this::createHistoryAndEncodingSchema);
         applyMigration(MIGRATION_FILE_ENCODING_SELECTIONS, "file_encoding_selections",
                 this::createFileEncodingSelectionSchema);
+        applyMigration(MIGRATION_USER_AUTH_MANAGEMENT, "user_auth_management",
+                this::createUserAuthManagementSchema);
     }
 
     /**
@@ -234,6 +237,40 @@ public class DatabaseInitializer {
      */
     private void createFileEncodingSelectionSchema() {
         ensureColumn("file_changes", "encoding", "TEXT");
+    }
+
+    /**
+     * 创建本地用户表、持久化会话表，并为操作时间线补充操作人审计列。
+     */
+    private void createUserAuthManagementSchema() {
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS users (" +
+                "id TEXT PRIMARY KEY, " +
+                "username TEXT NOT NULL UNIQUE, " +
+                "display_name TEXT NOT NULL, " +
+                "role TEXT NOT NULL, " +
+                "status TEXT NOT NULL, " +
+                "password_hash TEXT NOT NULL, " +
+                "password_salt TEXT NOT NULL, " +
+                "must_change_password INTEGER NOT NULL DEFAULT 0, " +
+                "last_login_at TEXT, " +
+                "creator TEXT NOT NULL DEFAULT '" + JarPatchConstants.DEFAULT_AUDITOR + "', " +
+                "updater TEXT NOT NULL DEFAULT '" + JarPatchConstants.DEFAULT_AUDITOR + "', " +
+                "created_at TEXT NOT NULL, " +
+                "updated_at TEXT NOT NULL)");
+
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS user_sessions (" +
+                "token_hash TEXT PRIMARY KEY, " +
+                "user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, " +
+                "expires_at TEXT NOT NULL, " +
+                "created_at TEXT NOT NULL, " +
+                "last_active_at TEXT NOT NULL)");
+
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_users_role_status ON users(role, status)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)");
+
+        ensureColumn("operation_journals", "operator",
+                "TEXT NOT NULL DEFAULT '" + JarPatchConstants.DEFAULT_AUDITOR + "'");
     }
 
     /**

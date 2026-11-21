@@ -135,6 +135,51 @@ public final class JarPatchConstants {
     public static final String LOG_UNEXPECTED_EXCEPTION = "后端发生未预期异常";
     public static final String SETTING_KEY_JDK_HOME = "jdk.home";
 
+    public static final String DEFAULT_ADMIN_USERNAME = "admin";
+    public static final String DEFAULT_ADMIN_DISPLAY_NAME = "系统管理员";
+    public static final String DEFAULT_ADMIN_INITIAL_PASSWORD = "Admin@123";
+    public static final int USERNAME_MIN_LENGTH = 3;
+    public static final int USERNAME_MAX_LENGTH = 32;
+    public static final int DISPLAY_NAME_MAX_LENGTH = 48;
+    public static final int PASSWORD_MIN_LENGTH = 8;
+    public static final int PASSWORD_MAX_LENGTH = 128;
+    public static final int PASSWORD_HASH_ITERATIONS = 120000;
+    public static final int PASSWORD_HASH_KEY_BITS = 256;
+    public static final int PASSWORD_SALT_BYTES = 16;
+    public static final int SESSION_TOKEN_BYTES = 32;
+    public static final long SESSION_TTL_DAYS = 7L;
+    public static final int LOGIN_MAX_FAILURES = 5;
+    public static final long LOGIN_LOCK_SECONDS = 60L;
+    public static final int MINIMUM_ACTIVE_ADMIN_COUNT = 1;
+    public static final int SQLITE_FLAG_TRUE = 1;
+    public static final int SQLITE_FLAG_FALSE = 0;
+
+    public static final String MESSAGE_AUTH_SESSION_REQUIRED = "登录状态已失效，请重新登录";
+    public static final String MESSAGE_AUTH_PASSWORD_CHANGE_REQUIRED = "首次登录或密码已被重置，请先修改密码后再继续操作";
+    public static final String MESSAGE_AUTH_ADMIN_REQUIRED = "当前操作仅限管理员执行";
+    public static final String MESSAGE_AUTH_CREDENTIALS_REQUIRED = "请输入用户名和密码";
+    public static final String MESSAGE_AUTH_INVALID_CREDENTIALS = "用户名或密码错误";
+    public static final String MESSAGE_AUTH_USER_DISABLED = "该账号已被禁用，请联系管理员";
+    public static final String MESSAGE_AUTH_LOGIN_LOCKED = "密码连续错误次数过多，请 1 分钟后再试";
+    public static final String MESSAGE_AUTH_LOGOUT_SUCCESS = "已安全退出登录";
+    public static final String MESSAGE_AUTH_PASSWORD_CHANGED = "密码修改成功";
+    public static final String MESSAGE_AUTH_OLD_PASSWORD_INVALID = "当前密码不正确";
+    public static final String MESSAGE_AUTH_NEW_PASSWORD_SAME = "新密码不能与当前密码相同";
+    public static final String MESSAGE_PASSWORD_LENGTH_INVALID = "密码长度需在 8 到 128 个字符之间";
+    public static final String MESSAGE_USERNAME_INVALID = "用户名长度需为 3 到 32 位，仅支持字母、数字、点、下划线和连字符";
+    public static final String MESSAGE_USERNAME_EXISTS = "用户名已存在，请更换其他用户名";
+    public static final String MESSAGE_DISPLAY_NAME_REQUIRED = "显示名称不能为空且不能超过 48 个字符";
+    public static final String MESSAGE_USER_NOT_FOUND = "用户不存在";
+    public static final String MESSAGE_USER_ROLE_INVALID = "不支持的用户角色，仅支持 ADMIN 或 USER";
+    public static final String MESSAGE_USER_STATUS_INVALID = "不支持的用户状态，仅支持 ENABLED 或 DISABLED";
+    public static final String MESSAGE_USER_CANNOT_DISABLE_SELF = "不能禁用当前正在登录的账号";
+    public static final String MESSAGE_USER_CANNOT_DEMOTE_SELF = "不能取消当前登录账号的管理员角色";
+    public static final String MESSAGE_USER_CANNOT_DELETE_SELF = "不能删除当前正在登录的账号";
+    public static final String MESSAGE_USER_LAST_ADMIN_PROTECTED = "系统至少需要保留一名启用中的管理员账号";
+    public static final String MESSAGE_USER_PASSWORD_RESET_SUCCESS = "密码已重置，该用户下次登录时必须修改密码";
+    public static final String MESSAGE_USER_DELETED = "用户已删除";
+    public static final String MESSAGE_PASSWORD_ALGORITHM_UNAVAILABLE = "当前 Java 运行时缺少 PBKDF2WithHmacSHA256 算法";
+
     public static final Set<String> EDITABLE_RESOURCE_EXTENSIONS =
             Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
                     "properties", "yml", "yaml", "xml", "json", "txt", "html", "css", "js"

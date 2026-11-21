@@ -18,6 +18,7 @@ public class OperationJournalRecord {
     private String targetPath;
     private String status;
     private String details;
+    private String operator;
     private String createdAt;
 
     public String getId() {
@@ -74,6 +75,14 @@ public class OperationJournalRecord {
 
     public void setDetails(String details) {
         this.details = details;
+    }
+
+    public String getOperator() {
+        return operator;
+    }
+
+    public void setOperator(String operator) {
+        this.operator = operator;
     }
 
     public String getCreatedAt() {

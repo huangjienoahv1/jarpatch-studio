@@ -1,5 +1,6 @@
 package com.jarpatch.repository;
 
+import com.jarpatch.config.UserContext;
 import com.jarpatch.model.OperationJournalRecord;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -48,10 +49,10 @@ public class OperationJournalRepository {
                        String details,
                        String createdAt) {
         jdbcTemplate.update("INSERT INTO operation_journals " +
-                        "(id, project_id, operation_id, operation_type, target_path, status, details, created_at) " +
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "(id, project_id, operation_id, operation_type, target_path, status, details, operator, created_at) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 UUID.randomUUID().toString(), projectId, operationId, operationType, targetPath,
-                status, details, createdAt);
+                status, details, UserContext.currentUsername(), createdAt);
     }
 
     /**
@@ -63,7 +64,7 @@ public class OperationJournalRepository {
      */
     public List<OperationJournalRecord> findByProjectId(String projectId, int limit) {
         return jdbcTemplate.query("SELECT id, project_id, operation_id, operation_type, target_path, " +
-                        "status, details, created_at FROM operation_journals WHERE project_id = ? " +
+                        "status, details, operator, created_at FROM operation_journals WHERE project_id = ? " +
                         "ORDER BY created_at DESC, id DESC LIMIT ?",
                 (resultSet, rowNum) -> {
                     OperationJournalRecord record = new OperationJournalRecord();
@@ -74,6 +75,7 @@ public class OperationJournalRepository {
                     record.setTargetPath(resultSet.getString("target_path"));
                     record.setStatus(resultSet.getString("status"));
                     record.setDetails(resultSet.getString("details"));
+                    record.setOperator(resultSet.getString("operator"));
                     record.setCreatedAt(resultSet.getString("created_at"));
                     return record;
                 }, projectId, limit);

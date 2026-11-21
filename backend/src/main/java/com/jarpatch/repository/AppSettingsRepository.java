@@ -1,6 +1,6 @@
 package com.jarpatch.repository;
 
-import com.jarpatch.common.JarPatchConstants;
+import com.jarpatch.config.UserContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -52,6 +52,7 @@ public class AppSettingsRepository {
      * @param now          当前时间字符串
      */
     public void upsert(String settingKey, String settingValue, String now) {
+        String operator = UserContext.currentUsername();
         jdbcTemplate.update("INSERT INTO app_settings " +
                         "(setting_key, setting_value, creator, updater, created_at, updated_at) " +
                         "VALUES (?, ?, ?, ?, ?, ?) " +
@@ -59,6 +60,6 @@ public class AppSettingsRepository {
                         "setting_value = excluded.setting_value, " +
                         "updater = excluded.updater, " +
                         "updated_at = excluded.updated_at",
-                settingKey, settingValue, JarPatchConstants.DEFAULT_AUDITOR, JarPatchConstants.DEFAULT_AUDITOR, now, now);
+                settingKey, settingValue, operator, operator, now, now);
     }
 }
