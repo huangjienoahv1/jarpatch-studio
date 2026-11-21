@@ -418,7 +418,7 @@ Electron 会尝试启动 `backend/target/jarpatch-studio-backend.jar`。
 npm.cmd start
 ```
 
-### 构建 Windows 免安装包
+### 构建 Windows 安装包与免安装包
 
 ```powershell
 pwsh.exe -NoLogo -NoProfile -File .\build.ps1
@@ -426,7 +426,18 @@ pwsh.exe -NoLogo -NoProfile -File .\build.ps1
 
 内网使用时，传入 `-BundleJdk17 -JdkHome '完整 JDK 17 目录'` 构建。该模式将完整 JDK 17（含 `javac`、`jar` 和许可证）内置到免安装 EXE，双击即可使用内置 Java 启动和编译 Java 17 原包，无需在目标电脑安装 JDK 或设置 `JAVA_HOME`。软件中已保存的编译 JDK 配置仍优先，迁移后应确认原配置路径有效。其他 Java 目标版本仍遵循已有编译器版本校验；JDT LS 和 AI 为可选能力，不包含在该离线包中。
 
-Windows 构建同时生成单文件 EXE 和以 `-FastStart.zip` 结尾的快速启动包。单文件 EXE 每次启动解压到独立的临时目录，退出后清理。经常使用时，可将快速启动包完整解压到独立目录，之后双击解压目录中的 `jarpatch-studio.exe`，可以为它创建快捷方式。两种包都免安装，使用相同的用户数据和应用配置，重复启动会激活已有窗口。
+Windows 构建同时生成以 `-Setup.exe` 结尾的安装包、单文件便携 EXE 和以 `-FastStart.zip` 结尾的快速启动包。安装包提供中文安装向导、自选安装目录、桌面和开始菜单快捷方式及系统卸载入口；安装后直接运行本地文件，无需每次解压。卸载保留用户数据和项目工作区。单文件 EXE 每次启动解压到独立的临时目录，退出后清理。经常使用时，可将快速启动包完整解压到独立目录，之后双击解压目录中的 `jarpatch-studio.exe`，可以为它创建快捷方式。后两种包都免安装，三种形式使用相同的用户数据和应用配置，重复启动会激活已有窗口。
+
+已有完整应用目录时，可以只追加安装包，无需重新编译后端（Win7 原生包示例）：
+
+```powershell
+pwsh.exe -NoProfile -File .\scripts\build-windows-installer.ps1 `
+  -AppDirectory .\release\windows7-native\FastStart `
+  -OutputDirectory .\frontend\dist-win7-native `
+  -ArtifactName JarPatch-Studio-0.1.0-Windows7-Native-x64-Setup.exe -Windows7
+```
+
+该命令仅生成安装包；单独追加交付时应将成品归档到对应 release 目录并记录大小、SHA-256 和签名状态。安装包沿用输入目录的应用版本和后端，输入目录必须来自同一版本的完整成品。
 
 ### 构建 Windows 原生后端验证包
 
@@ -436,11 +447,11 @@ Windows 构建同时生成单文件 EXE 和以 `-FastStart.zip` 结尾的快速�
 pwsh.exe -NoLogo -NoProfile -File .\build.ps1 -NativeBackend -NativeImageHome 'C:\Tools\GraalVM' -JdkHome 'C:\Tools\JDK17'
 ```
 
-产物写入 `release/windows-native/`，同时提供单文件 EXE 和快速启动 ZIP。桌面端启动包内的 `jarpatch-studio-backend.exe`，所需的 VC 运行库随应用提供，发布包不包含后端 JAR。编译用户的 Java 改动仍使用随包提供的 JDK 17，已保存的编译 JDK 配置优先。标准 Windows x64 原生包与 Win7 SP1 x64 原生包使用各自的入口和输出目录。原生机器码仍可被逆向分析，Electron 前端 JavaScript 仍随包交付。
+产物写入 `release/windows-native/`，同时提供安装包（`-Setup.exe`）、单文件便携 EXE 和快速启动 ZIP。桌面端启动包内的 `jarpatch-studio-backend.exe`，所需的 VC 运行库随应用提供，发布包不包含后端 JAR。编译用户的 Java 改动仍使用随包提供的 JDK 17，已保存的编译 JDK 配置优先。标准 Windows x64 原生包与 Win7 SP1 x64 原生包使用各自的入口和输出目录。原生机器码仍可被逆向分析，Electron 前端 JavaScript 仍随包交付。
 
 ### 构建 Win7 SP1 64 位兼容包
 
-在开发电脑上双击仓库根目录的 `build-win7.cmd` 即可打包。脚本优先使用命令参数指定的 JDK，其次读取 `JARPATCH_WIN7_JDK_HOME`，未配置时使用 `%TEMP%\jarpatch-win7-dependencies\jdk-21` 中的 Liberica JDK。也可以从 PowerShell 7 指定 JDK 目录：
+在开发电脑上双击仓库根目录的 `build-win7.cmd` 即可打包。脚本优先使用命令参数指定的 JDK，其次读取 `JARPATCH_WIN7_JDK_HOME`，未配置时优先使用 `%SystemDrive%\Tools\LibericaJDK21` 中的 Liberica JDK，并兼容已有的 `%TEMP%\jarpatch-win7-dependencies\jdk-21`。构建工具链应保存在固定目录，避免临时目录清理导致构建失败。也可以从 PowerShell 7 指定 JDK 目录：
 
 ```powershell
 .\build-win7.cmd 'C:\Tools\LibericaJDK21'
@@ -460,7 +471,7 @@ pwsh.exe -NoLogo -NoProfile -File .\build.ps1 -Windows7 -JdkHome 'C:\Tools\Liber
 
 ### 构建 Win7 SP1 x64 原生后端包
 
-在较新的 Windows 构建机上双击 `build-win7-native.cmd`。脚本会探测 Visual Studio 2022 的 MSVC x64 和 Windows SDK。默认从 `%TEMP%\jarpatch-win7-dependencies\` 读取 `jdk-21` 和 `nik-17`。也可分别通过 `JARPATCH_WIN7_JDK_HOME` 和 `NIK_HOME`（或 `GRAALVM_HOME`）指定工具链，或直接传参：
+在较新的 Windows 构建机上双击 `build-win7-native.cmd`。脚本会探测 Visual Studio 2022 的 MSVC x64 和 Windows SDK。默认从 `%SystemDrive%\Tools\LibericaJDK21` 和 `%SystemDrive%\Tools\LibericaNIK17` 读取工具链，并兼容已有的 `%TEMP%\jarpatch-win7-dependencies\jdk-21` 和 `nik-17`。这两套工具链是构建必需依赖，不应作为临时垃圾清理。也可分别通过 `JARPATCH_WIN7_JDK_HOME` 和 `NIK_HOME`（或 `GRAALVM_HOME`）指定工具链，或直接传参：
 
 ```powershell
 .\build-win7-native.cmd 'C:\Tools\LibericaJDK21' 'C:\Tools\LibericaNIK17'

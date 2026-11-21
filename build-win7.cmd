@@ -3,7 +3,9 @@ setlocal EnableExtensions DisableDelayedExpansion
 
 set "WIN7_BUILD_JDK=%~1"
 if not defined WIN7_BUILD_JDK set "WIN7_BUILD_JDK=%JARPATCH_WIN7_JDK_HOME%"
-if not defined WIN7_BUILD_JDK set "WIN7_BUILD_JDK=%TEMP%\jarpatch-win7-dependencies\jdk-21"
+if not defined WIN7_BUILD_JDK if exist "%SystemDrive%\Tools\LibericaJDK21\bin\javac.exe" set "WIN7_BUILD_JDK=%SystemDrive%\Tools\LibericaJDK21"
+if not defined WIN7_BUILD_JDK if exist "%TEMP%\jarpatch-win7-dependencies\jdk-21\bin\javac.exe" set "WIN7_BUILD_JDK=%TEMP%\jarpatch-win7-dependencies\jdk-21"
+if not defined WIN7_BUILD_JDK set "WIN7_BUILD_JDK=%SystemDrive%\Tools\LibericaJDK21"
 
 set "WIN7_BUILD_EXIT_CODE=1"
 where pwsh.exe >nul 2>nul

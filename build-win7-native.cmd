@@ -3,12 +3,18 @@ setlocal EnableExtensions DisableDelayedExpansion
 
 set "WIN7_BUILD_JDK=%~1"
 if not defined WIN7_BUILD_JDK set "WIN7_BUILD_JDK=%JARPATCH_WIN7_JDK_HOME%"
-if not defined WIN7_BUILD_JDK set "WIN7_BUILD_JDK=%TEMP%\jarpatch-win7-dependencies\jdk-21"
+if not defined WIN7_BUILD_JDK if exist "%SystemDrive%\Tools\LibericaJDK21\bin\javac.exe" set "WIN7_BUILD_JDK=%SystemDrive%\Tools\LibericaJDK21"
+if not defined WIN7_BUILD_JDK if exist "%TEMP%\jarpatch-win7-dependencies\jdk-21\bin\javac.exe" set "WIN7_BUILD_JDK=%TEMP%\jarpatch-win7-dependencies\jdk-21"
+if not defined WIN7_BUILD_JDK set "WIN7_BUILD_JDK=%SystemDrive%\Tools\LibericaJDK21"
 
 set "WIN7_NATIVE_IMAGE_HOME=%~2"
 if not defined WIN7_NATIVE_IMAGE_HOME set "WIN7_NATIVE_IMAGE_HOME=%NIK_HOME%"
 if not defined WIN7_NATIVE_IMAGE_HOME set "WIN7_NATIVE_IMAGE_HOME=%GRAALVM_HOME%"
-if not defined WIN7_NATIVE_IMAGE_HOME set "WIN7_NATIVE_IMAGE_HOME=%TEMP%\jarpatch-win7-dependencies\nik-17"
+if not defined WIN7_NATIVE_IMAGE_HOME if exist "%SystemDrive%\Tools\LibericaNIK17\bin\native-image.cmd" set "WIN7_NATIVE_IMAGE_HOME=%SystemDrive%\Tools\LibericaNIK17"
+if not defined WIN7_NATIVE_IMAGE_HOME if exist "%SystemDrive%\Tools\LibericaNIK17\bin\native-image.exe" set "WIN7_NATIVE_IMAGE_HOME=%SystemDrive%\Tools\LibericaNIK17"
+if not defined WIN7_NATIVE_IMAGE_HOME if exist "%TEMP%\jarpatch-win7-dependencies\nik-17\bin\native-image.cmd" set "WIN7_NATIVE_IMAGE_HOME=%TEMP%\jarpatch-win7-dependencies\nik-17"
+if not defined WIN7_NATIVE_IMAGE_HOME if exist "%TEMP%\jarpatch-win7-dependencies\nik-17\bin\native-image.exe" set "WIN7_NATIVE_IMAGE_HOME=%TEMP%\jarpatch-win7-dependencies\nik-17"
+if not defined WIN7_NATIVE_IMAGE_HOME set "WIN7_NATIVE_IMAGE_HOME=%SystemDrive%\Tools\LibericaNIK17"
 
 set "WIN7_BUILD_EXIT_CODE=1"
 where pwsh.exe >nul 2>nul

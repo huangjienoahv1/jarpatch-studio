@@ -457,6 +457,13 @@ try {
     $ReleaseExecutables = @(Get-ChildItem -LiteralPath $FrontendDistRoot -Filter '*.exe' -File)
     Invoke-CodeSigning -Executables ($ReleaseExecutables + (Get-Item -LiteralPath $PackagedExecutablePath))
 
+    # 安装包复用已验收的目录；安装后直接运行，不再每次解压便携包。
+    $InstallerName = "$($PortableExecutable.BaseName)-Setup.exe"
+    & (Join-Path $ProjectRoot 'scripts\build-windows-installer.ps1') `
+        -AppDirectory $PackagedAppRoot -OutputDirectory $FrontendDistRoot `
+        -ArtifactName $InstallerName -Windows7:$Windows7
+    Invoke-CodeSigning -Executables (Get-Item -LiteralPath (Join-Path $FrontendDistRoot $InstallerName))
+
     # 归档已验收的应用目录，签名构建中 ZIP 内的应用 EXE 也包含有效签名。
     $FastStartArchive = Join-Path $FrontendDistRoot "$($PortableExecutable.BaseName)-FastStart.zip"
     [System.IO.Compression.ZipFile]::CreateFromDirectory(
