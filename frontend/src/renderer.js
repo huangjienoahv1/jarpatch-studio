@@ -205,6 +205,14 @@ const MESSAGE_PATH_COPY_FAILED = '复制文件路径失败';
 const MESSAGE_ADMIN_ONLY_ACTION = '当前操作仅限管理员执行';
 const MESSAGE_PROJECT_FILTER_EMPTY = '没有匹配的项目';
 const MESSAGE_CANDIDATE_FILTER_EMPTY = '没有匹配的嵌套 Jar';
+const HELP_SCROLL_ACTIVE_OFFSET_PX = 48;
+const HELP_SCROLL_BOTTOM_THRESHOLD_PX = 4;
+const HELP_HASH_PREFIX_LENGTH = 1;
+const HELP_ACTIVE_CLASS = 'is-active';
+const HELP_ARIA_CURRENT_VALUE = 'location';
+const HELP_SEARCH_RESULT_PREFIX = '已匹配 ';
+const HELP_SEARCH_RESULT_SUFFIX = ' 个章节';
+const HELP_SEARCH_EMPTY_TEXT = '未找到匹配章节';
 const HISTORY_TAB_OPERATIONS = 'operations';
 const HISTORY_TAB_ANALYSES = 'analyses';
 const HISTORY_TAB_VALIDATIONS = 'validations';
@@ -353,6 +361,8 @@ const state = {
   logPanelHeight: LOG_PANEL_DEFAULT_HEIGHT,
   logPanelCollapsed: false,
   uiTheme: THEME_DARK,
+  helpScrollSyncFrame: 0,
+  helpSuppressNextScrollSync: false,
   expandedPaths: new Set([''])
 };
 
@@ -388,6 +398,12 @@ const elements = {
   helpBtn: document.getElementById('helpBtn'),
   helpDialog: document.getElementById('helpDialog'),
   helpNavigation: document.getElementById('helpNavigation'),
+  helpSearchInput: document.getElementById('helpSearchInput'),
+  helpSearchClearBtn: document.getElementById('helpSearchClearBtn'),
+  helpSearchStatus: document.getElementById('helpSearchStatus'),
+  helpContent: document.getElementById('helpContent'),
+  helpSearchEmpty: document.getElementById('helpSearchEmpty'),
+  helpSearchResetBtn: document.getElementById('helpSearchResetBtn'),
   settingsDialog: document.getElementById('settingsDialog'),
   settingsTabs: document.getElementById('settingsTabs'),
   settingsDotJdk: document.getElementById('settingsDotJdk'),
@@ -4068,16 +4084,206 @@ elements.cleanupWorkspaceBtn.addEventListener('click', cleanupCurrentWorkspace);
 elements.orphanWorkspacesBtn.addEventListener('click', cleanupOrphanWorkspaces);
 elements.errorGuideBtn.addEventListener('click', openErrorGuideDialog);
 elements.diagnosticBtn.addEventListener('click', exportDiagnostics);
-elements.helpBtn.addEventListener('click', () => elements.helpDialog.showModal());
+/**
+ * 获取帮助手册中全部章节节点。
+ *
+ * @author 黄杰
+ * @returns {HTMLElement[]} 章节元素列表
+ */
+function getHelpSections() {
+  return Array.from(elements.helpContent.querySelectorAll('section[data-help-section]'));
+}
+
+/**
+ * 同步左侧帮助目录的当前激活章节样式与无障碍标记。
+ *
+ * @author 黄杰
+ * @param {string} sectionId 目标章节标识
+ * @returns {void}
+ */
+function setActiveHelpSection(sectionId) {
+  const navLinks = Array.from(elements.helpNavigation.querySelectorAll('a[href^="#"]'));
+  for (const link of navLinks) {
+    const targetId = link.hash.slice(HELP_HASH_PREFIX_LENGTH);
+    const active = Boolean(sectionId) && targetId === sectionId && !link.hidden;
+    link.classList.toggle(HELP_ACTIVE_CLASS, active);
+    if (active) {
+      link.setAttribute('aria-current', HELP_ARIA_CURRENT_VALUE);
+      // 仅在目录项滚出左侧导航可视区域时柔和滚入，避免干扰正文阅读
+      link.scrollIntoView({ block: 'nearest' });
+    } else {
+      link.removeAttribute('aria-current');
+    }
+  }
+}
+
+/**
+ * 根据帮助正文当前滚动位置计算并高亮对应目录项。
+ *
+ * @author 黄杰
+ * @returns {void}
+ */
+function syncActiveHelpSectionFromScroll() {
+  const visibleSections = getHelpSections().filter((section) => !section.hidden);
+  if (visibleSections.length === 0) {
+    setActiveHelpSection('');
+    return;
+  }
+  const container = elements.helpContent;
+  const reachedBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - HELP_SCROLL_BOTTOM_THRESHOLD_PX;
+  // 滚到底部时直接高亮最后一个可见章节，避免末尾短章节无法被顶部阅读线触发
+  if (reachedBottom) {
+    setActiveHelpSection(visibleSections[visibleSections.length - 1].dataset.helpSection || '');
+    return;
+  }
+  const containerRect = container.getBoundingClientRect();
+  let activeId = visibleSections[0].dataset.helpSection || '';
+  for (const section of visibleSections) {
+    const topOffset = section.getBoundingClientRect().top - containerRect.top;
+    if (topOffset <= HELP_SCROLL_ACTIVE_OFFSET_PX) {
+      activeId = section.dataset.helpSection || activeId;
+    } else {
+      break;
+    }
+  }
+  setActiveHelpSection(activeId);
+}
+
+/**
+ * 通过动画帧节流同步帮助手册滚动高亮状态。
+ *
+ * @author 黄杰
+ * @returns {void}
+ */
+function scheduleHelpScrollSync() {
+  if (state.helpSuppressNextScrollSync) {
+    state.helpSuppressNextScrollSync = false;
+    return;
+  }
+  if (state.helpScrollSyncFrame) {
+    return;
+  }
+  state.helpScrollSyncFrame = window.requestAnimationFrame(() => {
+    state.helpScrollSyncFrame = 0;
+    syncActiveHelpSectionFromScroll();
+  });
+}
+
+/**
+ * 按用户输入关键词筛选帮助手册章节与左侧目录分组。
+ * <p>
+ * 入口为搜索框输入事件或打开/重置帮助手册；按空格拆分多关键词并同时匹配
+ * 章节正文与 data-help-keywords 别名，自动隐藏空分组并刷新匹配计数。
+ * </p>
+ *
+ * @author 黄杰
+ * @param {string} rawKeyword 原始搜索词
+ * @returns {void}
+ */
+function filterHelpManual(rawKeyword) {
+  const normalized = String(rawKeyword || '').trim().toLowerCase();
+  const tokens = normalized ? normalized.split(/\s+/).filter(Boolean) : [];
+  const sections = getHelpSections();
+  const matchedIds = new Set();
+
+  // 1. 逐章节判定是否命中全部关键词并控制显隐
+  for (const section of sections) {
+    const sectionId = section.dataset.helpSection || '';
+    const searchableText = `${section.dataset.helpKeywords || ''} ${section.textContent || ''}`.toLowerCase();
+    const matched = tokens.length === 0 || tokens.every((token) => searchableText.includes(token));
+    section.hidden = !matched;
+    if (matched) {
+      matchedIds.add(sectionId);
+    }
+  }
+
+  // 2. 同步过滤左侧目录链接，并自动隐藏无可见条目的目录分组
+  const navGroups = Array.from(elements.helpNavigation.querySelectorAll('.help-nav-group'));
+  for (const group of navGroups) {
+    const groupLinks = Array.from(group.querySelectorAll('a[href^="#"]'));
+    let visibleCount = 0;
+    for (const link of groupLinks) {
+      const targetId = link.hash.slice(HELP_HASH_PREFIX_LENGTH);
+      const visible = matchedIds.has(targetId);
+      link.hidden = !visible;
+      if (visible) {
+        visibleCount += 1;
+      }
+    }
+    group.hidden = visibleCount === 0;
+  }
+
+  // 3. 更新清空按钮、匹配计数文案与空状态提示
+  const hasFilter = tokens.length > 0;
+  elements.helpSearchClearBtn.hidden = !hasFilter;
+  elements.helpSearchEmpty.hidden = matchedIds.size > 0;
+  if (hasFilter) {
+    elements.helpSearchStatus.textContent = matchedIds.size > 0
+      ? `${HELP_SEARCH_RESULT_PREFIX}${matchedIds.size}${HELP_SEARCH_RESULT_SUFFIX}`
+      : HELP_SEARCH_EMPTY_TEXT;
+    elements.helpSearchStatus.hidden = false;
+  } else {
+    elements.helpSearchStatus.textContent = '';
+    elements.helpSearchStatus.hidden = true;
+  }
+
+  // 4. 筛选变更后回到正文顶部并高亮首个可见章节
+  elements.helpContent.scrollTop = 0;
+  syncActiveHelpSectionFromScroll();
+}
+
+/**
+ * 打开离线帮助手册弹窗并重置筛选与阅读位置。
+ *
+ * @author 黄杰
+ * @returns {void}
+ */
+function openHelpDialog() {
+  elements.helpSearchInput.value = '';
+  filterHelpManual('');
+  elements.helpDialog.showModal();
+  elements.helpContent.scrollTop = 0;
+  syncActiveHelpSectionFromScroll();
+}
+
+elements.helpBtn.addEventListener('click', openHelpDialog);
 elements.helpNavigation.addEventListener('click', (event) => {
   const link = event.target.closest('a');
-  if (!link) {
+  if (!link || link.hidden) {
     return;
   }
   event.preventDefault();
-  const heading = document.getElementById(link.hash.slice(1));
+  const targetId = link.hash.slice(HELP_HASH_PREFIX_LENGTH);
+  const heading = document.getElementById(targetId);
+  if (!heading) {
+    return;
+  }
+  state.helpSuppressNextScrollSync = true;
+  setActiveHelpSection(targetId);
   heading.focus({ preventScroll: true });
   heading.scrollIntoView({ block: 'start' });
+  window.requestAnimationFrame(() => {
+    state.helpSuppressNextScrollSync = false;
+  });
+});
+elements.helpContent.addEventListener('scroll', scheduleHelpScrollSync);
+elements.helpSearchInput.addEventListener('input', () => {
+  filterHelpManual(elements.helpSearchInput.value);
+});
+elements.helpSearchClearBtn.addEventListener('click', () => {
+  elements.helpSearchInput.value = '';
+  filterHelpManual('');
+  elements.helpSearchInput.focus();
+});
+elements.helpSearchResetBtn.addEventListener('click', () => {
+  elements.helpSearchInput.value = '';
+  filterHelpManual('');
+  elements.helpSearchInput.focus();
+});
+elements.helpDialog.addEventListener('click', (event) => {
+  if (event.target === elements.helpDialog) {
+    elements.helpDialog.close();
+  }
 });
 elements.searchBtn.addEventListener('click', searchProject);
 elements.cancelTaskBtn.addEventListener('click', cancelCurrentTask);

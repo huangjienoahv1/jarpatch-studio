@@ -4,7 +4,9 @@ param(
     [switch]$Windows7,
     [switch]$RequireSigning,
     [string]$CertificateThumbprint = $env:JARPATCH_WINDOWS_CERT_THUMBPRINT,
-    [string]$TimestampUrl = $env:JARPATCH_WINDOWS_TIMESTAMP_URL
+    [string]$TimestampUrl = $env:JARPATCH_WINDOWS_TIMESTAMP_URL,
+    [switch]$NativeBackend,
+    [string]$NativeImageHome = $env:GRAALVM_HOME
 )
 
 Set-StrictMode -Version Latest
@@ -16,7 +18,9 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 
 $ProjectRoot = [System.IO.Path]::GetFullPath($PSScriptRoot)
 $FrontendRoot = Join-Path $ProjectRoot 'frontend'
-$BackendJar = Join-Path $ProjectRoot 'backend\target\jarpatch-studio-backend.jar'
+$BackendArtifactName = if ($NativeBackend) { 'jarpatch-studio-backend.exe' } else { 'jarpatch-studio-backend.jar' }
+$BackendTarget = if ($NativeBackend) { 'backend\target\native' } else { 'backend\target' }
+$BackendArtifact = Join-Path (Join-Path $ProjectRoot $BackendTarget) $BackendArtifactName
 $BackendResourceRoot = Join-Path $FrontendRoot 'backend'
 $RuntimeResourceRoot = Join-Path $FrontendRoot 'runtime'
 $FrontendDistRoot = Join-Path $FrontendRoot 'dist'
@@ -25,10 +29,18 @@ $RootPackage = Get-Content -LiteralPath (Join-Path $ProjectRoot 'package.json') 
 $BuildEntry = 'build.ps1'
 $JdtLsVersion = '1.55.0'
 $PreviousLegacyWindows = $env:JARPATCH_LEGACY_WINDOWS
-$BundledJdkMajor = if ($Windows7) { 21 } elseif ($BundleJdk17) { 17 }
-if ($Windows7) {
+$BundledJdkMajor = if ($Windows7) { 21 } elseif ($BundleJdk17 -or $NativeBackend) { 17 }
+if ($Windows7 -and $NativeBackend) {
+    $FrontendDistRoot = Join-Path $FrontendRoot 'dist-win7-native'
+    $ReleaseRoot = Join-Path $ProjectRoot 'release\windows7-native'
+}
+elseif ($Windows7) {
     $FrontendDistRoot = Join-Path $FrontendRoot 'dist-win7'
     $ReleaseRoot = Join-Path $ProjectRoot 'release\windows7'
+}
+elseif ($NativeBackend) {
+    $FrontendDistRoot = Join-Path $FrontendRoot 'dist-native'
+    $ReleaseRoot = Join-Path $ProjectRoot 'release\windows-native'
 }
 
 function Resolve-RequiredCommand {
@@ -42,6 +54,26 @@ function Resolve-RequiredCommand {
         throw "未找到必需命令：$Name"
     }
     return $Command.Source
+}
+
+function Initialize-NativeBuildEnvironment {
+    if ($env:VSCMD_ARG_TGT_ARCH -in @('x64', 'amd64') -and (Get-Command 'cl.exe' -ErrorAction SilentlyContinue)) {
+        return
+    }
+    $VsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (!(Test-Path -LiteralPath $VsWhere -PathType Leaf)) {
+        throw '原生后端构建需要 Visual Studio 2022 Build Tools 的 MSVC x64 与 Windows SDK。'
+    }
+    $VsInstall = & $VsWhere -latest -products '*' -version '[17.0,18.0)' `
+        -requires 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64' -property installationPath
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($VsInstall)) {
+        throw '未找到包含 MSVC x64 的 Visual Studio 2022。'
+    }
+    $DevShell = Join-Path $VsInstall 'Common7\Tools\Launch-VsDevShell.ps1'
+    & $DevShell -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+    if (!(Get-Command 'cl.exe' -ErrorAction SilentlyContinue)) {
+        throw 'Visual Studio x64 构建环境初始化失败。'
+    }
 }
 
 function Install-BundledLanguageServer {
@@ -251,13 +283,81 @@ if ($Windows7) {
     }
 }
 
+$NativeImageVersion = $null
+if ($NativeBackend) {
+    if ([string]::IsNullOrWhiteSpace($NativeImageHome)) {
+        throw '请通过 -NativeImageHome 或 GRAALVM_HOME 指定 GraalVM Native Image 工具链。'
+    }
+    $NativeImageHome = [System.IO.Path]::GetFullPath($NativeImageHome)
+    $NativeImage = Join-Path $NativeImageHome 'bin\native-image.cmd'
+    if (!(Test-Path -LiteralPath $NativeImage -PathType Leaf)) {
+        $NativeImage = Join-Path $NativeImageHome 'bin\native-image.exe'
+    }
+    if (!(Test-Path -LiteralPath $NativeImage -PathType Leaf)) {
+        throw "未找到 GraalVM Native Image：$NativeImageHome"
+    }
+    $NativeImageVersion = (& $NativeImage --version 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "GraalVM Native Image 工具链校验失败：$NativeImageVersion"
+    }
+    if ($Windows7 -and $NativeImageVersion -notmatch 'Liberica-NIK-23\.0\.') {
+        throw 'Win7 原生包需要兼容 Win7 SP1 的 BellSoft Liberica NIK 23.0（JDK 17，Windows x64）。'
+    }
+    Initialize-NativeBuildEnvironment
+    $NativeRuntimeRoot = if ($Windows7) {
+        Join-Path $JdkHome 'bin'
+    } else {
+        if ([string]::IsNullOrWhiteSpace($env:VCToolsRedistDir)) {
+            throw 'Visual Studio 缺少 VC x64 运行库目录。'
+        }
+        Join-Path $env:VCToolsRedistDir 'x64\Microsoft.VC143.CRT'
+    }
+    $NativeRuntimeFiles = @(
+        foreach ($Library in 'vcruntime140.dll', 'vcruntime140_1.dll') {
+            $LibraryPath = Join-Path $NativeRuntimeRoot $Library
+            if (!(Test-Path -LiteralPath $LibraryPath -PathType Leaf)) {
+                throw "缺少原生后端 VC 运行库：$LibraryPath"
+            }
+            Get-Item -LiteralPath $LibraryPath
+        }
+    )
+    if ($Windows7) {
+        $UcrtBase = Join-Path $NativeRuntimeRoot 'ucrtbase.dll'
+        $UcrtBridge = Join-Path $NativeRuntimeRoot 'api-ms-win-crt-runtime-l1-1-0.dll'
+        if (!(Test-Path -LiteralPath $UcrtBase -PathType Leaf) -or !(Test-Path -LiteralPath $UcrtBridge -PathType Leaf)) {
+            throw "Win7 Liberica JDK 缺少随附的 Universal CRT：$NativeRuntimeRoot"
+        }
+        # 使用 Win7 版 JDK 随附的 UCRT 和 APISet，放在原生后端 EXE 旁。
+        $NativeRuntimeFiles += Get-Item -LiteralPath $UcrtBase
+        $NativeRuntimeFiles += Get-ChildItem -LiteralPath $NativeRuntimeRoot -Filter 'api-ms-win-*.dll' -File
+    }
+}
+
 $env:JAVA_HOME = $JdkHome
 $env:Path = "$(Join-Path $JdkHome 'bin');$env:Path"
 
 Push-Location $ProjectRoot
 try {
     $env:JARPATCH_LEGACY_WINDOWS = if ($Windows7) { '1' } else { $null }
-    & $Maven '-Dmaven.test.skip=true' package
+    if ($NativeBackend) {
+        # Native Image 工具链只用于构建，发布包内的 JDK 仍供补丁编译使用。
+        $PreviousPath = $env:Path
+        $PreviousGraalVmHome = $env:GRAALVM_HOME
+        try {
+            $env:GRAALVM_HOME = $NativeImageHome
+            $env:JAVA_HOME = $NativeImageHome
+            $env:Path = "$(Join-Path $NativeImageHome 'bin');$PreviousPath"
+            & $Maven -pl backend '-Pnative' '-Dmaven.test.skip=true' clean package
+        }
+        finally {
+            $env:GRAALVM_HOME = $PreviousGraalVmHome
+            $env:JAVA_HOME = $JdkHome
+            $env:Path = $PreviousPath
+        }
+    }
+    else {
+        & $Maven '-Dmaven.test.skip=true' package
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Maven 后端构建失败，退出码：$LASTEXITCODE"
     }
@@ -270,7 +370,14 @@ try {
     Remove-BuildDirectory $BackendResourceRoot
     Remove-BuildDirectory $RuntimeResourceRoot
     New-Item -ItemType Directory -Path $BackendResourceRoot -Force | Out-Null
-    Copy-Item -LiteralPath $BackendJar -Destination (Join-Path $BackendResourceRoot 'jarpatch-studio-backend.jar')
+    $PackagedBackend = Join-Path $BackendResourceRoot $BackendArtifactName
+    Copy-Item -LiteralPath $BackendArtifact -Destination $PackagedBackend
+    if ($NativeBackend) {
+        foreach ($Library in $NativeRuntimeFiles) {
+            Copy-Item -LiteralPath $Library.FullName -Destination $BackendResourceRoot
+        }
+        Invoke-CodeSigning -Executables (Get-Item -LiteralPath $PackagedBackend)
+    }
 
     $RuntimeModules = @(
         'java.base',
@@ -303,9 +410,18 @@ try {
     Remove-BuildDirectory $FrontendDistRoot
     if ($Windows7) {
         Install-BundledLanguageServer
+        $Win7ArtifactName = if ($NativeBackend) {
+            'JarPatch-Studio-${version}-Windows7-Native-${arch}.${ext}'
+        } else {
+            'JarPatch-Studio-${version}-Windows7-${arch}.${ext}'
+        }
         & $Npm --prefix $FrontendRoot run dist:win -- '--config.electronVersion=22.3.27' `
             "--config.directories.output=$FrontendDistRoot" `
-            '--config.win.artifactName=JarPatch-Studio-${version}-Windows7-${arch}.${ext}'
+            "--config.win.artifactName=$Win7ArtifactName"
+    }
+    elseif ($NativeBackend) {
+        & $Npm --prefix $FrontendRoot run dist:win -- "--config.directories.output=$FrontendDistRoot" `
+            '--config.win.artifactName=JarPatch-Studio-${version}-Windows-Native-${arch}.${ext}'
     }
     else {
         & $Npm --prefix $FrontendRoot run dist:win
@@ -313,26 +429,46 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Windows 发布包构建失败，退出码：$LASTEXITCODE"
     }
-    Invoke-PackagedSmokeCheck (Join-Path $FrontendDistRoot 'win-unpacked\jarpatch-studio.exe')
+    $PackagedAppRoot = Join-Path $FrontendDistRoot 'win-unpacked'
+    $PackagedExecutablePath = Join-Path $PackagedAppRoot 'jarpatch-studio.exe'
+    if ($NativeBackend) {
+        $PackagedBackendDirectory = Join-Path $PackagedAppRoot 'resources\backend'
+        foreach ($FileName in (@($BackendArtifactName) + $NativeRuntimeFiles.Name)) {
+            if (!(Test-Path -LiteralPath (Join-Path $PackagedBackendDirectory $FileName) -PathType Leaf)) {
+                throw "原生发布包缺少后端文件：$FileName"
+            }
+        }
+        if (Test-Path -LiteralPath (Join-Path $PackagedBackendDirectory 'jarpatch-studio-backend.jar')) {
+            throw '原生发布包包含不应交付的后端 JAR。'
+        }
+    }
+    Invoke-PackagedSmokeCheck $PackagedExecutablePath
+
+    $PortableExecutables = @(Get-ChildItem -LiteralPath $FrontendDistRoot -Filter '*.exe' -File)
+    if ($PortableExecutables.Count -ne 1) {
+        throw '无法唯一确定单文件应用 EXE。'
+    }
+    $PortableExecutable = $PortableExecutables[0]
+    $DiagnosticTarget = if ($Windows7) { 'windows7' } else { 'windows' }
+    & $Node (Join-Path $ProjectRoot 'scripts\build-startup-diagnostics.js') $FrontendDistRoot $PortableExecutable.Name $DiagnosticTarget
+    if ($LASTEXITCODE -ne 0) {
+        throw "独立启动诊断器构建失败，退出码：$LASTEXITCODE"
+    }
+    $ReleaseExecutables = @(Get-ChildItem -LiteralPath $FrontendDistRoot -Filter '*.exe' -File)
+    Invoke-CodeSigning -Executables ($ReleaseExecutables + (Get-Item -LiteralPath $PackagedExecutablePath))
+
+    # 归档已验收的应用目录，签名构建中 ZIP 内的应用 EXE 也包含有效签名。
+    $FastStartArchive = Join-Path $FrontendDistRoot "$($PortableExecutable.BaseName)-FastStart.zip"
+    [System.IO.Compression.ZipFile]::CreateFromDirectory(
+        $PackagedAppRoot, $FastStartArchive, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 
     Remove-ReleaseDirectory
     New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
     $Artifacts = Get-ChildItem -LiteralPath $FrontendDistRoot -File |
-        Where-Object { $_.Extension -in @('.exe', '.blockmap') }
+        Where-Object { $_.Extension -in @('.exe', '.blockmap', '.zip') }
     foreach ($Artifact in $Artifacts) {
         Copy-Item -LiteralPath $Artifact.FullName -Destination (Join-Path $ReleaseRoot $Artifact.Name) -Force
     }
-    $ApplicationExecutables = @(Get-ChildItem -LiteralPath $ReleaseRoot -Filter '*.exe' -File)
-    if ($ApplicationExecutables.Count -ne 1) {
-        throw '无法唯一确定需要诊断的应用 EXE。'
-    }
-    $DiagnosticTarget = if ($Windows7) { 'windows7' } else { 'windows' }
-    & $Node (Join-Path $ProjectRoot 'scripts\build-startup-diagnostics.js') $ReleaseRoot $ApplicationExecutables[0].Name $DiagnosticTarget
-    if ($LASTEXITCODE -ne 0) {
-        throw "独立启动诊断器构建失败，退出码：$LASTEXITCODE"
-    }
-    $ReleaseExecutables = @(Get-ChildItem -LiteralPath $ReleaseRoot -Filter '*.exe' -File)
-    Invoke-CodeSigning -Executables $ReleaseExecutables
     $SigningStatus = if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) { 'NOT_SIGNED' } else { 'VALID' }
 
     $JavaVersionLine = (($JavaVersionOutput -split "`r?`n")[0]).ToString()
@@ -340,18 +476,26 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Windows 发布清单生成失败，退出码：$LASTEXITCODE"
     }
-    if ($Windows7) {
+    if ($NativeBackend -or $Windows7) {
         $ManifestPath = Join-Path $ReleaseRoot 'release-manifest.json'
         $Manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
-        $Manifest | Add-Member -NotePropertyName 'compatibility' -NotePropertyValue ([ordered]@{
-            target = 'Windows 7 SP1 x64'
-            electronVersion = '22.3.27'
-            chromiumMajor = 108
-            jdkVendor = 'BellSoft Liberica'
-            jdtLsVersion = $JdtLsVersion
-            targetOsVerified = $false
-            note = '构建主机启动检查不能替代真实 Win7 验收；Electron 22 已停止维护。'
-        })
+        if ($NativeBackend) {
+            $Manifest | Add-Member -NotePropertyName 'backend' -NotePropertyValue ([ordered]@{
+                mode = 'native'
+                nativeImageVersion = $NativeImageVersion
+            })
+        }
+        if ($Windows7) {
+            $Manifest | Add-Member -NotePropertyName 'compatibility' -NotePropertyValue ([ordered]@{
+                target = 'Windows 7 SP1 x64'
+                electronVersion = '22.3.27'
+                chromiumMajor = 108
+                jdkVendor = 'BellSoft Liberica'
+                jdtLsVersion = $JdtLsVersion
+                targetOsVerified = $false
+                note = '构建主机启动检查不能替代真实 Win7 验收；Electron 22 已停止维护。'
+            })
+        }
         $Manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ManifestPath -Encoding utf8
     }
     Write-Host "Windows 发布包已生成：$ReleaseRoot"

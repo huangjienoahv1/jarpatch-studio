@@ -27,7 +27,7 @@ pwsh.exe -NoLogo -NoProfile -File .\build.ps1 -RequireSigning
 
 `build.ps1` 使用 Windows SDK `signtool.exe` 以 SHA-256 签名，然后通过 `Get-AuthenticodeSignature` 要求状态为 `Valid`。没有证书时可省略 `-RequireSigning` 生成内部验证包，此时清单必须记录 `NOT_SIGNED`，不能作为公开可信发布者版本。
 
-归档材料：Windows 版本、架构、EXE、SHA-256、证书主题与指纹、时间戳、清单、验收报告。
+发布快速启动包时，解压至独立目录，确认其中的 `jarpatch-studio.exe` 启动正常。签名构建在生成 ZIP 前签名并验证该 EXE。归档时同时保留 EXE、快速启动 ZIP、各文件 SHA-256、Windows 版本和架构、证书主题与指纹、时间戳、清单和验收报告。
 
 ## 3. macOS Developer ID 与公证
 

@@ -20,6 +20,7 @@ const BACKEND_PORT = 18765;
 const BACKEND_HOST = '127.0.0.1';
 const BACKEND_BASE_URL = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
 const BACKEND_JAR_NAME = 'jarpatch-studio-backend.jar';
+const BACKEND_NATIVE_EXE_NAME = 'jarpatch-studio-backend.exe';
 const BUNDLED_RUNTIME_DIRECTORY = 'runtime';
 const JAVAC_EXECUTABLE_NAME = process.platform === 'win32' ? 'javac.exe' : 'javac';
 const BACKEND_READY_TIMEOUT_MS = 20000;
@@ -121,20 +122,30 @@ function createWindow() {
  */
 function startBackend() {
   const backendJar = resolveBackendJarPath();
-  if (!fs.existsSync(backendJar)) {
+  const backendDirectory = path.dirname(backendJar);
+  const nativeExecutable = path.join(backendDirectory, BACKEND_NATIVE_EXE_NAME);
+  const nativeBackend = app.isPackaged && process.platform === 'win32' && fs.existsSync(nativeExecutable);
+  if (!nativeBackend && !fs.existsSync(backendJar)) {
     throw new Error(`未找到后端程序：${backendJar}`);
   }
   backendToken = crypto.randomBytes(32).toString('hex');
   startupDiagnostics.protectSecret(backendToken);
   backendInstanceId = crypto.randomUUID();
   backendLogPath = resolveBackendLogPath();
-  const javaExecutable = resolveJavaExecutable();
-  startupDiagnostics.write('BACKEND_LAUNCH', { javaExecutable, backendJar,
-    bundledJavacExists: fs.existsSync(path.join(path.dirname(javaExecutable), JAVAC_EXECUTABLE_NAME)) });
-  backendProcess = spawn(javaExecutable, ['-jar', backendJar], {
-    cwd: path.dirname(backendJar),
+  const javaHome = path.join(process.resourcesPath, BUNDLED_RUNTIME_DIRECTORY);
+  const executable = nativeBackend ? nativeExecutable : resolveJavaExecutable();
+  const args = nativeBackend ? [`-Djava.home=${javaHome}`] : ['-jar', backendJar];
+  const launchDetails = nativeBackend
+    ? { mode: 'native', nativeExecutable, bundledJavaHome: javaHome,
+      bundledJavacExists: fs.existsSync(path.join(javaHome, 'bin', JAVAC_EXECUTABLE_NAME)) }
+    : { mode: 'jvm', javaExecutable: executable, backendJar,
+      bundledJavacExists: fs.existsSync(path.join(path.dirname(executable), JAVAC_EXECUTABLE_NAME)) };
+  startupDiagnostics.write('BACKEND_LAUNCH', launchDetails);
+  backendProcess = spawn(executable, args, {
+    cwd: backendDirectory,
     env: {
       ...process.env,
+      ...(nativeBackend ? { JAVA_HOME: javaHome } : {}),
       [ENV_AUTH_TOKEN]: backendToken,
       [ENV_INSTANCE_ID]: backendInstanceId,
       [ENV_BACKEND_LOG_FILE]: backendLogPath

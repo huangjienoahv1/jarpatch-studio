@@ -48,11 +48,21 @@
   background: var(--surface);
 }
 
+.help-header-copy {
+  min-width: 0;
+}
+
 .help-header h2 {
   margin: 0;
   font-size: 17px;
   font-weight: 700;
   color: var(--text);
+}
+
+.help-header-subtitle {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .help-header .tool-btn {
@@ -61,8 +71,89 @@
 
 .help-body {
   display: grid;
-  grid-template-columns: 196px minmax(0, 1fr);
+  grid-template-columns: 236px minmax(0, 1fr);
   min-height: 0;
+}
+
+.help-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: var(--bg-sidebar);
+}
+
+.help-search-box {
+  padding: 12px 10px 10px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.help-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.help-search-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.help-search-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 28px 0 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.help-search-input::placeholder {
+  color: var(--muted);
+}
+
+.help-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.help-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.help-search-clear {
+  position: absolute;
+  right: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.help-search-clear:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.help-search-status {
+  margin: 6px 2px 0;
+  font-size: 11.5px;
+  color: var(--muted);
 }
 
 .help-navigation,
@@ -73,37 +164,58 @@
 }
 
 .help-navigation {
-  padding: 14px 10px;
-  border-right: 1px solid var(--line);
-  background: var(--bg-sidebar);
+  flex: 1 1 auto;
+  padding: 10px 10px 16px;
+}
+
+.help-nav-group + .help-nav-group {
+  margin-top: 12px;
 }
 
 .help-navigation h3 {
-  margin: 14px 8px 4px;
+  margin: 0 8px 4px;
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.help-navigation h3:first-child {
-  margin-top: 0;
 }
 
 .help-navigation a {
+  position: relative;
   display: block;
-  padding: 6px 9px;
+  padding: 6px 9px 6px 11px;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12.5px;
+  line-height: 1.4;
   text-decoration: none;
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
+.help-navigation a + a {
+  margin-top: 2px;
+}
+
 .help-navigation a:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.help-navigation a.is-active {
   background: var(--accent-soft);
   color: var(--accent-dark);
+  font-weight: 600;
+}
+
+.help-navigation a.is-active::before {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 2px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  content: '';
 }
 
 .help-dialog :focus-visible {
@@ -112,11 +224,26 @@
 }
 
 .help-content {
-  padding: 0 clamp(18px, 3vw, 38px) 28px;
+  padding: 0 clamp(18px, 3vw, 38px) 32px;
   font-size: 13.5px;
   line-height: 1.72;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+.help-empty-state {
+  margin: 36px 0;
+  padding: 28px 20px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  text-align: center;
+}
+
+.help-empty-state p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13.5px;
 }
 
 .help-content section {
@@ -129,11 +256,41 @@
 }
 
 .help-content h3 {
-  margin: 0 0 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
   font-size: 17px;
   font-weight: 700;
   color: var(--text);
-  scroll-margin-top: 14px;
+  scroll-margin-top: 16px;
+}
+
+.help-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+
+.help-tag-admin {
+  border-color: var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.help-tag-runtime {
+  border-color: var(--runtime-border);
+  background: var(--runtime-soft);
+  color: var(--runtime-tint);
 }
 
 .help-content strong {
@@ -153,10 +310,14 @@
 }
 
 .help-content li + li {
-  margin-top: 4px;
+  margin-top: 5px;
 }
 
 .help-content dt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   font-weight: 700;
   color: var(--text);
 }
@@ -212,6 +373,12 @@
   font-weight: 600;
 }
 
+.help-flow-runtime li {
+  border-color: var(--runtime-border);
+  background: var(--runtime-soft);
+  color: var(--runtime-tint);
+}
+
 .help-flow li + li {
   margin-top: 0;
 }
@@ -230,12 +397,13 @@
 
 .help-map {
   display: grid;
-  grid-template-columns: 1fr 1fr 2fr 1fr;
+  grid-template-columns: 1fr 1.1fr 2fr 0.9fr;
   grid-template-areas:
     'projects toolbar toolbar toolbar'
     'projects task task task'
     'projects tree editor analysis'
-    'projects logs logs logs';
+    'projects logs logs logs'
+    'status status status status';
   gap: 6px;
 }
 
@@ -250,6 +418,13 @@
   text-align: center;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.4;
+}
+
+.help-map div span {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
 }
 
 .help-map .help-map-projects {
@@ -274,7 +449,7 @@
 
 .help-map .help-map-editor {
   grid-area: editor;
-  min-height: 64px;
+  min-height: 68px;
   background: var(--editor-bg);
   color: var(--text);
   border-color: var(--accent-border);
@@ -286,6 +461,49 @@
 
 .help-map .help-map-logs {
   grid-area: logs;
+}
+
+.help-map .help-map-status {
+  grid-area: status;
+  padding: 6px 10px;
+  background: var(--editor-status-bg);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.help-table-wrap {
+  margin: 12px 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.help-table th,
+.help-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+
+.help-table th {
+  background: var(--bg-sidebar);
+  color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.help-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 .help-content .help-note {
@@ -303,25 +521,42 @@
   background: var(--warn-soft);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 780px) {
   .help-body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .help-navigation {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 8px;
-    align-items: baseline;
-    max-height: 23vh;
+  .help-sidebar {
+    max-height: 30vh;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
 
+  .help-navigation {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    align-items: flex-start;
+  }
+
+  .help-nav-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+  }
+
+  .help-nav-group + .help-nav-group {
+    margin-top: 0;
+  }
+
   .help-navigation h3 {
-    flex-basis: 100%;
-    margin-top: 8px;
+    margin: 0 4px 0 0;
+  }
+
+  .help-navigation a + a {
+    margin-top: 0;
   }
 
   .help-content .help-flow {
@@ -334,5 +569,16 @@
     top: -11px;
     left: calc(50% - 4px);
     transform: rotate(135deg);
+  }
+
+  .help-map {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      'toolbar toolbar'
+      'task task'
+      'projects tree'
+      'editor editor'
+      'analysis logs'
+      'status status';
   }
 }

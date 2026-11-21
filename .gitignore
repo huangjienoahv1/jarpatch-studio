@@ -10,6 +10,8 @@ out/
 frontend/backend/
 frontend/runtime/
 frontend/dist-win7/
+frontend/dist-win7-native/
+frontend/dist-native/
 release/
 samples/acceptance/output/
 samples/acceptance/work/

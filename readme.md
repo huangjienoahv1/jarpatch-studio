@@ -426,7 +426,17 @@ pwsh.exe -NoLogo -NoProfile -File .\build.ps1
 
 内网使用时，传入 `-BundleJdk17 -JdkHome '完整 JDK 17 目录'` 构建。该模式将完整 JDK 17（含 `javac`、`jar` 和许可证）内置到免安装 EXE，双击即可使用内置 Java 启动和编译 Java 17 原包，无需在目标电脑安装 JDK 或设置 `JAVA_HOME`。软件中已保存的编译 JDK 配置仍优先，迁移后应确认原配置路径有效。其他 Java 目标版本仍遵循已有编译器版本校验；JDT LS 和 AI 为可选能力，不包含在该离线包中。
 
-Windows 免安装包为每次启动使用独立临时解压目录，防止重复启动时清理正在运行实例的 JDK 和其他资源。应用仍采用单实例运行，第二次启动会激活已有窗口。
+Windows 构建同时生成单文件 EXE 和以 `-FastStart.zip` 结尾的快速启动包。单文件 EXE 每次启动解压到独立的临时目录，退出后清理。经常使用时，可将快速启动包完整解压到独立目录，之后双击解压目录中的 `jarpatch-studio.exe`，可以为它创建快捷方式。两种包都免安装，使用相同的用户数据和应用配置，重复启动会激活已有窗口。
+
+### 构建 Windows 原生后端验证包
+
+在配置了 MSVC x64 和 Windows SDK 的 Visual Studio 2022 开发者命令行中，用 PowerShell 7 运行以下命令。`-NativeImageHome` 指向带有 `native-image` 的 GraalVM JDK 或 Liberica Native Image Kit，`-JdkHome` 指向用于补丁编译的完整 Windows x64 JDK 17。
+
+```powershell
+pwsh.exe -NoLogo -NoProfile -File .\build.ps1 -NativeBackend -NativeImageHome 'C:\Tools\GraalVM' -JdkHome 'C:\Tools\JDK17'
+```
+
+产物写入 `release/windows-native/`，同时提供单文件 EXE 和快速启动 ZIP。桌面端启动包内的 `jarpatch-studio-backend.exe`，所需的 VC 运行库随应用提供，发布包不包含后端 JAR。编译用户的 Java 改动仍使用随包提供的 JDK 17，已保存的编译 JDK 配置优先。标准 Windows x64 原生包与 Win7 SP1 x64 原生包使用各自的入口和输出目录。原生机器码仍可被逆向分析，Electron 前端 JavaScript 仍随包交付。
 
 ### 构建 Win7 SP1 64 位兼容包
 
@@ -448,6 +458,16 @@ pwsh.exe -NoLogo -NoProfile -File .\build.ps1 -Windows7 -JdkHome 'C:\Tools\Liber
 
 [Electron 22 已停止维护](https://releases.electronjs.org/release/v22.3.27)，该包用于确有旧系统约束的环境；[Liberica 平台要求](https://bell-sw.com/pages/supported-configurations/)列出 Win7 SP1。构建主机上的启动、编译验收不能代替真实 Win7 验收，发布清单明确标记 `targetOsVerified: false`。发布包附带 [Eclipse JDT LS 1.55.0](https://github.com/eclipse-jdtls/eclipse.jdt.ls/tree/v1.55.0) 并共用内置 JDK 21。构建机首次打包会下载 Eclipse 官方发布包并校验 SHA-256，后续可复用缓存。基础编辑、补丁编译和 Java 代码智能可离线使用。
 
+### 构建 Win7 SP1 x64 原生后端包
+
+在较新的 Windows 构建机上双击 `build-win7-native.cmd`。脚本会探测 Visual Studio 2022 的 MSVC x64 和 Windows SDK。默认从 `%TEMP%\jarpatch-win7-dependencies\` 读取 `jdk-21` 和 `nik-17`。也可分别通过 `JARPATCH_WIN7_JDK_HOME` 和 `NIK_HOME`（或 `GRAALVM_HOME`）指定工具链，或直接传参：
+
+```powershell
+.\build-win7-native.cmd 'C:\Tools\LibericaJDK21' 'C:\Tools\LibericaNIK17'
+```
+
+`release/windows7-native/` 下的 EXE 与快启 ZIP 使用 Electron 22.3.27 和内置 JDK 21、JDT LS。后端由基于 JDK 17 的 Liberica NIK 23.0 编译，复用 Win7 版 Liberica JDK 21 随附的 VC 和 Universal CRT 运行库。该包面向 Win7 SP1 x64，构建清单中的 `targetOsVerified` 反映是否已完成目标系统验收。原 `build-win7.cmd` 继续构建 JVM 兼容包。
+
 ### 启动失败诊断
 
 Windows 发布目录同时提供小型原生 `JarPatch-Startup-Diagnostics.exe`。将它和同一发布目录的应用 EXE 放在一起，双击诊断器；应用退出或启动失败后，会自动打开诊断报告和日志目录。诊断器不依赖目标机器的 Java、Node.js、.NET 或 PowerShell，不安装软件、不修改系统运行库。
@@ -460,7 +480,7 @@ Windows 发布目录同时提供小型原生 `JarPatch-Startup-Diagnostics.exe`�
 
 ## 使用流程
 
-顶部工具栏的「帮助」可以离线打开图文手册。通过目录查看每个按钮的用途、操作步骤和注意事项，也可以按快速入门的流程图修改配置或 Java 源码。
+顶部工具栏的「帮助」可以离线打开图文手册。手册按「入门与账号 → 本地改包流程 → 运行时工作台 → 配置、维护与排错」四组场景组织，内置工作台示意图、快捷键与角色权限速查表、目录关键词检索和滚动阅读高亮。
 
 1. 打开 JarPatch Studio。
 2. 点击右上角“开发能力”：
@@ -712,3 +732,16 @@ Java 9 之后部分依赖 Jar 会包含 `module-info.class`，它是模块描述
 
 - **历史遗留控件随主框架同步盘点**：本次问题的根源是主编辑器升级到 Monaco 且后续切双主题后，辅助视图 `#unicodePreview` 仍停留在早期 `<textarea>` 时代。后续每次做主编辑器或主题升级时，应同步核查差异视图、AI 预览、运行时反编译和中文预览等全部代码展示承载区，避免出现体验断层。
 - **运行时工作台在线反编译同样支持中文预览**：当前「中文预览」位于主工作区编辑器，后续若远程容器在线反编译出的字节码中也频繁出现 `\uXXXX` 中文日志，可复用同一套 `decodeChineseUnicodeEscapes` 与只读预览能力提供一键切换。
+
+## 2026-11-21 离线帮助手册全面重构与阅读体验优化
+
+### 已完成内容
+
+- **按使用场景重排四组 14 个章节**：将原先按早期顶部按钮平铺的帮助手册重构为「入门与账号」「本地改包流程」「运行时工作台」「配置、维护与排错」四个分组，完整补齐此前缺失的 **运行时工作台**（单行工作条、连接配置、Docker/Kubernetes、容器日志、类与方法、在线反编译与热替换、JVM 检查、请求测试、部署包对照、回归验证、性能采集、环境与集成、导出诊断报告）及 **本地登录与角色权限**（默认管理员与首次改密、管理员/普通用户权限对比、用户管理）。
+- **与当前界面入口和交互细节 100% 对齐**：同步修正已收纳进右上角「更多」下拉菜单的项目设置、项目历史与校验、工作区清理、孤立工作区、错误排查向导与脱敏诊断入口；补全工作台 8 区域示意图（含底部 IDE 状态栏与深浅色主题切换）、常用快捷键速查表、文件树包路径合并、多文件标签栏、状态栏编码切换、升级版只读 Monaco「中文预览」以及三标签页「开发能力」（含 Win7 内置 JDT LS 与内网免密 AI 接入）。
+- **轻量阅读体验增强（100% 兼容 Chromium 108 / Win7）**：在左侧目录栏顶部新增多关键词实时筛选（同时匹配章节正文与别名关键词，自动隐藏空分组并展示匹配数量与空态重置），新增正文滚动与左侧目录激活态联动高亮（`requestAnimationFrame` 节流并处理目录点击与底部短章节边界），并支持点击遮罩关闭弹窗。
+
+### 反思与后续可继续改进方向
+
+- **手册内容随功能迭代同步检查**：本次帮助手册滞后源于多轮大功能（运行时工作台、认证权限、顶部栏重构、编辑器升级）上线时未将 `#helpDialog` 纳入发布检查清单；后续新增一级入口或权限变更时，应同步核对帮助手册对应章节与关键词索引。
+- **支持上下文直达定位**：后续可在「开发能力」「运行时工作台」「排错向导」等复杂弹窗标题栏补充轻量 `?` 入口，点击直接打开帮助手册并定位到对应章节。

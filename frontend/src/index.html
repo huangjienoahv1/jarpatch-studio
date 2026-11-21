@@ -417,199 +417,343 @@
   </dialog>
   <dialog id="helpDialog" class="help-dialog" aria-labelledby="helpDialogTitle">
     <header class="help-header">
-      <h2 id="helpDialogTitle">JarPatch Studio 使用手册</h2>
+      <div class="help-header-copy">
+        <h2 id="helpDialogTitle">JarPatch Studio 使用手册</h2>
+        <p class="help-header-subtitle">本地 Jar / War 反编译补丁 · 远程容器诊断与热替换 · 离线图文指南</p>
+      </div>
       <form method="dialog">
         <button class="tool-btn" type="submit" autofocus>关闭</button>
       </form>
     </header>
     <div class="help-body">
-      <nav id="helpNavigation" class="help-navigation" aria-label="手册目录">
-        <h3>入门</h3>
-        <a href="#help-start">快速入门</a>
-        <a href="#help-workbench">认识工作台</a>
-        <a href="#help-import">打开 Jar/War</a>
-        <a href="#help-editor">文件树与编辑器</a>
-        <h3>顶部操作</h3>
-        <a href="#help-analyze">分析</a>
-        <a href="#help-diff">差异</a>
-        <a href="#help-compile">编译</a>
-        <a href="#help-export">导出</a>
-        <a href="#help-project-settings">项目设置</a>
-        <a href="#help-history">项目历史</a>
-        <a href="#help-cleanup">清理工作区</a>
-        <a href="#help-orphans">孤立工作区</a>
-        <a href="#help-error-guide">排错向导</a>
-        <a href="#help-diagnostics">导出诊断</a>
-        <a href="#help-development">开发能力</a>
-        <h3>查看结果</h3>
-        <a href="#help-tasks">任务状态与日志</a>
-      </nav>
-      <div class="help-content" role="region" aria-label="手册正文">
-        <section>
+      <aside class="help-sidebar" aria-label="手册搜索与目录">
+        <div class="help-search-box">
+          <div class="help-search-wrap">
+            <svg class="help-search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="helpSearchInput" class="help-search-input" type="search" placeholder="搜索功能、按钮或关键词..." aria-label="搜索手册内容">
+            <button id="helpSearchClearBtn" class="help-search-clear" type="button" aria-label="清空手册搜索" title="清空搜索" hidden>
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <p id="helpSearchStatus" class="help-search-status" role="status" aria-live="polite" hidden></p>
+        </div>
+        <nav id="helpNavigation" class="help-navigation" aria-label="手册目录">
+          <div class="help-nav-group">
+            <h3>入门与账号</h3>
+            <a href="#help-start" class="is-active" aria-current="location">快速入门</a>
+            <a href="#help-workbench">工作台与快捷键</a>
+            <a href="#help-auth">登录、账号与权限</a>
+          </div>
+          <div class="help-nav-group">
+            <h3>本地改包流程</h3>
+            <a href="#help-import">打开 Jar/War 与历史</a>
+            <a href="#help-editor">文件浏览、编辑与预览</a>
+            <a href="#help-analyze">分析与风险</a>
+            <a href="#help-compile">编译</a>
+            <a href="#help-diff-export">差异确认与导出</a>
+          </div>
+          <div class="help-nav-group">
+            <h3>运行时工作台</h3>
+            <a href="#help-runtime-connect">连接容器与 Arthas</a>
+            <a href="#help-runtime-diagnose">日志、反编译与热替换</a>
+            <a href="#help-runtime-verify">请求、对照、回归与性能</a>
+          </div>
+          <div class="help-nav-group">
+            <h3>配置、维护与排错</h3>
+            <a href="#help-development">开发能力配置</a>
+            <a href="#help-project-more">项目设置与工作区维护</a>
+            <a href="#help-troubleshoot">任务日志与排错诊断</a>
+          </div>
+        </nav>
+      </aside>
+      <div id="helpContent" class="help-content" role="region" aria-label="手册正文">
+        <div id="helpSearchEmpty" class="help-empty-state" hidden>
+          <p>没有找到与当前关键词匹配的手册章节。</p>
+          <button id="helpSearchResetBtn" class="tool-btn" type="button">清空筛选，查看全部章节</button>
+        </div>
+
+        <section data-help-section="help-start" data-help-keywords="入门 流程 改配置 改代码 改java yaml properties 热替换 快速开始">
           <h3 id="help-start" tabindex="-1">快速入门</h3>
-          <p>JarPatch Studio 将 Jar 或 War 导入本地工作区。你可以查看包结构、编辑反编译后的 Java 和文本资源，再导出一个新包。导入后先点「分析」查看包类型和签名风险。</p>
+          <p>JarPatch Studio 提供两类核心能力：<strong>本地改包</strong>（对普通 Jar、Spring Boot Jar、War 解压、反编译、修改、编译并安全导出新包）与 <strong>运行时工作台</strong>（远程连接 Linux Docker 或 Kubernetes 容器，查看日志、在线反编译、调试接口与执行热替换）。</p>
           <figure>
-            <figcaption>只改 YAML、properties 等资源文件</figcaption>
+            <figcaption>场景一：只改 YAML、properties 等配置或文本资源</figcaption>
             <ol class="help-flow" role="list">
-              <li>打开包</li><li>编辑并保存</li><li>确认差异</li><li>导出新包</li>
+              <li>打开 Jar / War</li><li>编辑并保存</li><li>确认差异</li><li>导出新包</li>
             </ol>
           </figure>
           <figure>
-            <figcaption>修改 Java 源码</figcaption>
+            <figcaption>场景二：修改 Java 源码并重新打包</figcaption>
             <ol class="help-flow" role="list">
-              <li>打开包</li><li>编辑并保存</li><li>编译</li><li>确认差异</li><li>导出新包</li>
+              <li>打开 Jar / War</li><li>编辑并保存</li><li>编译</li><li>确认差异</li><li>导出新包</li>
             </ol>
           </figure>
-          <p class="help-note">例如修改 Spring Boot 的 <code>application-dev.yaml</code>，可从 <code>extracted/BOOT-INF/classes</code> 找到文件。保存后在「差异」展开该文件检查变更，再导出到新路径。只修改资源文件时，编译步骤可跳过。</p>
+          <figure>
+            <figcaption>场景三：远程诊断线上 / 测试容器与热替换</figcaption>
+            <ol class="help-flow help-flow-runtime" role="list">
+              <li>运行时工作台</li><li>选服务器加载容器</li><li>连接 Arthas</li><li>排查或热替换</li><li>释放 Arthas</li>
+            </ol>
+          </figure>
+          <p class="help-note">例如修改 Spring Boot 的 <code>application-dev.yaml</code>，可直接从 <code>extracted/BOOT-INF/classes</code> 打开文件，保存后点「差异」确认再导出，无需编译。所有导出均写入新路径，不会覆盖原包。</p>
         </section>
 
-        <section>
-          <h3 id="help-workbench" tabindex="-1">认识工作台</h3>
+        <section data-help-section="help-workbench" data-help-keywords="界面 布局 顶部工具栏 菜单 更多 主题 深色 浅色 状态栏 快捷键 ctrl+s alt+\ enter esc">
+          <h3 id="help-workbench" tabindex="-1">工作台与快捷键</h3>
           <figure>
-            <figcaption>工作台区域示意图</figcaption>
+            <figcaption>主工作台区域示意图</figcaption>
             <div class="help-map" aria-hidden="true">
-              <div class="help-map-projects">项目栏</div>
-              <div class="help-map-toolbar">项目名称与顶部操作栏</div>
-              <div class="help-map-task">任务状态 · 取消任务</div>
-              <div class="help-map-tree">文件树</div>
-              <div class="help-map-editor">编辑器</div>
-              <div class="help-map-analysis">分析与风险</div>
-              <div class="help-map-logs">执行日志</div>
+              <div class="help-map-projects">左侧项目栏<br><span>导入 · 筛选历史</span></div>
+              <div class="help-map-toolbar">顶部操作栏：核心工作流 · 运行时 / 开发能力 / 更多 · 主题 / 帮助 / 账号</div>
+              <div class="help-map-task">任务状态栏 · 实时进度 · 取消任务</div>
+              <div class="help-map-tree">文件浏览器<br><span>sources / extracted</span></div>
+              <div class="help-map-editor">多标签代码编辑器<br><span>面包屑 · 中文预览 · AI</span></div>
+              <div class="help-map-analysis">分析与风险<br><span>默认收起</span></div>
+              <div class="help-map-logs">执行日志（可拖拽高度 · 复制 · 清空 · 收起）</div>
+              <div class="help-map-status">底部 IDE 状态栏：Java 智能状态 · 行列号 · 语言 · 文件编码 · 当前账号</div>
             </div>
           </figure>
           <ul>
-            <li><strong>左侧项目栏</strong>用于导入包或切换历史项目。可用收起按钮给编辑器腾出空间。</li>
-            <li><strong>顶部操作栏</strong>针对当前项目执行分析、编译、导出等操作。项目名称下方显示包类型和工作区路径。「帮助」也可以在打开包之前使用。</li>
-            <li><strong>中间文件树与编辑器</strong>用于定位和修改文件。拖动两者之间的分隔条可调整文件树宽度。</li>
-            <li><strong>右侧分析与风险</strong>用于展开包结构、依赖数量和风险项。底部「执行日志」显示本次操作的进度和错误。</li>
+            <li><strong>顶部操作栏</strong>分为三组：左侧为当前项目的核心工作流（<code>分析</code>、<code>编译</code>、<code>差异</code>、<code>导出</code>）；中间为扩展与维护入口（<code>运行时工作台</code>、仅管理员可见的 <code>开发能力</code>、以及收纳了项目设置/历史/清理/排错/诊断的 <code>更多</code> 下拉菜单）；右侧为 <code>深浅色主题切换</code>、<code>帮助</code> 与 <code>账号菜单</code>。</li>
+            <li><strong>左侧项目栏</strong>支持导入包、按关键词筛选历史项目，收起后仍可通过左上角 <code>+</code> 快捷按钮打开新包。</li>
+            <li><strong>中间工作区</strong>支持拖拽文件树与编辑器之间的分隔条调整宽度；右侧「分析与风险」默认收起为窄按钮，不挤占代码视野。</li>
+            <li><strong>底部状态栏</strong>集中展示 Java 智能状态灯、光标行列号、当前文件语言、资源文件编码切换与当前登录用户。</li>
           </ul>
+          <div class="help-table-wrap">
+            <table class="help-table">
+              <thead>
+                <tr>
+                  <th>快捷键</th>
+                  <th>适用位置</th>
+                  <th>作用说明</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><kbd>Ctrl+S</kbd> / <kbd>⌘S</kbd></td>
+                  <td>主工作台编辑器</td>
+                  <td>保存当前打开的源码或资源文件到工作区</td>
+                </tr>
+                <tr>
+                  <td><kbd>Alt+\</kbd></td>
+                  <td>主工作台编辑器</td>
+                  <td>显式触发一次 AI 行内补全（返回后按 <kbd>Tab</kbd> 接受）</td>
+                </tr>
+                <tr>
+                  <td><kbd>Enter</kbd></td>
+                  <td>文件树搜索框</td>
+                  <td>按关键词检索当前项目的文件名与文件内容</td>
+                </tr>
+                <tr>
+                  <td><kbd>Ctrl+F</kbd> / <kbd>Ctrl+H</kbd></td>
+                  <td>Monaco 编辑器内</td>
+                  <td>在当前文件内执行查找或替换</td>
+                </tr>
+                <tr>
+                  <td><kbd>Esc</kbd></td>
+                  <td>任意弹窗或下拉菜单</td>
+                  <td>关闭当前最顶层弹窗、确认框或下拉菜单</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
-        <section>
-          <h3 id="help-import" tabindex="-1">打开 Jar/War</h3>
+        <section data-help-section="help-auth" data-help-keywords="登录 账号 密码 管理员 普通用户 权限 角色 admin Admin@123 用户管理 锁定 退出">
+          <h3 id="help-auth" tabindex="-1">登录、账号与权限</h3>
+          <p>软件采用本机离线账号认证，密码经 PBKDF2-SHA256 加盐后保存在本地 SQLite 中。首次启动会自动预置默认管理员 <code>admin</code>（初始密码 <code>Admin@123</code>），登录页会显示提示并支持「一键填入默认管理员」，首次登录后必须立即修改密码。</p>
+          <ul>
+            <li><strong>会话与安全</strong>：勾选「保持本机登录状态」可保持 7 天有效；同一账号连续输错密码 5 次将锁定 60 秒。</li>
+            <li><strong>右上角账号菜单</strong>：普通用户可使用「修改我的密码」和「退出登录」；管理员额外可见「用户管理」入口。修改本人密码后会同步吊销该账号在其他会话中的登录态。</li>
+            <li><strong>本地用户管理</strong><span class="help-tag help-tag-admin">仅管理员</span>：支持按关键词、角色与状态筛选账号，新增本地用户、修改显示名/角色/启停状态、重置临时密码及删除账号。禁用账号或重置密码会立即吊销目标用户的所有活跃会话。</li>
+          </ul>
+          <div class="help-table-wrap">
+            <table class="help-table">
+              <thead>
+                <tr>
+                  <th>功能模块</th>
+                  <th>管理员（ADMIN）</th>
+                  <th>普通用户（USER）</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>打开 / 导入、浏览编辑、分析、编译、差异、导出</td>
+                  <td>允许</td>
+                  <td>允许</td>
+                </tr>
+                <tr>
+                  <td>项目设置、项目历史与校验、排错向导、导出脱敏诊断</td>
+                  <td>允许</td>
+                  <td>允许</td>
+                </tr>
+                <tr>
+                  <td>运行时工作台（日志、反编译、热替换、请求、回归、性能）</td>
+                  <td>允许</td>
+                  <td>允许</td>
+                </tr>
+                <tr>
+                  <td>用户管理、全局「开发能力」配置</td>
+                  <td>允许</td>
+                  <td>隐藏且禁止</td>
+                </tr>
+                <tr>
+                  <td>删除项目历史、清理当前工作区、扫描孤立工作区</td>
+                  <td>允许</td>
+                  <td>隐藏且禁止</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="help-note help-warning">系统内置防误锁保护：不能禁用、降级或删除当前登录的自己，也不能禁用或删除最后一个启用中的管理员。</p>
+        </section>
+
+        <section data-help-section="help-import" data-help-keywords="导入 打开 jar war spring boot 嵌套jar pom.xml 反编译 cfr 项目历史 删除">
+          <h3 id="help-import" tabindex="-1">打开 Jar/War 与历史</h3>
           <ol>
-            <li>点击左侧「打开 Jar/War」，选择普通 JAR、Spring Boot JAR 或 WAR 文件。</li>
-            <li>遇到嵌套 Jar 选择弹窗时，可点「推荐选择」使用按模块和应用包名推断的范围，也可以手动勾选、全选或清空。各业务模块可能位于 <code>BOOT-INF/lib</code> 或 <code>WEB-INF/lib</code>。</li>
-            <li>点「开始导入」，等待解压和反编译。完成后从文件树查看 Java、配置和其他资源。</li>
+            <li>点击左侧「打开 Jar / War」（或空状态页按钮、收起态左上角 <code>+</code> 按钮），选择本地普通 JAR、Spring Boot JAR 或 WAR 文件。</li>
+            <li>程序先预解析包内的 <code>pom.xml</code> 与嵌套依赖。在「选择需要反编译的 Jar」弹窗中，可使用顶部搜索框按名称、路径或推荐原因实时筛选，通过「推荐选择 / 全选 / 清空」快速调整范围，右侧角标实时显示已选数量。</li>
+            <li>点击「开始导入」执行解压和 CFR 分批反编译（自动跳过 <code>module-info.class</code>）。任务进行期间可随时点击任务栏的「取消任务」。</li>
           </ol>
-          <p class="help-note">只想改主包配置时可缩小嵌套 Jar 的反编译范围。看不到某个业务模块源码时，检查它是否属于嵌套 Jar，并在导入时勾选对应模块。</p>
+          <p><strong>左侧项目历史</strong>列出已导入的本地项目，支持输入关键词实时筛选。管理员点击删除按钮时，弹窗提供三选操作：<strong>仅删除历史</strong>（保留磁盘工作区，后续可在「扫描孤立工作区」处理）、<strong>预览并清理工作区后删除</strong>，或取消。存在运行中任务时不能删除项目历史。</p>
+          <p class="help-note">多模块 Spring Boot 包的业务代码通常位于 <code>BOOT-INF/lib/*.jar</code>（War 包在 <code>WEB-INF/lib/*.jar</code>）。只改主包配置时可缩小反编译勾选范围以加快导入；若找不到某业务模块源码，检查导入时是否勾选了对应嵌套 Jar。</p>
         </section>
 
-        <section>
-          <h3 id="help-editor" tabindex="-1">文件树与编辑器</h3>
+        <section data-help-section="help-editor" data-help-keywords="文件树 编辑器 monaco 标签 tabs 面包屑 复制路径 合并包路径 compact folders 折叠 搜索 编码 utf-8 gbk 中文预览 unicode 保存 快速修复 整理import ai 补全 助手">
+          <h3 id="help-editor" tabindex="-1">文件浏览、编辑与预览</h3>
           <dl>
-            <dt>sources</dt>
-            <dd>反编译得到的 Java。主包源码一般按 Java 包名展开，选中的嵌套 Jar 源码在 <code>sources/nested-jars</code> 下。修改并保存后点击「编译」，生成包实际使用的 <code>.class</code>。</dd>
-            <dt>extracted</dt>
-            <dd>解压后的实际包内容。常见的配置和文本资源可以直接编辑保存。二进制和签名文件以只读方式处理。</dd>
-            <dt>搜索</dt>
-            <dd>在文件树上方输入类名、文件名或内容关键字，点击「搜索」或按 <kbd>Enter</kbd>。点击结果打开对应文件。</dd>
-            <dt>文件编码与中文预览</dt>
-            <dd>资源文件出现乱码时，先按实际编码重新打开，例如 GBK 或 GB18030。Java 源码使用 UTF-8。「中文预览」将 <code>\uXXXX</code> 转义显示为可读中文，预览区域只读，点「返回原文」可继续编辑。</dd>
-            <dt>保存</dt>
-            <dd>点击「保存」或按 <kbd>Ctrl+S</kbd>（macOS 为 <kbd>⌘S</kbd>）把修改写到工作区。切换文件或项目时留意未保存提示。资源文件保存会按所选编码写入，并保留原有的换行和 BOM。</dd>
-            <dt>快速修复与整理 import</dt>
-            <dd>在「开发能力」启用 Java 代码智能后，将光标放在有诊断的位置并点「快速修复」查看可用操作。「整理 import」按 Java 语义整理导入语句。检查编辑结果后保存。</dd>
-            <dt>AI 补全与 AI 助手</dt>
-            <dd>配置 AI 后，点「AI 补全」获取当前光标处的建议。通过「AI 助手」可解释代码、按诊断修复或按要求重构。运行前可选中目标代码，结果先显示在预览区。需要写入时，点「应用修改」，检查编辑器内容后再保存。</dd>
+            <dt>文件树（sources 与 extracted）</dt>
+            <dd><code>sources</code> 存放反编译得到的 Java 源码，主包源码按包名展开，勾选的嵌套 Jar 源码位于 <code>sources/nested-jars/原相对路径/...</code>；<code>extracted</code> 为解压后的原始包内容，文本与配置文件可直接编辑，二进制与签名文件只读展示。</dd>
+            <dt>文件树效率工具与搜索</dt>
+            <dd>文件浏览器右上角支持开启/关闭 <strong>包路径合并</strong>（默认开启，将单层目录合并为如 <code>com.example</code>）和 <strong>折叠所有目录</strong>。上方搜索框支持按文件名或内容检索，结果自动高亮关键字，点 <code>×</code> 可清空搜索返回完整文件树。</dd>
+            <dt>多文件标签栏与路径复制</dt>
+            <dd>打开多个文件时会在编辑器顶部形成标签栏，方便快速切换；存在未保存修改的文件会显示橙色圆点。路径面包屑旁提供「复制当前文件相对路径」按钮。</dd>
+            <dt>编码切换与保存</dt>
+            <dd>文件编码选择器位于<strong>窗口右下角 IDE 状态栏</strong>。Java 源码固定按 <code>UTF-8</code> 保存与编译；无 BOM 的资源文件出现乱码时，可显式切换为 <code>GBK</code>、<code>GB18030</code>、<code>UTF-16LE/BE</code> 重新打开。按 <kbd>Ctrl+S</kbd>（macOS 为 <kbd>⌘S</kbd>）或点「保存」写入工作区，保留原有 BOM 与换行符，且外部内容变更时会阻止误覆盖。</dd>
+            <dt>中文预览（Unicode 转义解码）</dt>
+            <dd>遇到 <code>\u7535\u5b50</code> 等中文 Unicode 转义时，点击编辑器工具栏「中文预览」打开独立的只读 Monaco 预览视图。预览保留语法高亮、折叠与深浅主题联动，自动高亮解码区间，支持「上一处 / 下一处」定位和滚动位置双向同步，且不修改原文件；点「返回原文」继续编辑。</dd>
+            <dt>Java 代码智能与 AI 辅助</dt>
+            <dd>在「开发能力」启用 Eclipse JDT LS 后，支持补全、悬浮文档、跳转定义、实时诊断波浪线，以及工具栏的「快速修复」和「整理 import」。启用 AI 代码助手后，可按 <kbd>Alt+\</kbd> 或点「AI 补全」触发一次行内建议，或打开「AI 助手」执行解释、按诊断修复与按要求重构；AI 解释仅只读展示，代码改动必须先在预览区核对后手动点击「应用修改」再保存。</dd>
           </dl>
         </section>
 
-        <section>
-          <h3 id="help-analyze" tabindex="-1">分析</h3>
-          <p>点击「分析」刷新当前项目的结构报告。展开右侧「分析与风险」，可查看包类型、入口类、Manifest、class 数量、依赖数量和修改文件数量。</p>
+        <section data-help-section="help-analyze" data-help-keywords="分析 风险 manifest 入口类 签名 混淆 多版本 已修改文件">
+          <h3 id="help-analyze" tabindex="-1">分析与风险</h3>
+          <p>点击顶部「分析」刷新当前项目的结构报告。点击右侧「分析与风险」窄条展开抽屉，可查看包类型、入口类、Manifest、class 数量、依赖数量、风险清单以及 <strong>已修改文件列表（点击可直接打开对应文件）</strong>。</p>
           <ul>
-            <li><strong>存在签名文件</strong>表示更新 class 或资源后，需要在导出环节处理失效签名。</li>
-            <li><strong>存在嵌套 Jar</strong>表示包内包含依赖或业务模块。寻找模块源码时可结合导入时勾选的范围。</li>
-            <li>如果出现多版本目录或混淆提示，编译和发布前应检查涉及的类、目录和运行环境。</li>
+            <li><strong>签名文件风险</strong>：存在 <code>META-INF/*.SF</code>、<code>*.RSA</code> 等签名文件时，修改任意 class 或资源都会导致原签名失效，导出阶段须按策略处理。</li>
+            <li><strong>嵌套 Jar / 多版本 / 混淆迹象</strong>：存在 <code>META-INF/versions</code> 多版本目录或明显混淆特征时，修改源码和重新编译前请重点核对对应类与运行环境。</li>
           </ul>
         </section>
 
-        <section>
-          <h3 id="help-diff" tabindex="-1">差异</h3>
-          <p>比较工作区已保存的内容与导入时的固定基线。对比窗口顶部汇总「源码」「资源」「class」三类数量，展开文件项可以查看导入基线和当前内容。</p>
-          <ul>
-            <li><strong>源码</strong>用于核对本次编辑的 Java，例如类或方法的具体变化。</li>
-            <li><strong>资源</strong>用于核对配置、模板等文件，例如 YAML 参数是否改对。</li>
-            <li><strong>class</strong>显示编译已写回的产物。改过 Java 时，确认最新修改已成功编译，再核对清单并导出。</li>
-          </ul>
-        </section>
-
-        <section>
+        <section data-help-section="help-compile" data-help-keywords="编译 javac release jdk 注解处理器 lombok staging 回滚 嵌套jar">
           <h3 id="help-compile" tabindex="-1">编译</h3>
           <ol>
-            <li>保存修改过的 Java，点击「编译」。程序根据原始 class 识别目标 Java 版本，并查找匹配的编译 JDK。</li>
-            <li>等待任务完成。全部目标编译成功后，主包 class 写回主 classes 目录，嵌套模块 class 写回对应的嵌套 Jar。</li>
-            <li>遇到失败时看底部日志中的首条编译错误。找不到 JDK 时检查「开发能力」中的 JDK 目录和 <code>bin/javac</code>。找不到类时核对报错类、包名和依赖。</li>
+            <li>保存已修改的 Java 文件后点击顶部「编译」。后端会自动读取对应原始 <code>.class</code> 的版本号，严格匹配本地 JDK 并使用 <code>--release</code> 编译。</li>
+            <li>为避免 Windows 命令行超长（<code>CreateProcess error=206</code>），编译器固定采用 <code>javac @参数文件</code> 调用，并显式传入 <code>-proc:none</code>（不自动运行原包依赖中的注解处理器）。</li>
+            <li>编译产物先写入独立 staging 目录，<strong>全部目标通过后</strong>才统一写回主 classes 目录或对应嵌套 Jar；若写回阶段发生异常会自动恢复备份。</li>
           </ol>
-          <p class="help-note">反编译后的 Java 可能需要修正后才能编译。涉及 Lombok、MapStruct 等注解处理生成的代码时，应使用原项目的构建流程。</p>
+          <p class="help-note">系统不会自动改写你的业务源码。若反编译代码因混淆、泛型擦除或依赖 Lombok/MapStruct 等注解生成逻辑而报错，请先看底部「执行日志」的首条编译错误，再手动修正或改用原项目源码构建。</p>
         </section>
 
-        <section>
-          <h3 id="help-export" tabindex="-1">导出</h3>
+        <section data-help-section="help-diff-export" data-help-keywords="差异 diff 导出 签名策略 校验 原子发布 导出路径">
+          <h3 id="help-diff-export" tabindex="-1">差异确认与导出</h3>
+          <p><strong>查看差异</strong>：点击顶部「差异」对比当前工作区与导入时的固定基线，按「源码」「资源」「class」三类汇总，支持「全部展开 / 全部折叠」及彩色状态标签。修改过 Java 文件时，请先完成编译并确认最新产物已出现在 class 清单中。</p>
           <ol>
-            <li>保存改动。修改过 Java 时，先完成编译。</li>
-            <li>点击「导出」，在「导出前差异确认」核对源码、资源和 class。确认无误后点「继续导出」。</li>
-            <li>选择签名处理方式，再选择输出位置。保持与原包对应的 <code>.jar</code> 或 <code>.war</code> 扩展名。</li>
-            <li>等到导出成功，核对提示中的输出路径。可到「项目历史」查看结构校验结果，再到目标环境启动并验证实际功能。</li>
+            <li>点击顶部「导出」，先在「导出前差异确认」中核对变更，确认无误后点击「继续导出」。</li>
+            <li>如原包存在签名，在内置确认弹窗中选择签名处理策略。</li>
+            <li>选择新包输出路径（保持原包的 <code>.jar</code> 或 <code>.war</code> 扩展名；禁止覆盖原包，也不可导出到工作区内部非 <code>exports</code> 目录）。</li>
+            <li>导出过程先写入同目录临时文件，通过结构校验后才原子发布；完成后可在「更多 → 项目历史与校验」查看校验明细。</li>
           </ol>
-          <p class="help-note help-warning"><strong>已修改的签名包</strong>需要选择移除失效签名，导出结果是未签名包。若部署环境要求签名，按其发布流程重新签名。选择保留签名时，程序会阻止导出已修改的签名包。</p>
+          <p class="help-note help-warning"><strong>签名包门禁</strong>：已修改的签名包默认阻止保留失效签名，只有明确选择「移除失效签名」后才会导出未签名包；若生产环境要求签名，请按组织流程重新签名。</p>
         </section>
 
-        <section>
-          <h3 id="help-project-settings" tabindex="-1">项目设置</h3>
-          <p>这些设置只作用于当前项目。修改后点「保存项目设置」。</p>
+        <section data-help-section="help-runtime-connect" data-help-keywords="运行时工作台 ssh 服务器 保存主机 openssh docker kubernetes k8s pod arthas 离线包 连接 释放">
+          <h3 id="help-runtime-connect" tabindex="-1">连接容器与 Arthas <span class="help-tag help-tag-runtime">运行时工作台</span></h3>
+          <p>点击顶部「运行时工作台」进入远程诊断弹窗。顶部采用单行快速工作条，按从左到右的自然操作顺序排列：<code>服务器 → 加载容器/Pod → 容器/Pod → Java 进程 → 连接/释放 Arthas</code>。</p>
           <dl>
-            <dt>目标 Java 版本</dt><dd>由原包的 class 决定，作为检查编译 JDK 的依据。此项只读。</dd>
-            <dt>默认导出目录</dt><dd>使用「浏览」选择常用输出目录，导出时仍可在保存窗口选择具体路径和文件名。</dd>
-            <dt>可编辑单文件上限与无 BOM 文本默认编码</dt><dd>文件太大无法编辑时，按实际需要调整上限。旧文本没有 BOM 时可选择默认编码。单个资源文件也可在编辑器工具栏选择编码。</dd>
-            <dt>推荐嵌套 Jar 与界面偏好</dt><dd>嵌套 Jar 每行填写一个包内相对路径。界面偏好使用 JSON 对象格式。一般修改包时可保留现有设置。</dd>
+            <dt>智能默认态与「连接配置」面板</dt>
+            <dd>如果本机已有保存过的服务器，打开工作台后会自动选中首台并默认收起配置面板，直接点「加载容器」即可（切换下拉框仅回填参数，不会自动发起 SSH 连接，避免误连线上）。首次使用或需新增主机、修改密码、切换认证/环境或指定离线包时，点击右上角「连接配置」（或在服务器下拉框底部选「＋ 新增 / 临时主机…」）展开配置面板；非默认选项收起后会以徽标显示在标题栏右侧。</dd>
+            <dt>SSH 认证与保存主机</dt>
+            <dd>「账号密码」模式使用内置 SSH 客户端，支持点击「保存主机」把密码经系统凭据加密存到本机，同一主机可按账号和端口保存多条，不需要时可「移除主机」；「OpenSSH 配置」模式填写本机 SSH 别名或 <code>user@host</code>。重启后首次连接仍需核对 SHA-256 主机指纹。</dd>
+            <dt>Docker 与 Kubernetes 环境</dt>
+            <dd>Docker 模式要求 SSH 账号具备 Docker 操作权限；切换到 Kubernetes 模式后，通过该 Linux 主机上的 <code>kubectl</code> 运行，可填写 Context、命名空间、标签选择器、可选调试容器名及远程 <code>kubeconfig</code> 路径（应用容器缺少 shell/JDK 时可借助同 Pod 共享进程命名空间的调试容器）。</dd>
+            <dt>连接与释放 Arthas</dt>
+            <dd>固定使用 Arthas 4.3.5 官方完整包并校验 SHA-256；内网无法访问下载站点时，可在「连接配置」选择本地同版 <code>arthas-bin.zip</code> 离线包。连接成功后配置面板自动收起。诊断完毕请点击「释放 Arthas」结束代理会话并清理远端临时目录。</dd>
           </dl>
         </section>
 
-        <section>
-          <h3 id="help-history" tabindex="-1">项目历史</h3>
-          <p>顶部「项目历史」查看当前项目的操作时间线、最近分析快照和导出校验。遇到导出失败时，可结合时间和操作 ID 定位同一次任务的结果。</p>
-          <p>左侧「项目历史」用于切换已导入的项目。使用项目旁的「删除」时，可选择只删除记录，或先预览并清理工作区再删除记录。只删除记录后，目录可在「孤立工作区」中查到。</p>
-        </section>
-
-        <section>
-          <h3 id="help-cleanup" tabindex="-1">清理工作区</h3>
-          <p>针对当前项目释放磁盘空间。点击后先预览工作区路径、文件数和占用空间，确认目录无误后才删除。清理完成后项目历史仍可查看。</p>
-          <p class="help-note help-warning"><strong>删除范围</strong>包括工作区里的解压文件、已保存的源码和配置修改、编译产物，以及存放在该目录内的导出包。需要保留的成果应先导出到工作区以外，再确认清理。</p>
-        </section>
-
-        <section>
-          <h3 id="help-orphans" tabindex="-1">孤立工作区</h3>
-          <p>扫描已完成导入、但已无项目记录的工作目录，例如之前选择「只删除历史」留下的目录。预览列出路径、文件数、大小和最后修改时间。</p>
-          <p class="help-note help-warning">确认后会清理本次预览列出的全部目录。先核对每个目录是否还有要保留的文件。预览后目录内容有变化时，需要重新扫描确认。</p>
-        </section>
-
-        <section>
-          <h3 id="help-error-guide" tabindex="-1">排错向导</h3>
-          <p>碰到导入、编译、导出或本地服务异常时，打开「排错向导」，用底部日志中的提示定位对应条目。向导提供 JDK、CFR 反编译、编译、签名、路径和端口等检查步骤。</p>
-          <p>例如遇到「找不到匹配的 JDK」，先对照「项目设置」里的目标版本，再在「开发能力」选择含 <code>bin/javac</code> 的 JDK 根目录并保存校验。</p>
-        </section>
-
-        <section>
-          <h3 id="help-diagnostics" tabindex="-1">导出诊断</h3>
-          <p>点击「导出诊断」并选择保存路径，生成一份脱敏 JSON，供排查软件问题。内容包括软件版本、系统与 Java 环境、近期任务日志和后端日志。反馈问题时可一并附上发生时间、所点按钮和报错表现。</p>
-        </section>
-
-        <section>
-          <h3 id="help-development" tabindex="-1">开发能力</h3>
+        <section data-help-section="help-runtime-diagnose" data-help-keywords="容器日志 实时追踪 类与方法 反编译 热替换 redefine 恢复原class 追踪耗时 trace jvm 线程 内存">
+          <h3 id="help-runtime-diagnose" tabindex="-1">日志、反编译与热替换 <span class="help-tag help-tag-runtime">运行时工作台</span></h3>
           <dl>
-            <dt>编译 JDK</dt><dd>选择包含 <code>bin/javac</code> 的 JDK 根目录，点「保存并校验」。所选目录用于编译补丁，目标 Java 版本以原包为准。</dd>
-            <dt>Java 代码智能（Eclipse JDT LS）</dt><dd>勾选后分别填写 JDT LS 解压目录和用于启动它的 Java 21 或以上 JDK，再保存。编辑器状态行显示连接情况。连接成功后可使用诊断、语义补全、悬停、跳转、快速修复和整理 import。这个 JDK 单独用于启动语言服务器。</dd>
-            <dt>AI 代码助手</dt><dd>勾选后选择与服务对应的协议，填写接口地址或以 /v1 结尾的基础地址，以及服务支持的模型 ID 和所需的 API Key，保存后从编辑器工具栏发起操作。AI 请求会将选中的代码或当前文件发送到所配置的端点。</dd>
+            <dt>容器日志</dt>
+            <dd>输入最近行数（1～1000）点击「查看日志」，或点击「实时追踪」持续输出日志（单次最长 5 分钟，可随时点「停止追踪」）。</dd>
+            <dt>类与方法查询、反编译与耗时追踪</dt>
+            <dd>在「类与方法」输入简单类名（自动模糊匹配）、完整类名（精确匹配）或 <code>*</code> 通配模式点击「搜索已加载的类」，点击搜索结果自动填入完整类名和 ClassLoader 哈希。「查看方法」支持按访问级别（public/protected/包可见/private）和方法类型（Spring HTTP 映射 / Java 接口 / 普通 / 代理类方法）组合筛选。「反编译」以只读方式展示线上源码；「追踪方法耗时」单次最多采集 20 秒或 3 次，启动后可切到「请求测试」触发调用。</dd>
+            <dt>Docker 容器热替换（在线编辑或上传 class）</dt>
+            <dd>连接 Docker 容器的 Arthas 后支持两种热替换方式：① 在「类与方法」点击「反编译并编辑」修改方法体，再点「编译并热替换」并选择对应的本地 Jar/War 解析依赖，工作台使用本地编译 JDK 编译验证、核对运行字节码并备份后执行热替换；② 在「环境与集成 → Docker 容器热替换」直接选择本地同名 <code>.class</code> 备份并替换。两种方式均可点击「恢复原 class」回滚，释放会话时也会尝试恢复。</dd>
+            <dt>JVM 检查</dt>
+            <dd>在「JVM 检查」页签一键获取「JVM 信息」「忙碌线程与堆栈」「内存」快照，耗时较长时可点「取消查询」。</dd>
           </dl>
-          <p class="help-note">只查看或修改 YAML、properties 等资源时，使用内置编辑器即可。Java 代码智能和 AI 均可按需启用。</p>
+          <p class="help-note help-warning"><strong>热替换边界</strong>：基于 JVM 类重定义能力，仅适合修改方法体（单 class 补丁）；新增/删除字段或修改方法签名会被目标 JVM 拒绝。热替换只影响当前运行内存，不会改写容器磁盘上的部署包文件。</p>
         </section>
 
-        <section>
-          <h3 id="help-tasks" tabindex="-1">任务状态与日志</h3>
-          <p>导入、分析、编译和导出会显示当前任务、进度及结果。操作耗时较长时，先看任务状态和底部「执行日志」。任务仍在运行时，可通过「取消任务」发出取消请求，随后查看最终状态。</p>
-          <p>出现失败时，先记录失败阶段和首条具体错误。结合「排错向导」进行检查，需要反馈时再用「导出诊断」保存日志。</p>
+        <section data-help-section="help-runtime-verify" data-help-keywords="请求测试 http https tls 关联日志 部署包对照 回归验证 断言 基线 性能采集 jfr 火焰图 多实例 actuator loki tunnel 诊断报告">
+          <h3 id="help-runtime-verify" tabindex="-1">请求、对照、回归与性能 <span class="help-tag help-tag-runtime">运行时工作台</span></h3>
+          <dl>
+            <dt>请求测试与关联日志</dt>
+            <dd>在「请求测试」选择目标 JVM 的监听端口、HTTP/HTTPS 协议与路径，展开「请求头、请求体与 TLS 主机名」填写可选参数（请求从容器内发往 <code>127.0.0.1</code>）。发送真实业务请求后，可点「查看关联日志」（优先按 Request ID / Trace ID，否则按时间窗口匹配）或「添加到请求集合」。</dd>
+            <dt>部署包对照</dt>
+            <dd>在「类与方法」点击「对照本地包」，工作台采集运行中 class 并与本地 Jar/War（含嵌套依赖与多版本条目）比对 SHA-256 摘要和两侧 CFR 源码差异。</dd>
+            <dt>回归验证</dt>
+            <dd>在「回归验证」管理请求集合（支持打开/保存 JSON，自动清理常见鉴权头；本次共用鉴权头填在「本次共用请求头」），支持 <code>status</code>、<code>maxMs</code>、<code>contains</code>、<code>jsonEquals</code>（JSON 指针如 <code>/result/ok</code>）断言。先跑「运行补丁前基线」，再跑「运行补丁后验证」，直观比较状态码、响应体与耗时变化。</dd>
+            <dt>性能采集与导出诊断报告</dt>
+            <dd>在「性能采集」录制 5～30 秒的 <strong>JFR</strong> 或 <strong>火焰图</strong>（CPU 定时器 / CPU perf / Wall clock），完成后可保存为文件。点击页签栏右侧「导出诊断报告」可生成结构化 JSON 汇总报告（不含请求体、源码和日志原文）。</dd>
+            <dt>环境与集成</dt>
+            <dd>提供最多 20 个目标的「多实例检查」、复用当前业务端口的「Spring Boot Actuator」端点读取、「Loki 集中日志」LogQL 查询，以及从系统浏览器打开已有「Arthas Tunnel」控制台。</dd>
+          </dl>
+        </section>
+
+        <section data-help-section="help-development" data-help-keywords="开发能力 jdk javac jdtls 代码智能 语言服务器 win7 ai 助手 openai anthropic messages 内网 http api key">
+          <h3 id="help-development" tabindex="-1">开发能力配置 <span class="help-tag help-tag-admin">仅管理员</span></h3>
+          <p>点击顶部「开发能力」打开三标签页配置弹窗，每个标签前的状态点反映当前生效情况；修改后点击「保存并校验」。</p>
+          <dl>
+            <dt>编译 JDK</dt>
+            <dd>选择包含 <code>bin/javac</code> 的 JDK 根目录并保存校验，页面同步显示当前内置 JDK 版本。补丁编译的目标 Java 版本始终以原包 <code>.class</code> 为准。</dd>
+            <dt>Java 代码智能（Eclipse JDT LS）</dt>
+            <dd>勾选启用后，配置 JDT LS 解压目录与运行它的 Java 21+ JDK（仅用于运行语言服务器，不影响项目 Java 8/17 编译目标）。<strong>Win7 离线兼容包已内置 JDT LS 与 JDK 21</strong>，勾选启用且两项路径留空即可直接使用。</dd>
+            <dt>AI 代码助手</dt>
+            <dd>勾选启用后选择协议（<code>OpenAI Responses API</code>、<code>OpenAI 兼容 Chat Completions</code> 或 <code>Anthropic 兼容 Messages API</code>），填写完整地址或以 <code>/v1</code> 结尾的基础地址及模型 ID。本机回环和内网私有 IPv4（<code>10/8</code>、<code>172.16/12</code>、<code>192.168/16</code>）允许 HTTP 且无鉴权时可留空 API Key，公网端点须使用 HTTPS；Messages 协议可选择 <code>x-api-key</code> 或 <code>Authorization Bearer</code>。保存的 API Key 由系统安全存储加密保护，可勾选「清除已保存的 API Key」移除旧密钥。</dd>
+          </dl>
+          <p class="help-note">只查看或修改 YAML、properties 等文本资源时，无需配置 JDT LS 或 AI，直接使用内置 Monaco 编辑器即可。</p>
+        </section>
+
+        <section data-help-section="help-project-more" data-help-keywords="更多菜单 项目设置 项目历史 校验 操作人 清理工作区 孤立工作区 磁盘空间">
+          <h3 id="help-project-more" tabindex="-1">项目设置与工作区维护</h3>
+          <p>以下低频与维护功能统一收纳在顶部右侧 <strong>「更多」</strong> 下拉菜单中：</p>
+          <dl>
+            <dt>项目设置（当前项目）</dt>
+            <dd>仅对当前项目生效。可查看只读的「目标 Java 版本」，自定义默认导出目录、可编辑单文件上限（1～100 MB）、无 BOM 文本默认编码、推荐嵌套 Jar 与界面偏好 JSON。</dd>
+            <dt>项目历史与校验（当前项目）</dt>
+            <dd>通过三个标签页分别查看「操作时间线」（带操作人与统一操作 ID）、「结构分析历史」与「导出校验历史」，方便回溯每次导入、编译与导出结果。</dd>
+            <dt>清理当前工作区 <span class="help-tag help-tag-admin">仅管理员</span></dt>
+            <dd>先预览工作区路径、文件数和占用空间，确认无误后删除磁盘工作区，但保留项目历史记录。存在运行中任务或预览后文件内容有变动时会拒绝清理。</dd>
+            <dt>扫描孤立工作区 <span class="help-tag help-tag-admin">仅管理员</span></dt>
+            <dd>扫描已完成导入但不再有项目记录的磁盘目录（如选择「仅删除历史」后遗留的目录），核对预览清单后统一释放磁盘空间。</dd>
+          </dl>
+          <p class="help-note help-warning"><strong>清理前请核对成果</strong>：清理工作区会删除目录内的解压文件、源码与配置修改、编译产物以及保存在该工作区 <code>exports</code> 目录下的导出包，需要保留的包请先复制到工作区以外。</p>
+        </section>
+
+        <section data-help-section="help-troubleshoot" data-help-keywords="任务状态 取消任务 执行日志 排错向导 导出诊断 脱敏 启动失败 diagnostics">
+          <h3 id="help-troubleshoot" tabindex="-1">任务日志与排错诊断</h3>
+          <dl>
+            <dt>任务状态与底部执行日志</dt>
+            <dd>导入、分析、编译和导出会先创建持久化任务并建立实时日志连接；耗时较长时可随时点击任务状态栏的「取消任务」。底部「执行日志」支持拖拽上边缘调整高度，并提供「复制」「清空」「收起」按钮。出现失败时请先记录失败阶段与首条具体报错。</dd>
+            <dt>错误排查向导（更多 → 错误排查向导）</dt>
+            <dd>汇总 JDK、CFR 反编译、编译、签名、路径与端口等常见异常的检查与处理步骤。例如遇到「找不到匹配的 JDK」，对照项目目标版本后在「开发能力」重新指定含 <code>bin/javac</code> 的 JDK 根目录并保存校验。</dd>
+            <dt>导出脱敏诊断（更多 → 导出脱敏诊断）</dt>
+            <dd>生成一份脱敏 JSON 诊断包（包含软件版本、系统与 Java 环境、近期任务日志与后端日志，不含敏感令牌），便于提交或协同排查问题。</dd>
+            <dt>启动失败诊断器（Windows）</dt>
+            <dd>若免安装包在打开界面前即退出，可将发布目录同级的 <code>JarPatch-Startup-Diagnostics.exe</code> 与主程序放在同一目录后双击运行，它会自动收集退出码、Chromium 日志与桌面启动日志并打开诊断报告目录。</dd>
+          </dl>
         </section>
       </div>
     </div>
