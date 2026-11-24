@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -14,7 +15,9 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.zip.CRC32;
@@ -79,6 +82,26 @@ public class ArchiveService {
      */
     public void validateArchive(Path archiveFile) throws IOException {
         archiveExtractor.validate(archiveFile);
+    }
+
+    /**
+     * 收集归档解压后的类目录和嵌套 Jar，供反编译和重新编译共同解析依赖。
+     *
+     * @param extractedDir 归档解压目录
+     * @param classesRoot 主类目录
+     * @return 按稳定顺序排列的工具类路径
+     * @throws IOException 无法遍历归档内容
+     */
+    static String classpath(Path extractedDir, Path classesRoot) throws IOException {
+        Set<String> entries = new LinkedHashSet<>(List.of(extractedDir.toString(), classesRoot.toString()));
+        String jarSuffix = "." + JarPatchConstants.JAR_EXTENSION;
+        try (var paths = Files.walk(extractedDir)) {
+            paths.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(jarSuffix))
+                    .sorted(Comparator.comparing(Path::toString))
+                    .forEach(path -> entries.add(path.toString()));
+        }
+        return String.join(File.pathSeparator, entries);
     }
 
     /**

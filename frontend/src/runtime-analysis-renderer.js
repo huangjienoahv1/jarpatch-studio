@@ -51,14 +51,14 @@ window.createRuntimeAnalysis = function createRuntimeAnalysis(context) {
     syncControls();
   }
 
-  function sync({ closing, attached, hasProcess, targeting, classActive, requestActive }) {
+  function sync({ closing, attached, hasProcess, targeting, classActive, requestActive, correlateEnabled }) {
     const suiteRun = tasks.has('suite');
     const profileRun = tasks.has('profile');
     const available = !closing && hasProcess && !targeting;
     const diagnosticsReady = available && attached;
     view('CompareClass').disabled = !diagnosticsReady || classActive || comparing || profileRun;
     view('ComparisonEntry').disabled = closing || comparing || !comparison?.entries?.length;
-    view('Correlate').disabled = !available || !lastRequest || requestActive || tasks.has('logs');
+    view('Correlate').disabled = !correlateEnabled || !available || !lastRequest || requestActive || tasks.has('logs');
     view('AddCase').disabled = closing || suiteRun;
     for (const control of ['RunBaseline', 'RunCandidate']) {
       view(control).disabled = !available || !view('Ports').value || suiteRun || requestActive || profileRun;

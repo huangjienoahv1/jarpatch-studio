@@ -431,7 +431,9 @@ handleRuntimeIpc('runtime:run', (event, id, request) => {
     : request?.action === 'applyPatch' ? runtimePatchFile : undefined;
   if (request?.action === 'attach' && request.offline && !file) throw new Error('请先选择官方离线包');
   const data = { ...request, file };
-  if (data.action === 'passwordContainers' && !data.password) data.password = savedSshPassword(data);
+  const passwordLogin = data.action === 'passwordContainers'
+    || (data.action === 'connectExisting' && data.connection === 'password');
+  if (passwordLogin && !data.password) data.password = savedSshPassword(data);
   return runtimeWorkbench.run(id, data, (kind, value) => {
     if (!event.sender.isDestroyed()) event.sender.send('runtime:update', { id, kind, value });
   });

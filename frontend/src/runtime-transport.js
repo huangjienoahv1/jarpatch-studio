@@ -1,10 +1,18 @@
 const { spawn } = require('child_process');
+const { Duplex, PassThrough } = require('stream');
 const { StringDecoder } = require('string_decoder');
-const { SESSION_ID, runPasswordCommand } = require('./runtime-password-ssh');
+const { SESSION_ID, openPasswordLoopback, runPasswordCommand } = require('./runtime-password-ssh');
 
 const SSH_TIMEOUT_MS = 15000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const SSH_HOST = /^(?:[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}@)?(?:[A-Za-z0-9][A-Za-z0-9_.-]{0,252}|\[[0-9A-Fa-f:]+\])$/;
+const OPENSSH_OPTIONS = ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
+  '-o', 'ConnectTimeout=8', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2'];
+
+function sshDestination(host) {
+  if (typeof host !== 'string' || !SSH_HOST.test(host)) throw new Error('请输入 SSH 主机别名或 user@host');
+  return host.replace(/\[([0-9a-f:]+)\]$/i, '$1');
+}
 
 function shellArgument(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
@@ -25,21 +33,48 @@ function remoteExitError(code, stdout, stderr, { sensitive, bootDiagnostics }) {
   return new Error('远端操作退出码 ' + code + (message ? '（' + message.slice(0, 500) + '）' : ''));
 }
 
-function runSsh(host, command, options = {}) {
-  if (typeof host !== 'string' || !SSH_HOST.test(host)) {
-    return Promise.reject(new Error('请输入 SSH 主机别名或 user@host'));
-  }
-  const { input, signal, timeout = SSH_TIMEOUT_MS, onChunk, sensitive = false, bootDiagnostics = false,
-    binary = false, maxOutputBytes = MAX_OUTPUT_BYTES } = options;
+async function runSsh(host, command, options = {}) {
+  const destination = sshDestination(host);
+  const { signal, timeout = SSH_TIMEOUT_MS, maxOutputBytes = MAX_OUTPUT_BYTES } = options;
   if (signal?.aborted) return Promise.reject(new Error('操作已取消'));
   if (SESSION_ID.test(host)) {
     return runPasswordCommand(host, command, { ...options, timeout, maxOutputBytes }, remoteExitError);
   }
-  const destination = host.replace(/\[([0-9a-f:]+)\]$/i, '$1');
+  return runCommand('ssh', [...OPENSSH_OPTIONS, destination, command], { ...options, remote: true });
+}
+
+function openSshLoopback(host, port, signal, callback) {
+  const destination = sshDestination(host);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Arthas HTTP 端口无效');
+  if (signal?.aborted) return callback(new Error('操作已取消'));
+  if (SESSION_ID.test(host)) return openPasswordLoopback(host, port, signal, callback);
+  const child = spawn('ssh', [...OPENSSH_OPTIONS, '-o', 'ClearAllForwardings=yes', '-W', '127.0.0.1:' + port, destination],
+    { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    if (stderr.length < 1000) stderr += chunk.toString('utf8').slice(0, 1000 - stderr.length);
+  });
+  const output = new PassThrough();
+  child.stdout.pipe(output, { end: false });
+  const stream = Duplex.from({ readable: output, writable: child.stdin });
+  stream.once('close', () => child.kill());
+  child.once('error', (error) => stream.destroy(error.code === 'ENOENT'
+    ? new Error('找不到 ssh，请将兼容的 OpenSSH 客户端加入 PATH') : error));
+  child.once('close', (code) => {
+    if (code !== 0 && !stream.destroyed) stream.destroy(remoteExitError(code, [], [Buffer.from(stderr)], { sensitive: false }));
+    else output.end();
+  });
+  callback(null, stream);
+}
+
+function runCommand(program, args, options = {}) {
+  const { input, signal, timeout = SSH_TIMEOUT_MS, onChunk, sensitive = false, bootDiagnostics = false,
+    binary = false, maxOutputBytes = MAX_OUTPUT_BYTES, remote = false, cwd, env } = options;
+  const location = remote ? '远端' : '本机';
+  if (signal?.aborted) return Promise.reject(new Error('操作已取消'));
   return new Promise((resolve, reject) => {
-    const child = spawn('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
-      '-o', 'ConnectTimeout=8', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', destination, command],
-    { windowsHide: true, stdio: [input == null ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+    const child = spawn(program, args, { cwd, env, windowsHide: true,
+      stdio: [input == null ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
     const stdout = [];
     const stderr = [];
     const decoder = new StringDecoder('utf8');
@@ -53,7 +88,7 @@ function runSsh(host, command, options = {}) {
     }
 
     const cancel = () => terminate(new Error('操作已取消'));
-    const timer = setTimeout(() => terminate(new Error('等待远端响应超时')), timeout);
+    const timer = setTimeout(() => terminate(new Error('等待' + location + '响应超时')), timeout);
     signal?.addEventListener('abort', cancel, { once: true });
     if (signal?.aborted) cancel();
 
@@ -64,7 +99,7 @@ function runSsh(host, command, options = {}) {
         if (decoded) onChunk(decoded);
       } else {
         stdoutBytes += chunk.length;
-        if (stdoutBytes > maxOutputBytes) terminate(new Error('远端输出超过大小限制，请缩小查询范围'));
+        if (stdoutBytes > maxOutputBytes) terminate(new Error(location + '输出超过大小限制，请缩小查询范围'));
         else stdout.push(chunk);
       }
     });
@@ -75,7 +110,7 @@ function runSsh(host, command, options = {}) {
       }
     });
     child.on('error', (error) => {
-      failure ??= error.code === 'ENOENT' ? new Error('找不到 ssh，请将兼容的 OpenSSH 客户端加入 PATH') : error;
+      failure ??= error.code === 'ENOENT' && remote ? new Error('找不到 ssh，请将兼容的 OpenSSH 客户端加入 PATH') : error;
     });
     child.stdin?.on('error', (error) => {
       if (error.code !== 'EPIPE') terminate(error);
@@ -84,7 +119,11 @@ function runSsh(host, command, options = {}) {
       clearTimeout(timer);
       signal?.removeEventListener('abort', cancel);
       if (failure) return reject(failure);
-      if (code !== 0) return reject(remoteExitError(code, stdout, stderr, { sensitive, bootDiagnostics }));
+      if (code !== 0) {
+        const error = remoteExitError(code, stdout, stderr, { sensitive, bootDiagnostics });
+        if (!remote) error.message = error.message.replace(/^远端/, location);
+        return reject(error);
+      }
       if (onChunk) {
         const remaining = decoder.end();
         if (remaining) onChunk(remaining);
@@ -112,4 +151,4 @@ function curlConfig(entries) {
   }).join('\n') + '\n';
 }
 
-module.exports = { runSsh, shellCommand, dockerExec, curlConfig };
+module.exports = { runCommand, runSsh, sshDestination, openSshLoopback, shellCommand, dockerExec, curlConfig };

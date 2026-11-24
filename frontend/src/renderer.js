@@ -106,6 +106,7 @@ const MESSAGE_TASK_COMPLETED = '任务已完成';
 const MESSAGE_TASK_FAILED = '任务已失败';
 const MESSAGE_TASK_CANCEL_FAILED = '取消任务失败';
 const MESSAGE_TASK_START_FAILED = '任务启动失败';
+const MESSAGE_TASK_IN_PROGRESS = '已有任务正在执行，请等待当前任务结束';
 const MESSAGE_TASK_LOG_UNAVAILABLE = '任务日志连接失败';
 const MESSAGE_DIAGNOSTIC_EXPORT_SUCCESS = '脱敏诊断信息已导出';
 const MESSAGE_DIAGNOSTIC_EXPORT_FAILED = '导出诊断信息失败';
@@ -339,7 +340,9 @@ const state = {
   diffRequestId: 0,
   currentInspection: null,
   currentTree: null,
+  taskStarting: false,
   currentTask: null,
+  failedCompileProjectId: null,
   currentTaskSocket: null,
   currentTaskAbortController: null,
   currentTaskCancelRequested: false,
@@ -453,6 +456,8 @@ const elements = {
   taskStatusDetail: document.getElementById('taskStatusDetail'),
   taskProgressFill: document.getElementById('taskProgressFill'),
   cancelTaskBtn: document.getElementById('cancelTaskBtn'),
+  retryCompileBtn: document.getElementById('retryCompileBtn'),
+  dismissTaskBtn: document.getElementById('dismissTaskBtn'),
   contentGrid: document.getElementById('contentGrid'),
   treeResizeHandle: document.getElementById('treeResizeHandle'),
   compactFoldersBtn: document.getElementById('compactFoldersBtn'),
@@ -468,6 +473,7 @@ const elements = {
   activeFileName: document.getElementById('activeFileName'),
   copyFilePathBtn: document.getElementById('copyFilePathBtn'),
   activeFileKind: document.getElementById('activeFileKind'),
+  findInEditorBtn: document.getElementById('findInEditorBtn'),
   unicodePreviewBtn: document.getElementById('unicodePreviewBtn'),
   fileEncodingSelect: document.getElementById('fileEncodingSelect'),
   saveBtn: document.getElementById('saveBtn'),
@@ -909,7 +915,7 @@ function updateDirtyIndicator() {
 }
 
 /**
- * 根据文件类型、当前预览状态和已启用能力更新传统代码智能与 AI 按钮。
+ * 根据文件类型、当前预览状态和已启用能力更新编辑器工具栏按钮。
  */
 function updateEditorActionButtons() {
   const hasFile = Boolean(state.currentProject && state.currentFilePath);
@@ -917,6 +923,7 @@ function updateEditorActionButtons() {
   const editableView = hasFile && !state.unicodePreviewOpen;
   const javaFile = editableView && state.currentFilePath.toLowerCase().endsWith('.java');
   const aiEnabled = Boolean(state.developmentSettings && state.developmentSettings.aiEnabled);
+  elements.findInEditorBtn.disabled = !hasFile;
   elements.quickFixBtn.disabled = !javaFile || !state.languageServerReady;
   elements.organizeImportsBtn.disabled = !javaFile || !state.languageServerReady;
   elements.aiInlineBtn.disabled = !editableView || !aiEnabled;
@@ -1290,23 +1297,40 @@ function parseTaskProgress(message) {
  */
 function updateTaskPanel(title, detail, active, barState = null, progress = null) {
   elements.taskStatusText.textContent = title;
-  elements.taskStatusDetail.textContent = detail;
+  updateTaskDetail(detail);
+  elements.cancelTaskBtn.hidden = !active;
   elements.cancelTaskBtn.disabled = !active || state.currentTaskCancelRequested;
-  if (barState) {
-    elements.taskBar.dataset.state = barState;
-  } else {
-    elements.taskBar.dataset.state = active ? TASK_STATE_RUNNING : TASK_STATE_IDLE;
-  }
+  elements.taskBar.dataset.state = barState || (active ? TASK_STATE_RUNNING : TASK_STATE_IDLE);
+  elements.dismissTaskBtn.hidden = barState !== TASK_STATE_FAILED;
+  updateCompileRetryButton();
   if (typeof progress === 'number' && !Number.isNaN(progress)) {
     const clamped = Math.min(Math.max(progress, TASK_PROGRESS_MIN), TASK_PROGRESS_MAX);
     elements.taskProgressFill.style.width = `${clamped}%`;
   }
 }
 
+function updateTaskDetail(detail) {
+  elements.taskStatusDetail.textContent = detail;
+  elements.taskStatusDetail.title = detail;
+}
+
+function updateCompileRetryButton() {
+  elements.retryCompileBtn.hidden = elements.taskBar.dataset.state !== TASK_STATE_FAILED
+    || !state.currentProject || state.failedCompileProjectId !== state.currentProject.id;
+}
+
+function dismissTaskFailure() {
+  state.failedCompileProjectId = null;
+  updateTaskPanel(MESSAGE_TASK_IDLE, MESSAGE_TASK_IDLE_DETAIL, false, TASK_STATE_IDLE, TASK_PROGRESS_MIN);
+}
+
 /**
  * 恢复工作台可操作状态。
  */
 function restoreWorkspaceControls() {
+  if (state.taskStarting || state.currentTask) {
+    return;
+  }
   elements.openArchiveBtn.disabled = false;
   elements.sidebarQuickOpenBtn.disabled = false;
   elements.settingsBtn.disabled = false;
@@ -1339,6 +1363,7 @@ function restoreWorkspaceControls() {
   setButtonLabel(elements.exportBtn, BUTTON_TEXT_EXPORT);
   setButtonLabel(elements.analyzeBtn, BUTTON_TEXT_ANALYZE);
   elements.cancelTaskBtn.disabled = true;
+  updateCompileRetryButton();
 }
 
 /**
@@ -1396,9 +1421,15 @@ function closeTaskSocket() {
  * @param taskId 任务 ID
  * @return 连接完成后的 Promise
  */
-function openTaskSocket(taskId) {
+async function openTaskSocket(taskId) {
   closeTaskSocket();
-  const socket = new WebSocket(window.jarPatchApiClient.taskWebSocketUrl(taskId));
+  let socket;
+  try {
+    socket = new WebSocket(window.jarPatchApiClient.taskWebSocketUrl(taskId));
+  } catch (error) {
+    appendLog(`${MESSAGE_TASK_LOG_UNAVAILABLE}：${error.message}`);
+    return null;
+  }
   state.currentTaskSocket = socket;
   return new Promise((resolve) => {
     let settled = false;
@@ -1418,7 +1449,7 @@ function openTaskSocket(taskId) {
       appendLog(message);
       const parsed = parseTaskProgress(message);
       if (parsed.progress == null) {
-        elements.taskStatusDetail.textContent = parsed.detail;
+        updateTaskDetail(parsed.detail);
         return;
       }
       updateTaskPanel(`${taskLabel} · ${parsed.progress}%`, parsed.detail, true, TASK_STATE_RUNNING, parsed.progress);
@@ -1439,25 +1470,26 @@ function openTaskSocket(taskId) {
  */
 function beginTaskSession(task) {
   state.currentTask = task;
+  state.taskStarting = false;
   state.currentTaskAbortController = new AbortController();
   state.currentTaskCancelRequested = false;
-  lockWorkspaceControls();
   updateTaskPanel(`${getTaskLabel(task.taskType)} · 0%`, task.message || MESSAGE_TASK_PANEL_READY, true, TASK_STATE_RUNNING, TASK_PROGRESS_MIN);
 }
 
 /**
  * 结束当前任务会话。
  *
- * @param task     任务记录
+ * @param taskType 任务类型
  * @param status   最终状态文案
  * @param detail   最终详情文案
  * @param barState 任务栏结束态标识
  */
-function endTaskSession(task, status, detail, barState = TASK_STATE_DONE) {
-  const label = getTaskLabel(task.taskType);
+function endTaskSession(taskType, status, detail, barState) {
+  const label = getTaskLabel(taskType);
   const finalProgress = barState === TASK_STATE_DONE ? TASK_PROGRESS_MAX : null;
   updateTaskPanel(`${label} · ${status}`, detail, false, barState, finalProgress);
   closeTaskSocket();
+  state.taskStarting = false;
   state.currentTaskAbortController = null;
   state.currentTaskCancelRequested = false;
   state.currentTask = null;
@@ -1474,27 +1506,39 @@ function endTaskSession(task, status, detail, barState = TASK_STATE_DONE) {
  * @return 业务请求结果
  */
 async function executeTaskOperation(taskType, projectId, message, requestRunner) {
-  const task = await api('/api/tasks', {
-    method: 'POST',
-    body: JSON.stringify({
-      taskType,
-      projectId,
-      message
-    })
-  });
-  beginTaskSession(task);
-  await openTaskSocket(task.id);
+  if (state.taskStarting || state.currentTask) {
+    throw new Error(MESSAGE_TASK_IN_PROGRESS);
+  }
+  state.taskStarting = true;
+  state.failedCompileProjectId = null;
+  lockWorkspaceControls();
+  if (taskType === TASK_TYPE_COMPILE) {
+    setActionButtonRunning(elements.compileBtn, BUTTON_TEXT_COMPILE_RUNNING);
+  } else if (taskType === TASK_TYPE_EXPORT) {
+    setActionButtonRunning(elements.exportBtn, BUTTON_TEXT_EXPORT_RUNNING);
+  }
+  updateTaskPanel(`${getTaskLabel(taskType)} · 0%`, message, false, TASK_STATE_RUNNING, TASK_PROGRESS_MIN);
   try {
+    const task = await api('/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ taskType, projectId, message })
+    });
+    beginTaskSession(task);
+    await openTaskSocket(task.id);
     const result = await requestRunner(task, state.currentTaskAbortController.signal);
-    endTaskSession(task, MESSAGE_TASK_PANEL_DONE, result && result.message ? result.message : MESSAGE_TASK_COMPLETED, TASK_STATE_DONE);
+    endTaskSession(taskType, MESSAGE_TASK_PANEL_DONE, result && result.message ? result.message : MESSAGE_TASK_COMPLETED, TASK_STATE_DONE);
     return result;
   } catch (error) {
-    if (isTaskCanceledError(error)) {
-      endTaskSession(task, MESSAGE_TASK_PANEL_CANCELED, MESSAGE_TASK_CANCELED, TASK_STATE_CANCELED);
+    if (state.currentTask && isTaskCanceledError(error)) {
+      endTaskSession(taskType, MESSAGE_TASK_PANEL_CANCELED, MESSAGE_TASK_CANCELED, TASK_STATE_CANCELED);
       notify(MESSAGE_TASK_CANCELED, NOTICE_TYPE_INFO);
       return null;
     }
-    endTaskSession(task, MESSAGE_TASK_PANEL_FAILED, error.message || MESSAGE_TASK_FAILED, TASK_STATE_FAILED);
+    if (taskType === TASK_TYPE_COMPILE) {
+      state.failedCompileProjectId = projectId;
+    }
+    const failureMessage = state.taskStarting ? MESSAGE_TASK_START_FAILED : MESSAGE_TASK_FAILED;
+    endTaskSession(taskType, MESSAGE_TASK_PANEL_FAILED, error.message || failureMessage, TASK_STATE_FAILED);
     throw error;
   }
 }
@@ -3439,9 +3483,9 @@ async function compileProject() {
     notify(MESSAGE_UNSAVED_CHANGES_BLOCK_ACTION, NOTICE_TYPE_INFO);
     return;
   }
-  setActionButtonRunning(elements.compileBtn, BUTTON_TEXT_COMPILE_RUNNING);
+  const projectId = state.currentProject.id;
   try {
-    const result = await executeTaskOperation(TASK_TYPE_COMPILE, state.currentProject.id, '开始编译修改过的 Java 文件', (task, signal) => api(`/api/projects/${state.currentProject.id}/compile`, {
+    const result = await executeTaskOperation(TASK_TYPE_COMPILE, projectId, '开始编译修改过的 Java 文件', (task, signal) => api(`/api/projects/${projectId}/compile`, {
       method: 'POST',
       signal,
       headers: {
@@ -3612,7 +3656,6 @@ async function exportProject() {
     notify(MESSAGE_EXPORT_CANCELED, NOTICE_TYPE_INFO);
     return;
   }
-  setActionButtonRunning(elements.exportBtn, BUTTON_TEXT_EXPORT_RUNNING);
   try {
     const result = await executeTaskOperation(TASK_TYPE_EXPORT, state.currentProject.id, `开始导出修改后的包: ${outputPath}`, (task, signal) => api(`/api/projects/${state.currentProject.id}/export`, {
       method: 'POST',
@@ -3634,9 +3677,6 @@ async function exportProject() {
 function setActionButtonRunning(button, runningText) {
   setButtonLabel(button, runningText);
   button.classList.add('busy');
-  elements.analyzeBtn.disabled = true;
-  elements.compileBtn.disabled = true;
-  elements.exportBtn.disabled = true;
 }
 
 function restoreProjectActionButtons() {
@@ -4064,6 +4104,10 @@ document.querySelectorAll('[data-close-dialog]').forEach((button) => {
     }
   });
 });
+elements.findInEditorBtn.addEventListener('click', () => {
+  const activeView = state.unicodePreviewOpen ? state.unicodePreviewView : elements.editor;
+  activeView.showFind();
+});
 elements.unicodePreviewBtn.addEventListener('click', toggleUnicodePreview);
 elements.unicodePreviewPrevBtn.addEventListener('click', () => navigateUnicodePreviewMatch(UNICODE_PREVIEW_STEP_PREV));
 elements.unicodePreviewNextBtn.addEventListener('click', () => navigateUnicodePreviewMatch(UNICODE_PREVIEW_STEP_NEXT));
@@ -4287,6 +4331,8 @@ elements.helpDialog.addEventListener('click', (event) => {
 });
 elements.searchBtn.addEventListener('click', searchProject);
 elements.cancelTaskBtn.addEventListener('click', cancelCurrentTask);
+elements.retryCompileBtn.addEventListener('click', compileProject);
+elements.dismissTaskBtn.addEventListener('click', dismissTaskFailure);
 elements.browseJdkBtn.addEventListener('click', pickJdkHomeDirectory);
 elements.browseJdtLsBtn.addEventListener('click', pickJdtLsHomeDirectory);
 elements.browseJdtLsJavaBtn.addEventListener('click', pickJdtLsJavaHomeDirectory);

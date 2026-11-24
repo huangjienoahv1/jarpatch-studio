@@ -121,7 +121,7 @@
         </span>
         <div>
           <h2 id="runtimeTitle">运行时工作台</h2>
-          <p>远程容器诊断 · Arthas 4.3.5 · 实时日志、反编译、热替换与回归</p>
+          <p>JVM 诊断、在线反编译与回归验证</p>
         </div>
       </div>
       <div class="runtime-heading-actions">
@@ -141,34 +141,52 @@
       </div>
     </header>
     <div id="runtimeQuickBar" class="runtime-quick-bar" role="region" aria-label="快速连接工作条">
-      <div class="runtime-quick-group runtime-quick-server">
-        <label class="runtime-quick-field">
+      <label class="runtime-quick-field">
+        <span>连接方式</span>
+        <select id="runtimeProvider">
+          <option value="docker">Docker</option><option value="kubernetes">Kubernetes</option>
+          <option value="local">本机 JVM</option><option value="host">SSH 宿主机 JVM</option>
+          <option value="windows">SSH Windows JVM</option>
+          <option value="existing">已有 Arthas</option>
+        </select>
+      </label>
+      <div id="runtimeQuickServer" class="runtime-quick-group runtime-quick-server">
+        <label id="runtimeSshHostsField" class="runtime-quick-field">
           <span>服务器</span>
           <select id="runtimeSshHosts"><option value="">请先配置服务器</option></select>
         </label>
         <button id="runtimeConnect" class="tool-btn" type="button">加载容器</button>
       </div>
-      <span class="runtime-quick-divider" aria-hidden="true"></span>
-      <div class="runtime-quick-group runtime-quick-target">
-        <label class="runtime-quick-field">
+      <div id="runtimeQuickTarget" class="runtime-quick-group runtime-quick-target">
+        <label id="runtimeContainerField" class="runtime-quick-field">
           <span id="runtimeContainerLabel">容器</span>
           <select id="runtimeContainer"></select>
         </label>
-        <label class="runtime-quick-field runtime-quick-process">
+        <label id="runtimeProcessField" class="runtime-quick-field runtime-quick-process">
           <span>Java 进程</span>
           <select id="runtimeProcess"></select>
         </label>
+        <output id="runtimeExistingTarget" class="runtime-muted" aria-label="已有 Arthas 端点" hidden></output>
       </div>
       <div class="runtime-quick-actions">
         <button id="runtimeAttach" class="tool-btn runtime-primary" type="button">连接 Arthas</button>
         <button id="runtimeDetach" class="tool-btn runtime-detach-btn" type="button" hidden>
           <span id="runtimeAttachDot" class="runtime-attach-dot" aria-hidden="true"></span>
-          <span>释放 Arthas</span>
+          <span id="runtimeDetachLabel">释放 Arthas</span>
         </button>
       </div>
     </div>
     <div id="runtimeConnectionBox" class="runtime-connection-box" hidden>
-      <fieldset class="runtime-config-section">
+      <fieldset id="runtimeExistingConfig" class="runtime-config-section" hidden>
+        <legend>已有 Arthas</legend>
+        <div class="runtime-row">
+          <label>访问方式<select id="runtimeExistingTransport"><option value="local">本机回环</option><option value="ssh">SSH 转发</option></select></label>
+          <label>Arthas HTTP 端口<input id="runtimeExistingPort" type="number" min="1" max="65535" value="8563"></label>
+          <label>Arthas 账号<input id="runtimeExistingUser" placeholder="可选" spellcheck="false" autocomplete="off"></label>
+          <label>Arthas 密码<input id="runtimeExistingPassword" type="password" placeholder="可选" autocomplete="off"></label>
+        </div>
+      </fieldset>
+      <fieldset id="runtimeSshConfig" class="runtime-config-section">
         <legend>SSH 服务器与认证</legend>
         <div class="runtime-ssh-primary">
           <label class="runtime-ssh-auth-field">SSH 认证<select id="runtimeSshAuth"><option value="password" selected>账号密码</option><option value="openssh">OpenSSH 配置</option></select></label>
@@ -184,10 +202,9 @@
           </div>
         </div>
       </fieldset>
-      <fieldset class="runtime-config-section">
-        <legend>运行环境与 Arthas 包</legend>
+      <fieldset id="runtimePackageConfig" class="runtime-config-section">
+        <legend>Arthas 包</legend>
         <div class="runtime-env-row">
-          <label class="runtime-provider-field">连接方式<select id="runtimeProvider"><option value="docker">Docker</option><option value="kubernetes">Kubernetes</option></select></label>
           <div class="runtime-package-field">
             <span class="runtime-field-caption">Arthas 离线包</span>
             <div class="runtime-package-controls">
@@ -209,7 +226,7 @@
     <p id="runtimeStatus" class="runtime-status" role="status"></p>
     <p id="runtimeError" class="runtime-error" role="alert" tabindex="-1" hidden></p>
     <nav class="runtime-tabs" aria-label="运行时功能">
-      <button class="tool-btn" type="button" data-runtime-tab="logs" aria-pressed="true">容器日志</button>
+      <button class="tool-btn" type="button" data-runtime-tab="logs" aria-pressed="true">应用日志</button>
       <button class="tool-btn" type="button" data-runtime-tab="classes" aria-pressed="false">类与方法</button>
       <button class="tool-btn" type="button" data-runtime-tab="jvm" aria-pressed="false">JVM 检查</button>
       <button class="tool-btn" type="button" data-runtime-tab="request" aria-pressed="false">请求测试</button>
@@ -220,8 +237,14 @@
       <button id="runtimeReport" class="tool-btn runtime-report" type="button">导出诊断报告</button>
     </nav>
     <div class="runtime-content">
-      <section class="runtime-pane" data-runtime-pane="logs" aria-label="容器日志">
-        <div class="runtime-row">
+      <section class="runtime-pane" data-runtime-pane="logs" aria-label="应用日志">
+        <div id="runtimeHostLogSource" class="runtime-row" hidden>
+          <label>日志来源<select id="runtimeLogSourceKind"><option value="journal">systemd</option><option value="file">应用日志文件</option></select></label>
+          <label class="runtime-grow"><span id="runtimeLogSourceLabel">服务单元</span>
+            <input id="runtimeLogSourceValue" placeholder="app.service" spellcheck="false"></label>
+        </div>
+        <p id="runtimeLocalLogHint" class="runtime-muted" hidden>本机应用日志可在启动控制台或应用配置的日志文件中查看。</p>
+        <div id="runtimeLogActions" class="runtime-row">
           <label>最近行数<input id="runtimeTail" type="number" min="1" max="1000" value="100"></label>
           <button id="runtimeReadLogs" class="tool-btn" type="button">查看日志</button>
           <button id="runtimeFollowLogs" class="tool-btn" type="button">实时追踪</button>
@@ -243,7 +266,7 @@
           <p id="runtimeSourcePatchAvailability" class="runtime-muted" role="status" hidden></p>
           <div class="runtime-row">
             <label>ClassLoader 哈希<input id="runtimeLoader" placeholder="同名类时指定" spellcheck="false"></label>
-            <label class="runtime-grow">方法名<input id="runtimeMethod" spellcheck="false"></label>
+            <label id="runtimeTraceMethod" class="runtime-grow">方法名<input id="runtimeMethod" spellcheck="false"></label>
             <button id="runtimeTrace" class="tool-btn" type="button">追踪方法耗时</button>
             <button id="runtimeCancelTrace" class="tool-btn" type="button">停止采集</button>
           </div>
@@ -302,7 +325,7 @@
         </div>
         <details class="runtime-request-settings">
           <summary>请求头、请求体与 TLS 主机名</summary>
-          <label>TLS 主机名<input id="runtimeServerName" spellcheck="false" placeholder="证书上的域名，连接仍指向容器内 127.0.0.1"></label>
+          <label>TLS 主机名<input id="runtimeServerName" spellcheck="false" placeholder="证书上的域名，连接仍指向目标环境的 127.0.0.1"></label>
           <div class="runtime-payload">
             <label>请求头（每行一项）<textarea id="runtimeHeaders" rows="3" spellcheck="false" placeholder="Content-Type: application/json"></textarea></label>
             <label>请求体<textarea id="runtimeBody" rows="3" spellcheck="false"></textarea></label>
@@ -363,12 +386,12 @@
       </section>
       <section class="runtime-pane" data-runtime-pane="advanced" aria-label="环境与集成" hidden>
         <div class="runtime-integrations">
-          <details open>
+          <details data-runtime-managed-only open>
             <summary>多实例检查</summary>
             <label>目标实例<select id="runtimeInventoryTargets" multiple size="4"></select></label>
             <button id="runtimeInventory" type="button" class="tool-btn">检查所选实例</button>
           </details>
-          <details>
+          <details data-runtime-managed-only>
             <summary>Spring Boot Actuator</summary>
             <div class="runtime-row">
               <label>基础路径<input id="runtimeActuatorBase" value="/actuator" spellcheck="false"></label>
@@ -398,7 +421,7 @@
               <button id="runtimeTunnel" type="button" class="tool-btn">打开官方控制台</button>
             </div>
           </details>
-          <details>
+          <details data-runtime-managed-only>
             <summary>Docker 容器热替换</summary>
             <div class="runtime-row">
               <button id="runtimePatch" type="button" class="tool-btn">选择 class 并替换</button>
@@ -454,7 +477,7 @@
           </div>
           <div class="help-nav-group">
             <h3>运行时工作台</h3>
-            <a href="#help-runtime-connect">连接容器与 Arthas</a>
+            <a href="#help-runtime-connect">连接 JVM 与 Arthas</a>
             <a href="#help-runtime-diagnose">日志、反编译与热替换</a>
             <a href="#help-runtime-verify">请求、对照、回归与性能</a>
           </div>
@@ -474,7 +497,7 @@
 
         <section data-help-section="help-start" data-help-keywords="入门 流程 改配置 改代码 改java yaml properties 热替换 快速开始">
           <h3 id="help-start" tabindex="-1">快速入门</h3>
-          <p>JarPatch Studio 提供两类核心能力：<strong>本地改包</strong>（对普通 Jar、Spring Boot Jar、War 解压、反编译、修改、编译并安全导出新包）与 <strong>运行时工作台</strong>（远程连接 Linux Docker 或 Kubernetes 容器，查看日志、在线反编译、调试接口与执行热替换）。</p>
+          <p>JarPatch Studio 提供本地改包和运行时诊断。可导入 Jar、Spring Boot Jar 或 War 进行反编译和修改，也可在「运行时工作台」连接本机、远程 Windows/Linux 宿主机、Docker 或 Kubernetes 中的 Java 进程。</p>
           <figure>
             <figcaption>场景一：只改 YAML、properties 等配置或文本资源</figcaption>
             <ol class="help-flow" role="list">
@@ -545,7 +568,7 @@
                 <tr>
                   <td><kbd>Ctrl+F</kbd> / <kbd>Ctrl+H</kbd></td>
                   <td>Monaco 编辑器内</td>
-                  <td>在当前文件内执行查找或替换</td>
+                  <td>在当前文件内查找或替换。编辑器工具栏的“搜索”也可打开查找框，中文预览中可搜索解码后的中文。</td>
                 </tr>
                 <tr>
                   <td><kbd>Esc</kbd></td>
@@ -666,26 +689,30 @@
           <p class="help-note help-warning"><strong>签名包门禁</strong>：已修改的签名包默认阻止保留失效签名，只有明确选择「移除失效签名」后才会导出未签名包；若生产环境要求签名，请按组织流程重新签名。</p>
         </section>
 
-        <section data-help-section="help-runtime-connect" data-help-keywords="运行时工作台 ssh 服务器 保存主机 openssh docker kubernetes k8s pod arthas 离线包 连接 释放">
-          <h3 id="help-runtime-connect" tabindex="-1">连接容器与 Arthas <span class="help-tag help-tag-runtime">运行时工作台</span></h3>
-          <p>点击顶部「运行时工作台」进入远程诊断弹窗。顶部采用单行快速工作条，按从左到右的自然操作顺序排列：<code>服务器 → 加载容器/Pod → 容器/Pod → Java 进程 → 连接/释放 Arthas</code>。</p>
+        <section data-help-section="help-runtime-connect" data-help-keywords="运行时工作台 ssh 服务器 windows linux 保存主机 openssh docker kubernetes k8s pod 已有 arthas 离线包 连接 释放">
+          <h3 id="help-runtime-connect" tabindex="-1">连接 JVM 与 Arthas <span class="help-tag help-tag-runtime">运行时工作台</span></h3>
+          <p>打开「运行时工作台」，在顶部选择连接方式，加载目标 Java 进程后点击「连接 Arthas」。</p>
           <dl>
-            <dt>智能默认态与「连接配置」面板</dt>
-            <dd>如果本机已有保存过的服务器，打开工作台后会自动选中首台并默认收起配置面板，直接点「加载容器」即可（切换下拉框仅回填参数，不会自动发起 SSH 连接，避免误连线上）。首次使用或需新增主机、修改密码、切换认证/环境或指定离线包时，点击右上角「连接配置」（或在服务器下拉框底部选「＋ 新增 / 临时主机…」）展开配置面板；非默认选项收起后会以徽标显示在标题栏右侧。</dd>
+            <dt>本机 JVM 与 SSH 宿主机 JVM</dt>
+            <dd>本机模式直接点击「加载 Java 进程」。Linux 宿主机模式先选择 SSH 服务器，两种模式都可直接选进程。Attach 需要对应的完整 JDK。Linux 宿主机的 SSH 账号需与应用的有效 UID/GID 匹配。</dd>
+            <dt>SSH Windows JVM</dt>
+            <dd>使用目标 JVM 的运行账号登录 Windows SSH，加载 Java 进程后连接 Arthas。该账号需能运行 <code>pwsh.exe</code>（PowerShell 7），目标 JVM 需由完整 JDK 启动。方法追踪可从目标应用的原有入口触发。</dd>
+            <dt>已有 Arthas</dt>
+            <dd>选择本机回环或 SSH 转发，再填写 Arthas HTTP 端口与可选凭据。可以查类、看方法、反编译和检查 JVM。断开时结束工作台的本次连接，代理由原启动方管理。</dd>
             <dt>SSH 认证与保存主机</dt>
             <dd>「账号密码」模式使用内置 SSH 客户端，支持点击「保存主机」把密码经系统凭据加密存到本机，同一主机可按账号和端口保存多条，不需要时可「移除主机」；「OpenSSH 配置」模式填写本机 SSH 别名或 <code>user@host</code>。重启后首次连接仍需核对 SHA-256 主机指纹。</dd>
             <dt>Docker 与 Kubernetes 环境</dt>
             <dd>Docker 模式要求 SSH 账号具备 Docker 操作权限；切换到 Kubernetes 模式后，通过该 Linux 主机上的 <code>kubectl</code> 运行，可填写 Context、命名空间、标签选择器、可选调试容器名及远程 <code>kubeconfig</code> 路径（应用容器缺少 shell/JDK 时可借助同 Pod 共享进程命名空间的调试容器）。</dd>
             <dt>连接与释放 Arthas</dt>
-            <dd>固定使用 Arthas 4.3.5 官方完整包并校验 SHA-256；内网无法访问下载站点时，可在「连接配置」选择本地同版 <code>arthas-bin.zip</code> 离线包。连接成功后配置面板自动收起。诊断完毕请点击「释放 Arthas」结束代理会话并清理远端临时目录。</dd>
+            <dd>固定使用 Arthas 4.3.5 官方完整包并校验 SHA-256。内网无法访问下载站点时，可在「连接配置」选择同版 <code>arthas-bin.zip</code>。诊断结束后点击「释放 Arthas」。若 Windows JVM 仍占用代理 JAR，等目标 JVM 退出后重新加载进程即可回收。</dd>
           </dl>
         </section>
 
         <section data-help-section="help-runtime-diagnose" data-help-keywords="容器日志 实时追踪 类与方法 反编译 热替换 redefine 恢复原class 追踪耗时 trace jvm 线程 内存">
           <h3 id="help-runtime-diagnose" tabindex="-1">日志、反编译与热替换 <span class="help-tag help-tag-runtime">运行时工作台</span></h3>
           <dl>
-            <dt>容器日志</dt>
-            <dd>输入最近行数（1～1000）点击「查看日志」，或点击「实时追踪」持续输出日志（单次最长 5 分钟，可随时点「停止追踪」）。</dd>
+            <dt>应用日志</dt>
+            <dd>容器模式查看容器输出，SSH 宿主机模式填写 systemd 服务单元或日志文件绝对路径。可查看最近 1～1000 行，或实时追踪最多 5 分钟。本机日志可在应用控制台或应用配置的日志文件中查看。</dd>
             <dt>类与方法查询、反编译与耗时追踪</dt>
             <dd>在「类与方法」输入简单类名（自动模糊匹配）、完整类名（精确匹配）或 <code>*</code> 通配模式点击「搜索已加载的类」，点击搜索结果自动填入完整类名和 ClassLoader 哈希。「查看方法」支持按访问级别（public/protected/包可见/private）和方法类型（Spring HTTP 映射 / Java 接口 / 普通 / 代理类方法）组合筛选。「反编译」以只读方式展示线上源码；「追踪方法耗时」单次最多采集 20 秒或 3 次，启动后可切到「请求测试」触发调用。</dd>
             <dt>Docker 容器热替换（在线编辑或上传 class）</dt>
@@ -700,7 +727,7 @@
           <h3 id="help-runtime-verify" tabindex="-1">请求、对照、回归与性能 <span class="help-tag help-tag-runtime">运行时工作台</span></h3>
           <dl>
             <dt>请求测试与关联日志</dt>
-            <dd>在「请求测试」选择目标 JVM 的监听端口、HTTP/HTTPS 协议与路径，展开「请求头、请求体与 TLS 主机名」填写可选参数（请求从容器内发往 <code>127.0.0.1</code>）。发送真实业务请求后，可点「查看关联日志」（优先按 Request ID / Trace ID，否则按时间窗口匹配）或「添加到请求集合」。</dd>
+            <dd>在「请求测试」选择目标 JVM 的监听端口、HTTP/HTTPS 协议与路径，请求从目标环境发往 <code>127.0.0.1</code>。发送后可点「添加到请求集合」。Docker 与 Kubernetes 模式支持按 Request ID、Trace ID 或时间窗口查看关联日志。</dd>
             <dt>部署包对照</dt>
             <dd>在「类与方法」点击「对照本地包」，工作台采集运行中 class 并与本地 Jar/War（含嵌套依赖与多版本条目）比对 SHA-256 摘要和两侧 CFR 源码差异。</dd>
             <dt>回归验证</dt>
@@ -1342,7 +1369,9 @@
             <div class="task-progress-track" aria-hidden="true">
               <div id="taskProgressFill" class="task-progress-fill"></div>
             </div>
-            <button id="cancelTaskBtn" class="tool-btn task-cancel" type="button" disabled>取消任务</button>
+            <button id="cancelTaskBtn" class="tool-btn task-action task-cancel" type="button" disabled hidden>取消任务</button>
+            <button id="retryCompileBtn" class="tool-btn task-action" type="button" hidden>重新编译</button>
+            <button id="dismissTaskBtn" class="tool-btn task-action" type="button" hidden>关闭提示</button>
           </div>
         </section>
 
@@ -1394,6 +1423,7 @@
                 <button id="aiInlineBtn" class="editor-btn" type="button" disabled title="显式触发一次 AI 行内补全（Alt+\）">AI 补全</button>
                 <button id="aiAssistantBtn" class="editor-btn" type="button" disabled title="解释、修复或重构当前选区或文件">AI 助手</button>
                 <span class="editor-divider" aria-hidden="true"></span>
+                <button id="findInEditorBtn" class="editor-btn" type="button" disabled title="在当前文件中搜索（Ctrl+F / ⌘F）">搜索</button>
                 <button id="unicodePreviewBtn" class="editor-btn" type="button" aria-pressed="false" disabled title="只读预览中文 Unicode 转义字符">
                   <span class="btn-label">中文预览</span>
                 </button>

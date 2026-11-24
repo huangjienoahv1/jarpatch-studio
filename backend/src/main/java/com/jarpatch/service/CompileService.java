@@ -9,25 +9,27 @@ import com.jarpatch.model.ProjectRecord;
 import com.jarpatch.model.TaskRecord;
 import com.jarpatch.repository.FileChangeRepository;
 import com.jarpatch.repository.CompiledArtifactRepository;
+import com.jarpatch.service.CompileProcessRunner.CompilationFailedException;
+import com.jarpatch.service.DecompiledSourceRecovery.RecoveredSource;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 
 /**
  * Java 修改文件严格编译与提交服务。
  * <p>
  * 编译入口来自 /api/projects/{id}/compile。服务先按主 classes 或嵌套 Jar 分组，从每个
  * 修改源码对应的原始 class 读取目标 Java 版本，再使用已验证 javac 和 --release 把所有
- * 产物写入本次 staging 目录；全部目标编译成功后才备份并统一写回 extracted，任一失败或
+ * 产物写入本次 staging 目录；对可确认的反编译强转问题，仅使用修复副本复编。全部目标编译
+ * 成功后才备份并统一写回 extracted，任一失败或
  * 取消都会恢复本次提交前文件。
  * </p>
  *
@@ -44,6 +46,9 @@ public class CompileService {
     private static final String COMPILE_STAGING_PREFIX = ".staging-";
     private static final String OUTPUT_DIR = "outputs";
     private static final String BACKUP_DIR = "backup";
+    private static final String RECOVERY_DIR = "recovery";
+    private static final String MESSAGE_RECOVER_CAST = "编译副本移除反编译产生的 Object 强转，重新编译";
+    private static final String MESSAGE_RECOVERY_FAILED = "编译副本重试失败";
     private static final int MINIMUM_RELEASE_COMPILER_VERSION = 9;
     private static final String MESSAGE_COMPILE_START = "开始编译修改过的 Java 文件";
     private static final String MESSAGE_COMPILE_LOCATE_JAVAC = "定位并执行 javac -version";
@@ -67,6 +72,7 @@ public class CompileService {
     private final CompiledArtifactRepository compiledArtifactRepository;
     private final ClockService clockService;
     private final CompileProcessRunner compileProcessRunner;
+    private final DecompiledSourceRecovery decompiledSourceRecovery;
     private final CompileArtifactCommitter compileArtifactCommitter;
     private final ProjectOperationLockService projectOperationLockService;
 
@@ -81,6 +87,7 @@ public class CompileService {
      * @param compiledArtifactRepository 已提交编译产物仓储
      * @param clockService         时间服务
      * @param compileProcessRunner javac 子进程执行器
+     * @param decompiledSourceRecovery 反编译源码副本修复服务
      * @param compileArtifactCommitter 编译产物提交与恢复服务
      * @param projectOperationLockService 项目级长操作互斥锁服务
      */
@@ -92,6 +99,7 @@ public class CompileService {
                           CompiledArtifactRepository compiledArtifactRepository,
                           ClockService clockService,
                           CompileProcessRunner compileProcessRunner,
+                          DecompiledSourceRecovery decompiledSourceRecovery,
                           CompileArtifactCommitter compileArtifactCommitter,
                           ProjectOperationLockService projectOperationLockService) {
         this.workspaceService = workspaceService;
@@ -102,6 +110,7 @@ public class CompileService {
         this.compiledArtifactRepository = compiledArtifactRepository;
         this.clockService = clockService;
         this.compileProcessRunner = compileProcessRunner;
+        this.decompiledSourceRecovery = decompiledSourceRecovery;
         this.compileArtifactCommitter = compileArtifactCommitter;
         this.projectOperationLockService = projectOperationLockService;
     }
@@ -177,6 +186,8 @@ public class CompileService {
             Map<String, List<String>> pathsByTarget = groupJavaPathsByTarget(javaPaths);
             Map<String, Path> compiledOutputs = new LinkedHashMap<>();
             StringBuilder processOutput = new StringBuilder();
+            String classpath = ArchiveService.classpath(workspaceService.extractedDir(project),
+                    compileArtifactCommitter.classRoot(project));
 
             taskService.running(task, PROGRESS_COMPILE_TARGETS, MESSAGE_COMPILE_ALL_TARGETS);
             for (Map.Entry<String, List<String>> entry : pathsByTarget.entrySet()) {
@@ -184,14 +195,10 @@ public class CompileService {
                 JavaVersionInfo targetVersion = javaVersionService.detectCompileTargetVersion(
                         project, entry.getKey(), entry.getValue());
                 validateCompilerVersion(compilerInfo, targetVersion);
-                Path targetOutput = compileRunDir.resolve(OUTPUT_DIR)
-                        .resolve(compileArtifactCommitter.safeTargetName(entry.getKey()));
-                Files.createDirectories(targetOutput);
-                List<String> command = buildCommand(project, compilerInfo.getJavacPath(), targetOutput,
-                        entry.getValue(), targetVersion.getFeatureVersion());
-                processOutput.append(compileProcessRunner.run(command, workspaceService.sourceDir(project),
-                        () -> taskService.isCancelled(task.getId())));
-                compiledOutputs.put(entry.getKey(), targetOutput);
+                CompiledTarget compiled = compileTarget(project, task, entry.getKey(), entry.getValue(),
+                        compilerInfo.getJavacPath(), targetVersion.getFeatureVersion(), classpath, compileRunDir);
+                processOutput.append(compiled.message());
+                compiledOutputs.put(entry.getKey(), compiled.output());
             }
 
             taskService.running(task, PROGRESS_PREPARE_COMMIT, MESSAGE_COMPILE_PREPARE_COMMIT);
@@ -265,52 +272,84 @@ public class CompileService {
     }
 
     /**
-     * 构建使用 javac 参数文件的严格编译命令。
+     * 编译单组 Java 文件。只有 javac 诊断能定位到可确认的反编译问题时，才在独立目录复编一次。
      *
-     * @param project        项目记录
-     * @param javac          javac 路径
-     * @param compiledDir    本目标 staging 输出目录
-     * @param javaPaths      修改源码路径
-     * @param releaseVersion --release 版本
-     * @return 外部进程命令
-     * @throws IOException 参数文件写入失败时抛出
+     * @param project 当前项目
+     * @param task 编译任务，接收修复行号并提供取消检查
+     * @param target 主包或嵌套 Jar
+     * @param javaPaths 本组源码在文件树中的路径
+     * @param javac 已选定的编译器
+     * @param release 原 class 的 Java 版本
+     * @param classpath 原包类目录和依赖
+     * @param runDir 本次编译 staging
+     * @return 成功的产物目录和编译输出
+     * @throws IOException 源码、编译进程或 staging 无法访问
+     * @throws InterruptedException 等待 javac 时被中断
      */
-    private List<String> buildCommand(ProjectRecord project,
-                                      Path javac,
-                                      Path compiledDir,
-                                      List<String> javaPaths,
-                                      int releaseVersion) throws IOException {
-        List<Path> sources = new ArrayList<>();
+    private CompiledTarget compileTarget(ProjectRecord project, TaskRecord task, String target, List<String> javaPaths,
+                                         Path javac, int release, String classpath, Path runDir)
+            throws IOException, InterruptedException {
+        Map<String, Path> sources = new LinkedHashMap<>();
         for (String javaPath : javaPaths) {
             if (!javaPath.startsWith(JarPatchConstants.TREE_SOURCE_PREFIX)) {
                 throw new IllegalArgumentException(JarPatchConstants.MESSAGE_FILE_OUT_OF_WORKSPACE);
             }
             String relativePath = javaPath.substring(JarPatchConstants.TREE_SOURCE_PREFIX.length());
-            sources.add(workspaceService.resolveSource(project, relativePath));
+            sources.put(javaPath, workspaceService.resolveSource(project, relativePath));
         }
-        return compileProcessRunner.prepareCommand(javac, compiledDir, releaseVersion, buildClasspath(project), sources);
+
+        String directoryName = compileArtifactCommitter.safeTargetName(target);
+        Path output = Files.createDirectories(runDir.resolve(OUTPUT_DIR).resolve(directoryName));
+        Path workDir = workspaceService.sourceDir(project);
+        BooleanSupplier cancelled = () -> taskService.isCancelled(task.getId());
+        List<String> command = compileProcessRunner.prepareCommand(javac, output, release, classpath,
+                List.copyOf(sources.values()));
+        try {
+            return new CompiledTarget(output, compileProcessRunner.run(command, workDir, cancelled));
+        } catch (CompilationFailedException original) {
+            Path recoveryDir = runDir.resolve(RECOVERY_DIR).resolve(directoryName);
+            Map<Path, RecoveredSource> recovered;
+            try {
+                recovered = decompiledSourceRecovery.prepare(project, target, mainArchivePrefix(project), sources,
+                        original.getMessage(), classpath, recoveryDir, () -> taskService.ensureNotCancelled(task.getId()));
+            } catch (IOException exception) {
+                throw new IllegalStateException(original.getMessage() + MESSAGE_RECOVERY_FAILED
+                        + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + exception.getMessage(), exception);
+            }
+            if (recovered.isEmpty()) {
+                throw original;
+            }
+
+            List<Path> retrySources = new ArrayList<>();
+            List<String> locations = new ArrayList<>();
+            sources.forEach((name, source) -> {
+                RecoveredSource replacement = recovered.get(source);
+                if (replacement == null) {
+                    retrySources.add(source);
+                } else {
+                    retrySources.add(replacement.path());
+                    locations.add(name + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + replacement.lines());
+                }
+            });
+            String recoveryMessage = MESSAGE_RECOVER_CAST + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR
+                    + String.join(System.lineSeparator(), locations) + System.lineSeparator();
+            taskService.running(task, PROGRESS_COMPILE_TARGETS, recoveryMessage);
+            taskService.ensureNotCancelled(task.getId());
+            Path retryOutput = Files.createDirectory(recoveryDir.resolve(OUTPUT_DIR));
+            List<String> retryCommand = compileProcessRunner.prepareCommand(javac, retryOutput, release, classpath,
+                    retrySources);
+            try {
+                return new CompiledTarget(retryOutput,
+                        recoveryMessage + compileProcessRunner.run(retryCommand, workDir, cancelled));
+            } catch (CompilationFailedException retry) {
+                throw new IllegalStateException(original.getMessage() + MESSAGE_RECOVERY_FAILED
+                        + JarPatchConstants.MESSAGE_DETAIL_SEPARATOR + retry.getMessage(), retry);
+            }
+        }
     }
 
-    /**
-     * 构建原包 classes 和全部嵌套 Jar 组成的编译 classpath。
-     *
-     * @param project 项目记录
-     * @return classpath 字符串
-     * @throws IOException 遍历依赖失败时抛出
-     */
-    private String buildClasspath(ProjectRecord project) throws IOException {
-        List<String> entries = new ArrayList<>();
-        Path extractedDir = workspaceService.extractedDir(project);
-        entries.add(extractedDir.toString());
-        entries.add(compileArtifactCommitter.classRoot(project).toString());
-        try (var stream = Files.walk(extractedDir)) {
-            stream.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().toLowerCase()
-                            .endsWith("." + JarPatchConstants.JAR_EXTENSION))
-                    .sorted(Comparator.comparing(Path::toString))
-                    .forEach(path -> entries.add(path.toString()));
-        }
-        return String.join(File.pathSeparator, entries);
+    /** 标识本组通过编译的输出，供所有组成功后统一提交。 */
+    private record CompiledTarget(Path output, String message) {
     }
 
     /**

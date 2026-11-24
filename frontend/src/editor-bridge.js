@@ -1,4 +1,5 @@
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
+import 'monaco-editor/esm/vs/editor/contrib/find/browser/findController.js';
 import 'monaco-editor/esm/vs/editor/contrib/suggest/browser/suggestController.js';
 import 'monaco-editor/esm/vs/basic-languages/java/java.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/xml/xml.contribution.js';
@@ -32,6 +33,7 @@ const UI_THEME_LIGHT = 'light';
 const MONACO_THEME_DARK = 'jarpatch-dark';
 const MONACO_THEME_LIGHT = 'jarpatch-light';
 const EDITOR_TOP_BOTTOM_PADDING = 10;
+const MONACO_FIND_ACTION = 'actions.find';
 const UNICODE_PREVIEW_ARIA_LABEL = '中文 Unicode 转义只读预览';
 const UNICODE_PREVIEW_FONT_FAMILY = '"JetBrains Mono", "Cascadia Code", "Cascadia Mono", Consolas, monospace';
 const UNICODE_PREVIEW_FONT_SIZE = 13.5;
@@ -776,6 +778,14 @@ class JavaLanguageClient {
   }
 }
 
+function showEditorFind(editor) {
+  if (!editor.getModel()) {
+    return;
+  }
+  editor.focus();
+  return editor.getAction(MONACO_FIND_ACTION).run();
+}
+
 /**
  * 用 Monaco 替代原 textarea，同时保留 renderer.js 已依赖的 value、disabled、focus 等接口。
  */
@@ -967,6 +977,10 @@ class MonacoEditorFacade {
    */
   async showQuickFix() {
     await this.editor.getAction('editor.action.quickFix').run();
+  }
+
+  showFind() {
+    return showEditorFind(this.editor);
   }
 
   /**
@@ -1645,6 +1659,10 @@ function createUnicodePreviewView(container) {
      */
     focus() {
       editor.focus();
+    },
+
+    showFind() {
+      return showEditorFind(editor);
     },
 
     /**

@@ -11,11 +11,12 @@ const PROFILE_TYPES = {
 };
 const PROFILER_EVENTS = new Set(['itimer', 'cpu', 'wall']);
 
-function requireUniqueDump(rows, directory) {
+function requireUniqueDump(rows, directory, windows) {
   const classes = rows.flatMap((item) => Array.isArray(item.dumpedClasses) ? item.dumpedClasses : []);
   if (!classes.length) throw new Error('目标类未加载或无法导出');
   if (classes.length !== 1) throw new Error('有多个同名类，请先选择 ClassLoader 哈希');
-  const location = classes[0].location;
+  const raw = classes[0].location;
+  const location = windows && typeof raw === 'string' ? raw.replace(/\\/g, '/') : raw;
   if (typeof location !== 'string' || !location.startsWith(directory + '/') || !location.endsWith('.class')
       || location.split('/').includes('..') || /[\u0000-\u001f]/.test(location)) {
     throw new Error('Arthas 返回的 class 路径超出本次任务目录');
@@ -23,12 +24,16 @@ function requireUniqueDump(rows, directory) {
   return location;
 }
 
+function artifactArgument(location) {
+  return /[\s"'\\]/.test(location) ? JSON.stringify(location) : location;
+}
+
 async function collectClass(access, session, className, loader, signal) {
   const directory = session.directory + '/class-' + randomBytes(12).toString('hex');
   await access.create(directory, signal);
   try {
-    const rows = await access.exec('dump -d ' + directory + (loader ? ' -c ' + loader : '') + ' ' + className, signal);
-    const location = requireUniqueDump(rows, directory);
+    const rows = await access.exec('dump -d ' + artifactArgument(directory) + (loader ? ' -c ' + loader : '') + ' ' + className, signal);
+    const location = requireUniqueDump(rows, directory, /^[a-z]:\//i.test(directory) || directory.startsWith('//'));
     const contents = await access.read(location, MAX_CLASS_BYTES, signal);
     if (contents.length < 8 || contents.readUInt32BE() !== CLASS_MAGIC) throw new Error('运行中 class 格式无效');
     return { className, loader, sha256: sha256(contents), size: contents.length, contents: contents.toString('base64') };
@@ -56,8 +61,8 @@ async function collectProfile(access, session, type, seconds, event, signal, emi
       if (!/not active|not running|inactive/i.test(profileText(status))) throw new Error('当前 JVM 已在采样或采样状态不可确认');
     }
     const command = type === 'jfr'
-      ? 'jfr start -n ' + name + ' --duration ' + seconds + 's --maxsize 16m -f ' + location
-      : 'profiler start --event ' + event + ' --timeout ' + seconds + ' --file ' + location + ' --format flamegraph';
+      ? 'jfr start -n ' + name + ' --duration ' + seconds + 's --maxsize 16m -f ' + artifactArgument(location)
+      : 'profiler start --event ' + event + ' --timeout ' + seconds + ' --file ' + artifactArgument(location) + ' --format flamegraph';
     if (signal.aborted) throw new Error('操作已取消');
     // 启动命令交给 JVM 自行限时。取消或断开时等到该次采集截止，避免停止别人的采样。
     let startError;
@@ -78,7 +83,11 @@ async function collectProfile(access, session, type, seconds, event, signal, emi
         contents = await access.read(location, MAX_PROFILE_BYTES, signal);
         break;
       } catch (error) {
-        if (attempt === 4 || signal.aborted || !/^远端操作退出码 197\b/.test(error.message)) throw error;
+        const pending = ['ENOENT', 'JARPATCH_ARTIFACT_PENDING'].includes(error.code) || /^远端操作退出码 197\b/.test(error.message);
+        if (attempt === 4 && type === 'jfr' && error.code === 'JARPATCH_ARTIFACT_PENDING') {
+          throw new Error('JFR 录制结束后文件仍为空，请检查目标 JVM 的 JFR 日志和临时目录');
+        }
+        if (attempt === 4 || signal.aborted || !pending) throw error;
         await delay(400, undefined, { signal });
       }
     }

@@ -3,6 +3,7 @@
   const root = view('Dialog');
   const tabs = [...root.querySelectorAll('[data-runtime-tab]')];
   const panes = [...root.querySelectorAll('[data-runtime-pane]')];
+  const integrationsWithManagedTarget = [...root.querySelectorAll('[data-runtime-managed-only]')];
   const jvmButtons = [...root.querySelectorAll('[data-runtime-diagnose]')];
   const sourcePanel = view('SourcePanel');
   const sourcePane = sourcePanel.parentElement;
@@ -11,6 +12,7 @@
   const updates = new Map();
   const logCharacterLimit = 220000;
   const traceHint = '采集最多 20 秒或 3 次，可切换到请求测试触发方法。';
+  const windowsTraceHint = '采集最多 20 秒或 3 次，可从目标应用的原有入口触发方法。';
   const methodAccessLabels = { package: '包可见', unknown: '访问级别未知' };
   const DEFAULT_SSH_PORT = 22;
   const AUTH_METHOD = {
@@ -19,8 +21,15 @@
   };
   const PROVIDER_TYPE = {
     DOCKER: 'docker',
-    KUBERNETES: 'kubernetes'
+    KUBERNETES: 'kubernetes',
+    LOCAL: 'local',
+    HOST: 'host',
+    WINDOWS: 'windows',
+    EXISTING: 'existing'
   };
+  const LOCAL_HOST = '本机';
+  const LOCAL_JVM = 'local-jvm';
+  const DIAGNOSTIC_TABS = new Set(['classes', 'jvm', 'advanced']);
   const HOST_OPTION = {
     EMPTY: '',
     CUSTOM: '__custom__',
@@ -73,6 +82,8 @@
   let integrations;
   let loadedCluster;
   let loadedLogin;
+  let loadedProvider;
+  let existingTarget;
   let savedHosts = [];
   let managingSshHosts = false;
   let connectionExpanded = false;
@@ -197,12 +208,53 @@
    * @param {{ method: string }} login 当前表单登录配置
    */
   function syncConnectionBarState(login) {
-    const isK8s = view('Provider').value === PROVIDER_TYPE.KUBERNETES;
-    const isOpenSsh = login.method === AUTH_METHOD.OPENSSH;
-    const hasOfflinePackage = Boolean(packageName);
+    const provider = view('Provider').value;
+    const isK8s = provider === PROVIDER_TYPE.KUBERNETES;
+    const local = provider === PROVIDER_TYPE.LOCAL;
+    const hostJvm = provider === PROVIDER_TYPE.HOST;
+    const windowsJvm = provider === PROVIDER_TYPE.WINDOWS;
+    const existing = provider === PROVIDER_TYPE.EXISTING;
+    const needsSsh = !local && (!existing || view('ExistingTransport').value === 'ssh');
+    const processOnly = local || hostJvm || windowsJvm || existing;
+    const isOpenSsh = needsSsh && login.method === AUTH_METHOD.OPENSSH;
+    const hasOfflinePackage = !existing && Boolean(packageName);
 
     // 同步单行工作条在 Docker 与 Kubernetes 模式下的按钮及字段标签
-    view('Connect').textContent = isK8s ? CONNECTION_COPY.LOAD_PODS : CONNECTION_COPY.LOAD_CONTAINERS;
+    view('Connect').textContent = processOnly ? '加载 Java 进程'
+      : isK8s ? CONNECTION_COPY.LOAD_PODS : CONNECTION_COPY.LOAD_CONTAINERS;
+    view('QuickBar').classList.toggle('is-local', local);
+    view('QuickBar').classList.toggle('is-existing', existing);
+    view('QuickBar').classList.toggle('is-existing-local', existing && !needsSsh);
+    view('QuickTarget').classList.toggle('is-process-only', processOnly);
+    view('Connect').hidden = existing;
+    view('QuickServer').hidden = existing && !needsSsh;
+    view('SshHostsField').hidden = !needsSsh;
+    view('SshConfig').hidden = !needsSsh;
+    view('ContainerField').hidden = processOnly;
+    view('ProcessField').hidden = existing;
+    view('ExistingTarget').hidden = !existing;
+    view('ExistingTarget').textContent = 'HTTP ' + (view('ExistingPort').value || '—')
+      + (existingTarget ? ' · PID ' + existingTarget.pid : '');
+    view('ExistingConfig').hidden = !existing;
+    view('PackageConfig').hidden = existing;
+    view('Attach').textContent = existing ? '连接已有 Arthas' : '连接 Arthas';
+    view('DetachLabel').textContent = existing ? '断开连接' : '释放 Arthas';
+    for (const name of ['EditSource', 'CompareClass']) view(name).hidden = existing || windowsJvm;
+    for (const name of ['TraceMethod', 'Trace', 'CancelTrace', 'TraceStatus']) {
+      view(name).hidden = existing;
+    }
+    for (const button of tabs) {
+      button.hidden = (existing || windowsJvm) && !DIAGNOSTIC_TABS.has(button.dataset.runtimeTab);
+    }
+    for (const integration of integrationsWithManagedTarget) integration.hidden = existing || windowsJvm;
+    view('Report').hidden = existing || windowsJvm;
+    view('HostLogSource').hidden = !hostJvm;
+    view('LocalLogHint').hidden = !local;
+    view('LogActions').hidden = local;
+    view('Logs').hidden = local;
+    const fileLog = view('LogSourceKind').value === 'file';
+    view('LogSourceLabel').textContent = fileLog ? '日志文件' : '服务单元';
+    view('LogSourceValue').placeholder = fileLog ? '/var/log/app/app.log' : 'app.service';
     view('ContainerLabel').textContent = isK8s
       ? CONNECTION_COPY.POD_CONTAINER_LABEL
       : CONNECTION_COPY.CONTAINER_LABEL;
@@ -245,6 +297,7 @@
   }
 
   function selectedTarget() {
+    if (view('Provider').value === PROVIDER_TYPE.EXISTING) return existingTarget || {};
     return { host, container: view('Container').value, pid: process?.pid, start: process?.start };
   }
 
@@ -254,6 +307,34 @@
     return method === AUTH_METHOD.PASSWORD
       ? { method, address, username: view('SshUser').value.trim(), port: view('SshPort').value }
       : { method, address };
+  }
+
+  function requireSshLogin() {
+    const login = loginFields();
+    if (!login.address) {
+      setConnectionBoxExpanded(true);
+      view('Host').focus();
+      throw new Error(CONNECTION_COPY.ERROR_HOST_REQUIRED);
+    }
+    if (login.method === AUTH_METHOD.PASSWORD && !login.username) {
+      setConnectionBoxExpanded(true);
+      view('SshUser').focus();
+      throw new Error(CONNECTION_COPY.ERROR_USER_REQUIRED);
+    }
+    return login;
+  }
+
+  function existingConnection() {
+    const data = { action: 'connectExisting', connection: 'local', arthasPort: view('ExistingPort').value,
+      arthasUser: view('ExistingUser').value.trim(), arthasPassword: view('ExistingPassword').value };
+    if (view('ExistingTransport').value === 'ssh') {
+      const login = requireSshLogin();
+      Object.assign(data, { connection: login.method, host: login.address, username: login.username,
+        port: login.port, password: view('SshPassword').value });
+      view('SshPassword').value = '';
+    }
+    view('ExistingPassword').value = '';
+    return data;
   }
 
   function savedHostFor(login) {
@@ -285,9 +366,14 @@
   function syncControls() {
     const clusterOptions = integrations?.cluster();
     const login = loginFields();
+    const provider = view('Provider').value;
+    const local = provider === PROVIDER_TYPE.LOCAL;
+    const hostJvm = provider === PROVIDER_TYPE.HOST;
+    const windowsJvm = provider === PROVIDER_TYPE.WINDOWS;
+    const existing = provider === PROVIDER_TYPE.EXISTING;
     const isPassword = login.method === AUTH_METHOD.PASSWORD;
-    const currentHost = Boolean(host) && JSON.stringify(loadedLogin) === JSON.stringify(login)
-      && JSON.stringify(loadedCluster) === JSON.stringify(clusterOptions);
+    const currentHost = Boolean(host) && loadedProvider === provider && (local || (
+      JSON.stringify(loadedLogin) === JSON.stringify(login) && JSON.stringify(loadedCluster) === JSON.stringify(clusterOptions)));
     const hasContainer = currentHost && Boolean(view('Container').value);
     const hasProcess = hasContainer && Boolean(process);
     const active = tasks.size > 0 || choosingSourceArchive;
@@ -322,27 +408,33 @@
     view('Container').disabled = lockTarget || !currentHost;
     view('Process').disabled = lockTarget || !hasContainer || processes.length === 0;
     view('Attach').hidden = canRelease;
-    view('Attach').disabled = closing || active || !hasProcess || canRelease;
+    view('Attach').disabled = lockTarget || (!existing && !hasProcess);
     view('Detach').hidden = !canRelease;
     view('Detach').disabled = closing || active || !canRelease;
     view('Package').disabled = lockTarget;
     view('ResetPackage').disabled = lockTarget;
+    for (const name of ['ExistingTransport', 'ExistingPort', 'ExistingUser', 'ExistingPassword']) view(name).disabled = lockTarget;
     view('Close').disabled = closing || managingSshHosts || choosingSourceArchive;
-    for (const name of ['ReadLogs', 'FollowLogs']) view(name).disabled = closing || targeting || !hasContainer || logActive;
+    const hasLogSource = !local && (!hostJvm || Boolean(view('LogSourceValue').value.trim()));
+    for (const name of ['ReadLogs', 'FollowLogs']) {
+      view(name).disabled = closing || targeting || !hasContainer || logActive || !hasLogSource;
+    }
+    for (const name of ['LogSourceKind', 'LogSourceValue']) view(name).disabled = closing || targeting || logActive;
     view('StopLogs').disabled = closing || !logActive;
     for (const name of ['Search', 'Methods', 'Source', 'Trace']) view(name).disabled = closing || !attached || classActive;
     for (const name of ['Class', 'Loader', 'Method']) view(name).disabled = closing || !attached || classActive;
     view('CancelTrace').disabled = closing || tasks.get('classes')?.type !== 'trace';
     jvmButtons.forEach((button) => { button.disabled = closing || !attached || jvmActive; });
     view('CancelJvm').disabled = closing || !jvmActive;
-    view('RefreshPorts').disabled = closing || !hasProcess || targeting || requestActive;
+    view('RefreshPorts').disabled = closing || !hasProcess || windowsJvm || targeting || requestActive;
     view('Send').disabled = closing || !hasProcess || targeting || requestActive || tasks.has('suite') || !view('Ports').value;
     view('CancelRequest').disabled = closing || !requestActive;
-    analysis?.sync({ closing, attached, hasProcess, targeting, classActive, requestActive });
+    analysis?.sync({ closing, attached, hasProcess: hasProcess && !windowsJvm, targeting, classActive, requestActive,
+      correlateEnabled: !local && !hostJvm });
     integrations?.sync({ closing, lockTarget, currentHost, hasProcess, targeting, attached, clusterOptions, classActive });
     const canPatch = !closing && attached && !classActive && !tasks.has('advanced') && !tasks.has('profile');
     view('EditSource').disabled = !canPatch || !integrations?.canApplyPatch();
-    const patchHint = attached ? integrations.sourcePatchHint() : '';
+    const patchHint = attached && !existing && !windowsJvm ? integrations.sourcePatchHint() : '';
     const patchAvailability = view('SourcePatchAvailability');
     patchAvailability.hidden = !patchHint;
     if (patchAvailability.textContent !== patchHint) patchAvailability.textContent = patchHint;
@@ -509,7 +601,7 @@
     view('Loader').value = '';
     clearClassChoices();
     for (const name of ['ClassOutput', 'JvmOutput', 'Response', 'RequestStatus']) view(name).textContent = '';
-    view('TraceStatus').textContent = traceHint;
+    view('TraceStatus').textContent = view('Provider').value === PROVIDER_TYPE.WINDOWS ? windowsTraceHint : traceHint;
   }
 
   async function refreshPorts() {
@@ -536,8 +628,8 @@
     fillOptions(view('Ports'), [], String, String, '先选择 Java 进程');
     syncControls();
     if (process) {
-      view('Status').textContent = '已选择 PID ' + process.pid + ' · ' + process.executable;
-      await refreshPorts();
+      view('Status').textContent = ['已选择 PID ' + process.pid, process.name, process.executable, process.user].filter(Boolean).join(' · ');
+      if (view('Provider').value !== PROVIDER_TYPE.WINDOWS) await refreshPorts();
     }
   }
 
@@ -551,17 +643,17 @@
       view('Status').textContent = '请选择运行中的容器';
       return;
     }
-    view('Status').textContent = '正在查找容器中的 Java 进程…';
+    view('Status').textContent = '正在查找 Java 进程…';
     try {
       processes = await invoke('target', { action: 'processes', ...selectedTarget() });
-      fillOptions(view('Process'), processes, (p) => 'PID ' + p.pid + ' · ' + p.executable,
+      fillOptions(view('Process'), processes, (p) => ['PID ' + p.pid, p.name || p.executable, p.user].filter(Boolean).join(' · '),
         (p) => p.pid, processes.length ? '请选择进程' : '未发现 Java 进程', true);
-      view('Status').textContent = processes.length ? '请选择 Java 进程' : '当前容器未发现可读的 Java 进程';
-      await selectProcess();
     } catch (error) {
-      view('Status').textContent = '容器已选中';
+      view('Status').textContent = 'Java 进程查询失败';
       throw error;
     }
+    view('Status').textContent = processes.length ? '请选择 Java 进程' : '当前环境未发现可读的 Java 进程';
+    await selectProcess();
   }
 
   function appendLog(text) {
@@ -581,10 +673,11 @@
     view('LogStatus').textContent = follow ? '正在追踪…' : '正在获取…';
     try {
       const result = await invoke('logs', {
-        action: 'logs', ...selectedTarget(), tail: view('Tail').value, follow
+        action: 'logs', ...selectedTarget(), tail: view('Tail').value, follow,
+        logSource: { kind: view('LogSourceKind').value, value: view('LogSourceValue').value.trim() }
       }, (kind, chunk) => { if (kind === 'log') appendLog(chunk); });
       if (!follow) {
-        appendLog(result || '该容器没有可读的近期标准输出日志。');
+        appendLog(result || '当前来源没有可读的近期日志。');
         view('LogStatus').textContent = '近期日志';
       } else {
         view('LogStatus').textContent = result || '日志流已结束';
@@ -790,6 +883,8 @@
         fillOptions(view('Ports'), [], String, String, '请选择 Java 进程');
       }
       view('SshPassword').value = '';
+      view('ExistingPassword').value = '';
+      existingTarget = undefined;
       attached = false;
       canRelease = false;
       clearLog();
@@ -802,7 +897,7 @@
       for (const name of ['Headers', 'Body']) view(name).value = '';
       root.close();
     } catch (error) {
-      view('Status').textContent = '远端清理未确认';
+      view('Status').textContent = 'Arthas 清理未确认';
       canRelease = true;
       throw error;
     } finally {
@@ -814,6 +909,19 @@
   bind('Btn', async () => {
     clearError();
     root.showModal();
+    if (view('Provider').value === PROVIDER_TYPE.EXISTING) {
+      setConnectionBoxExpanded(true);
+      selectTab('classes');
+      view('Status').textContent = '填写正在运行的 Arthas HTTP 端点';
+      view('ExistingTransport').focus();
+      return;
+    }
+    if (view('Provider').value === PROVIDER_TYPE.LOCAL) {
+      setConnectionBoxExpanded(false);
+      view('Status').textContent = '点击「加载 Java 进程」查看本机 JVM';
+      view('Connect').focus();
+      return;
+    }
     await manageSshHosts(() => bridge.listSshHosts());
     // 打开工作台时按是否有已保存主机智能决定默认态：有常用主机则默认选中首台并收起配置面板
     if (!host && !view('Host').value.trim()) {
@@ -833,6 +941,7 @@
     }
     setConnectionBoxExpanded(false);
     syncControls();
+    if (view('Provider').value === PROVIDER_TYPE.WINDOWS) selectTab('classes');
     view('Status').textContent = host ? CONNECTION_COPY.STATUS_RELOAD_OR_SELECT : CONNECTION_COPY.STATUS_READY_SAVED_HOST;
     view('SshHosts').focus();
   });
@@ -895,60 +1004,102 @@
     }
   });
   bind('Connect', async () => {
-    const login = loginFields();
-    // 发起连接前校验必填连接参数；缺失时主动展开配置面板引导补填
-    if (!login.address) {
-      setConnectionBoxExpanded(true);
-      view('Host').focus();
-      throw new Error(CONNECTION_COPY.ERROR_HOST_REQUIRED);
+    const provider = view('Provider').value;
+    if (provider === PROVIDER_TYPE.LOCAL) {
+      host = LOCAL_HOST;
+      loadedProvider = provider;
+      loadedLogin = undefined;
+      loadedCluster = undefined;
+      integrations.targets([]);
+      fillOptions(view('Container'), [{ id: LOCAL_JVM, name: LOCAL_HOST }], (item) => item.name, (item) => item.id, '', true);
+      await selectContainer();
+      view('Process').focus();
+      return;
     }
-    if (login.method === AUTH_METHOD.PASSWORD && !login.username) {
-      setConnectionBoxExpanded(true);
-      view('SshUser').focus();
-      throw new Error(CONNECTION_COPY.ERROR_USER_REQUIRED);
-    }
+    const login = requireSshLogin();
     const cluster = integrations.cluster();
+    const hostJvm = provider === PROVIDER_TYPE.HOST;
+    const windowsJvm = provider === PROVIDER_TYPE.WINDOWS;
     const sameLogin = host && JSON.stringify(login) === JSON.stringify(loadedLogin);
     const password = view('SshPassword').value;
     view('SshPassword').value = '';
-    view('Status').textContent = '正在通过 SSH 读取' + (cluster ? ' Kubernetes Pod…' : ' Docker 容器…');
+    const environment = windowsJvm ? 'Windows 宿主机' : hostJvm ? 'Linux 宿主机' : cluster ? 'Kubernetes 环境' : 'Docker 环境';
+    view('Status').textContent = '正在通过 SSH 连接 ' + environment + '…';
     try {
       let list;
       if (login.method === AUTH_METHOD.PASSWORD && (password || !sameLogin || savedHostFor(login))) {
         const connection = await invoke('target', { action: 'passwordContainers', host: login.address,
-          username: login.username, port: login.port, password, cluster });
+          username: login.username, port: login.port, password, cluster, hostJvm, windowsJvm });
         host = connection.host;
         list = connection.list;
       } else {
         const requestedHost = login.method === AUTH_METHOD.PASSWORD ? host : login.address;
-        list = await invoke('target', { action: 'containers', host: requestedHost, cluster });
+        list = await invoke('target', { action: 'containers', host: requestedHost, cluster, hostJvm, windowsJvm });
         host = requestedHost;
       }
       loadedLogin = login;
       loadedCluster = cluster;
-      integrations.targets(list);
-      fillOptions(view('Container'), list, (item) => item.name + ' · ' + item.image + ' · ' + item.status,
+      loadedProvider = provider;
+      integrations.targets(hostJvm || windowsJvm ? [] : list);
+      fillOptions(view('Container'), list, (item) => [item.name, item.image, item.status].filter(Boolean).join(' · '),
         (item) => item.id, list.length ? '请选择容器' : '无运行中容器', true);
       await selectContainer();
+      if (hostJvm || windowsJvm) view('Process').focus();
     } catch (error) {
-      if (JSON.stringify(login) !== JSON.stringify(loadedLogin) || JSON.stringify(cluster) !== JSON.stringify(loadedCluster)) {
+      if (provider !== loadedProvider || JSON.stringify(login) !== JSON.stringify(loadedLogin)
+          || JSON.stringify(cluster) !== JSON.stringify(loadedCluster)) {
         host = undefined;
         loadedLogin = undefined;
         loadedCluster = undefined;
+        loadedProvider = undefined;
         integrations.targets([]);
         fillOptions(view('Container'), [], String, String, '请先连接 SSH');
         await selectContainer();
       }
-      view('Status').textContent = 'SSH 或容器查询失败';
+      view('Status').textContent = 'SSH 或运行目标查询失败';
       throw error;
     }
   });
+  view('Provider').addEventListener('change', () => {
+    clearError();
+    host = undefined;
+    loadedLogin = undefined;
+    loadedCluster = undefined;
+    loadedProvider = undefined;
+    existingTarget = undefined;
+    view('ExistingPassword').value = '';
+    integrations.targets([]);
+    fillOptions(view('Container'), [], String, String, '请先加载运行目标');
+    selectContainer().then(() => {
+      const provider = view('Provider').value;
+      if (provider === PROVIDER_TYPE.EXISTING) {
+        setConnectionBoxExpanded(true);
+        selectTab('classes');
+        view('Status').textContent = '填写正在运行的 Arthas HTTP 端点';
+      } else {
+        if (provider === PROVIDER_TYPE.WINDOWS) selectTab('classes');
+        view('Status').textContent = provider === PROVIDER_TYPE.LOCAL
+          ? '点击「加载 Java 进程」查看本机 JVM' : '选择服务器后加载运行目标';
+      }
+    }).catch(showError);
+  });
+  view('ExistingTransport').addEventListener('change', syncControls);
+  view('ExistingPort').addEventListener('input', syncControls);
+  view('LogSourceKind').addEventListener('change', () => {
+    view('LogSourceValue').value = '';
+    clearLog();
+    syncControls();
+  });
+  view('LogSourceValue').addEventListener('input', syncControls);
   view('Container').addEventListener('change', () => { clearError(); selectContainer().catch(showError); });
   view('Process').addEventListener('change', () => { clearError(); selectProcess().catch(showError); });
   for (const name of ['Host', 'SshUser', 'SshPort', 'SshPassword']) {
     view(name).addEventListener('keydown', (event) => {
       // 忽略中文输入法组合态中的回车按键，避免误触发远程连接
-      if (!event.isComposing && event.key === 'Enter' && !view('Connect').disabled) view('Connect').click();
+      if (!event.isComposing && event.key === 'Enter') {
+        const button = view(view('Provider').value === PROVIDER_TYPE.EXISTING ? 'Attach' : 'Connect');
+        if (!button.disabled && !button.hidden) button.click();
+      }
     });
     view(name).addEventListener('input', syncControls);
   }
@@ -972,19 +1123,24 @@
     syncControls();
   });
   bind('Attach', async () => {
+    const existing = view('Provider').value === PROVIDER_TYPE.EXISTING;
+    const data = existing ? existingConnection()
+      : { action: 'attach', ...selectedTarget(), offline: Boolean(packageName) };
     canRelease = true;
+    if (existing) view('Status').textContent = '正在连接已有 Arthas…';
     try {
-      const result = await invoke('target', { action: 'attach', ...selectedTarget(), offline: Boolean(packageName) },
+      const result = await invoke('target', data,
         (kind, value) => { if (kind === 'status') view('Status').textContent = value; });
       attached = true;
+      existingTarget = existing ? result.target : undefined;
       integrations.setAttachment(result);
-      view('Status').textContent = 'Arthas ' + result.version + ' 已连接 · PID ' + result.pid;
+      view('Status').textContent = (existing ? '已连接已有 Arthas' : 'Arthas ' + result.version + ' 已连接') + ' · PID ' + result.pid;
       setConnectionBoxExpanded(false);
       selectTab('classes');
       view('Class').focus();
     } catch (error) {
       view('Status').textContent = 'Arthas 连接失败';
-      canRelease = /远端清理未确认|请先释放当前 Arthas 会话/.test(error.message);
+      canRelease = /Arthas 清理未确认|请先释放当前 Arthas 会话/.test(error.message);
       throw error;
     } finally {
       syncControls();
@@ -993,17 +1149,22 @@
   bind('Detach', async () => {
     if (!(await confirmSourceDiscard())) return;
     view('Status').textContent = '正在释放 Arthas…';
+    let result;
     try {
-      await invoke('target', { action: 'detach' });
+      result = await invoke('target', { action: 'detach' });
     } catch (error) {
-      view('Status').textContent = '远端清理未确认';
+      view('Status').textContent = 'Arthas 清理未确认';
       throw error;
     }
     attached = false;
     canRelease = false;
+    existingTarget = undefined;
     integrations.setAttachment(null);
     clearOutputs();
-    view('Status').textContent = 'Arthas 已释放';
+    view('Status').textContent = result?.borrowed ? '已断开本次 Arthas 诊断连接'
+      : result?.deferredCleanup
+      ? 'Arthas 已释放。目标 JVM 退出后重新加载进程，可回收被占用的代理 JAR。'
+      : 'Arthas 已释放';
     syncControls();
   });
   view('ConnToggleBtn').addEventListener('click', () => setConnectionBoxExpanded(!connectionExpanded));

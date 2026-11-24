@@ -106,6 +106,24 @@ function passwordSessionLabel(id) {
   return sessions.get(id)?.label;
 }
 
+function openPasswordLoopback(id, port, signal, callback) {
+  const session = sessions.get(id);
+  if (!session) return callback(new Error('密码 SSH 会话已断开，请重新连接'));
+  if (signal?.aborted) return callback(new Error('操作已取消'));
+  try {
+    session.client.forwardOut('127.0.0.1', 0, '127.0.0.1', port, (error, stream) => {
+      if (signal?.aborted) {
+        stream?.close();
+        return callback(new Error('操作已取消'));
+      }
+      if (error) return callback(new Error('SSH 转发失败，请检查服务端转发权限和 Arthas HTTP 端口'));
+      callback(null, stream);
+    });
+  } catch {
+    callback(new Error('密码 SSH 会话已断开，请重新连接'));
+  }
+}
+
 function runPasswordCommand(id, command, options, exitError) {
   const session = sessions.get(id);
   if (!session) return Promise.reject(new Error('密码 SSH 会话已断开，请重新输入密码连接'));
@@ -180,4 +198,4 @@ function runPasswordCommand(id, command, options, exitError) {
 }
 
 module.exports = { SESSION_ID, openPasswordSession, closePasswordSession, passwordSessionLabel, runPasswordCommand,
-  sshPasswordTarget, assertSshPassword };
+  openPasswordLoopback, sshPasswordTarget, assertSshPassword };

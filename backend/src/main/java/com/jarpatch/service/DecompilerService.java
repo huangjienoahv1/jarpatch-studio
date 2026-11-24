@@ -3,6 +3,7 @@ package com.jarpatch.service;
 import com.jarpatch.common.JarPatchConstants;
 import org.springframework.stereotype.Service;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -73,11 +74,12 @@ public class DecompilerService {
     public void decompile(Path extractedDir, Path sourceDir, String packageType, Set<String> selectedNestedJars, BooleanSupplier cancelRequested) throws IOException {
         Files.createDirectories(sourceDir);
         Path classesRoot = resolveClassesRoot(extractedDir, packageType);
+        String classpath = ArchiveService.classpath(extractedDir, classesRoot);
         if (Files.exists(classesRoot)) {
-            decompileClassesRoot(classesRoot, sourceDir, cancelRequested);
+            decompileClassesRoot(classesRoot, sourceDir, classpath, cancelRequested);
         }
 
-        decompileNestedJars(extractedDir, selectedNestedJars, sourceDir, cancelRequested);
+        decompileNestedJars(extractedDir, selectedNestedJars, sourceDir, classpath, cancelRequested);
     }
 
     /**
@@ -85,12 +87,13 @@ public class DecompilerService {
      *
      * @param classesRoot class 根目录
      * @param sourceDir   源码输出目录
+     * @param classpath   原包依赖
      * @param cancelRequested 取消检查回调
      * @throws IOException 读取 class 文件失败时抛出
      */
-    private void decompileClassesRoot(Path classesRoot, Path sourceDir, BooleanSupplier cancelRequested) throws IOException {
+    private void decompileClassesRoot(Path classesRoot, Path sourceDir, String classpath, BooleanSupplier cancelRequested) throws IOException {
         ensureNotCancelled(cancelRequested);
-        cfrBatchDecompiler.decompile(findClassFiles(classesRoot), sourceDir, cancelRequested);
+        cfrBatchDecompiler.decompile(findClassFiles(classesRoot), sourceDir, classpath, cancelRequested);
     }
 
     /**
@@ -104,9 +107,10 @@ public class DecompilerService {
      * @param selectedNestedJars 用户选择需要反编译的嵌套 Jar 相对路径
      * @param sourceDir          源码输出目录
      * @param cancelRequested    取消检查回调
+     * @param classpath          原包依赖
      * @throws IOException 查找嵌套 Jar 失败时抛出
      */
-    private void decompileNestedJars(Path extractedDir, Set<String> selectedNestedJars, Path sourceDir, BooleanSupplier cancelRequested) throws IOException {
+    private void decompileNestedJars(Path extractedDir, Set<String> selectedNestedJars, Path sourceDir, String classpath, BooleanSupplier cancelRequested) throws IOException {
         if (selectedNestedJars == null || selectedNestedJars.isEmpty()) {
             return;
         }
@@ -115,7 +119,7 @@ public class DecompilerService {
             Path nestedSourceDir = sourceDir.resolve(JarPatchConstants.SOURCE_NESTED_JAR_DIR)
                     .resolve(extractedDir.relativize(nestedJar).toString());
             Files.createDirectories(nestedSourceDir);
-            decompileArchive(nestedJar, nestedSourceDir, cancelRequested);
+            decompileArchive(nestedJar, nestedSourceDir, classpath, cancelRequested);
         }
     }
 
@@ -202,15 +206,16 @@ public class DecompilerService {
      *
      * @param archiveFile 嵌套 Jar 文件
      * @param sourceDir   当前嵌套 Jar 的源码输出目录
+     * @param classpath   原包依赖
      * @param cancelRequested 取消检查回调
      * @throws IOException 解压或读取嵌套 Jar 失败时抛出
      */
-    private void decompileArchive(Path archiveFile, Path sourceDir, BooleanSupplier cancelRequested) throws IOException {
+    private void decompileArchive(Path archiveFile, Path sourceDir, String classpath, BooleanSupplier cancelRequested) throws IOException {
         Path tempDir = Files.createTempDirectory(NESTED_JAR_TEMP_PREFIX);
         try {
             archiveService.unzip(archiveFile, tempDir, cancelRequested);
             // 嵌套 Jar 先展开再批量反编译，确保 module-info.class 不进入 CFR 普通类处理链路。
-            decompileClassesRoot(tempDir, sourceDir, cancelRequested);
+            decompileClassesRoot(tempDir, sourceDir, archiveFile + File.pathSeparator + classpath, cancelRequested);
         } finally {
             deleteDirectoryQuietly(tempDir);
         }

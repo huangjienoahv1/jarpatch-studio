@@ -1,10 +1,16 @@
 const crypto = require('crypto');
 const fs = require('fs/promises');
+const path = require('path');
 const { setTimeout: delay } = require('timers/promises');
 const fetch = require('./http-fetch');
-const { runSsh, shellCommand, curlConfig } = require('./runtime-transport');
-const { RuntimeTargets } = require('./runtime-targets');
-const { openPasswordSession, closePasswordSession, passwordSessionLabel } = require('./runtime-password-ssh');
+const { runCommand, runSsh, sshDestination, shellCommand, curlConfig } = require('./runtime-transport');
+const { RuntimeTargets, HOST_JVM, LOCAL_JVM, LOCAL_HOST } = require('./runtime-targets');
+const { availablePort, confirmLocalProcess, createLocalArthasDirectory, loopbackHttp, localJdk, localPorts, localProcesses,
+  removeLocalArthasDirectory, startLocalArthas, sweepDeferredArthasDirectories } = require('./runtime-local-jvm');
+const { SESSION_ID, openPasswordSession, closePasswordSession, passwordSessionLabel } = require('./runtime-password-ssh');
+const { EXISTING_ARTHAS, existingArthasOptions, arthasHttp, parseArthasHttp } = require('./runtime-existing-arthas');
+const { WINDOWS_JVM, windowsProcesses, uploadWindowsArthas, startWindowsArthas, removeWindowsArthas,
+  sweepWindowsArthas, windowsArthasListening } = require('./runtime-windows-ssh');
 const { HTTP_METHODS, normalizeSuite, sha256, assertionResults, captureMarker, parseHttpCapture,
   selectCorrelatedLogs } = require('./runtime-validation');
 const { collectClass, collectProfile } = require('./runtime-artifacts');
@@ -17,6 +23,8 @@ const ARTHAS_SIZE = 17150150;
 const ARTHAS_SHA256 = 'f4ea8e4ab4bb20a9925c21780bfb91331e73968eae881fd89b855cccaad21f1c';
 const ARTHAS_URL = 'https://github.com/alibaba/arthas/releases/download/arthas-all-' + ARTHAS_VERSION + '/arthas-bin.zip';
 const ARTHAS_USER = 'jarpatch';
+const ARTHAS_DIRECTORY = 'jarpatch-arthas-';
+const WINDOWS_ARTHAS_DIRECTORY = 'jarpatch-win-arthas-';
 const LOG_SECONDS = 300;
 const OBSERVE_SECONDS = 20;
 const MAX_PATCH_SOURCE_BYTES = 2 * 1024 * 1024;
@@ -32,7 +40,12 @@ const SCAN_JAVA = [
   '  case "$exe" in */bin/java) ;; "") [ "$(cat "$proc/comm" 2>/dev/null)" = java ] || continue ;; *) continue ;; esac',
   '  start=$(' + PROCESS_START + ' "$proc/stat" 2>/dev/null) || continue',
   '  ids=$(awk \'/^Uid:/{uid=$3} /^Gid:/{gid=$3} END{print uid ":" gid}\' "$proc/status" 2>/dev/null) || continue',
-  '  printf "%s\\t%s\\t%s\\t%s\\n" "$(basename "$proc")" "$start" "$ids" "$exe"',
+  '  name=',
+  '  if [ "$1" = host ]; then',
+  '    name=$( (tr "\\000" "\\n" < "$proc/cmdline") 2>/dev/null | awk \'jar{n=split($0,a,"/"); print a[n]; exit} $0=="-jar"{jar=1}\')',
+  '    name=$(printf "%s" "$name" | tr -d "\\t\\r\\n")',
+  '  fi',
+  '  printf "%s\\t%s\\t%s\\t%s\\t%s\\n" "$(basename "$proc")" "$start" "$ids" "$exe" "$name"',
   'done'
 ].join('\n');
 
@@ -64,7 +77,7 @@ const PREPARE = CHECK_TARGET + [
   'elif [ -x "${2%/*}/jar" ]; then extractor=jdk-jar',
   'elif command -v jar >/dev/null 2>&1; then extractor=jar',
   'else extractor=""; missing="${missing:+$missing、}unzip 或 JDK jar"; fi',
-  'if [ -n "$missing" ]; then printf \'缺少容器工具：%s\\n\' "$missing" >&2; exit 193; fi',
+  'if [ -n "$missing" ]; then printf \'缺少运行环境工具：%s\\n\' "$missing" >&2; exit 193; fi',
   'umask 077; mkdir "$1"',
   'printf "%s\\n" "$extractor"'
 ].join('\n');
@@ -117,6 +130,17 @@ const READ_ARTIFACT = [
 function requireContainer(id) {
   if (typeof id !== 'string' || !CONTAINER_ID.test(id)) throw new Error('请选择运行中的容器');
   return id;
+}
+
+function requireTarget(host, id) {
+  if (id === LOCAL_JVM && host === LOCAL_HOST) return id;
+  if (id === HOST_JVM || id === WINDOWS_JVM) return id;
+  return requireContainer(id);
+}
+
+function sessionGone(error) {
+  return ['ECONNREFUSED', 'JARPATCH_PROCESS_CHANGED'].includes(error.code)
+    || /^远端操作退出码 (7|191)\b/.test(error.message);
 }
 
 function readLines(output) {
@@ -234,12 +258,13 @@ class RuntimeWorkbench {
     const controller = new AbortController();
     const promise = this.execute(data, controller.signal, emit).catch((error) => {
       if (controller.signal.aborted && error.name === 'AbortError') throw new Error('操作已取消');
+      if (error.message?.startsWith('远端操作退出码 190')) throw new Error('SSH 账号的 UID/GID 与目标 JVM 不同，请使用运行该应用的账号连接');
       if (error.message?.startsWith('远端操作退出码 191')) throw new Error('目标 Java 进程已变化，请重新选择实例');
       if (error.message?.startsWith('远端操作退出码 192')) throw new Error('目标 JVM 的监听端口不可读');
       if (/^远端操作退出码 193\b/.test(error.message)) {
-        const missing = error.message.match(/缺少容器工具：([^）\r\n]+)/)?.[1];
-        throw new Error(missing ? '当前执行容器缺少工具：' + missing
-          : '当前执行容器的依赖检查失败，需要 curl、timeout，以及 unzip 或 JDK jar');
+        const missing = error.message.match(/缺少运行环境工具：([^）\r\n]+)/)?.[1];
+        throw new Error(missing ? '当前运行环境缺少工具：' + missing
+          : '运行环境的依赖检查失败，需要 curl、timeout，以及 unzip 或 JDK jar');
       }
       if (error.message?.startsWith('远端操作退出码 194')) throw new Error('未找到目标进程对应的完整 JDK');
       if (error.message?.startsWith('远端操作退出码 195')) throw new Error('Arthas 临时端口已占用，请重新连接');
@@ -273,17 +298,18 @@ class RuntimeWorkbench {
 
   async execute(data, signal, emit) {
     switch (data?.action) {
-      case 'containers': return this.containers(data.host, signal, data.cluster);
+      case 'containers': return this.containers(data.host, signal, data.cluster, data.hostJvm, data.windowsJvm);
       case 'passwordContainers': return this.passwordContainers(data, signal);
       case 'disconnectPassword':
         if (this.session || this.attaching || this.passwordConnecting) throw new Error('请先结束当前连接操作');
         closePasswordSession(this.passwordHost);
         this.passwordHost = undefined;
         return;
-      case 'processes': return this.processes(data.host, requireContainer(data.container), signal);
+      case 'processes': return this.processes(data.host, requireTarget(data.host, data.container), signal);
       case 'ports': return this.ports(await this.target(data, signal), signal);
       case 'logs': return this.logs(data, signal, emit);
       case 'attach': return this.attach(data, signal, emit);
+      case 'connectExisting': return this.connectExisting(data, signal);
       case 'detach': return this.detach();
       case 'diagnose': return this.diagnose(data, signal, emit);
       case 'request': return this.request(data, signal);
@@ -311,7 +337,7 @@ class RuntimeWorkbench {
     let host;
     try {
       host = await openPasswordSession(data, this.confirmSshHost, signal);
-      const list = await this.containers(host, signal, data.cluster);
+      const list = await this.containers(host, signal, data.cluster, data.hostJvm, data.windowsJvm);
       if (signal.aborted) throw new Error('操作已取消');
       closePasswordSession(this.passwordHost);
       this.passwordHost = host;
@@ -324,7 +350,16 @@ class RuntimeWorkbench {
     }
   }
 
-  async containers(host, signal, cluster) {
+  async containers(host, signal, cluster, hostJvm, windowsJvm) {
+    if (windowsJvm === true) return [{ id: WINDOWS_JVM, name: 'Windows 宿主机' }];
+    if (hostJvm === true) {
+      await runSsh(host, 'test -r /proc/self/stat', { signal })
+        .catch((error) => {
+          if (/^远端操作退出码 1\b/.test(error.message)) throw new Error('该接入方式需要 Linux 宿主机和可读的 /proc');
+          throw error;
+        });
+      return [{ id: HOST_JVM, name: 'Linux 宿主机' }];
+    }
     if (cluster) return this.targets.listKubernetes(host, cluster, signal);
     const output = await runSsh(host, shellCommand(['docker', 'ps', '--no-trunc', '--format', '{{json .}}']), { signal });
     return readLines(output).map(JSON.parse).filter((item) => CONTAINER_ID.test(item.ID)).map((item) => ({
@@ -359,11 +394,22 @@ class RuntimeWorkbench {
   }
 
   async processes(host, container, signal) {
-    const output = await this.targets.exec(host, container, ['sh', '-c', SCAN_JAVA], { signal });
+    if (container === LOCAL_JVM) {
+      await sweepDeferredArthasDirectories();
+      return localProcesses(signal);
+    }
+    if (container === WINDOWS_JVM) {
+      const rows = await windowsProcesses(host, signal);
+      await sweepWindowsArthas(host, signal);
+      return rows;
+    }
+    const hostJvm = container === HOST_JVM;
+    const output = await this.targets.exec(host, container, ['sh', '-c', SCAN_JAVA, 'sh', hostJvm ? 'host' : 'container'], { signal });
     const found = readLines(output).map((line) => {
-      const [pid, start, user, executable] = line.split('\t');
-      return { pid, start, user, executable };
+      const [pid, start, user, executable, name] = line.split('\t');
+      return { pid, start, user, executable, name };
     }).filter((p) => /^\d+$/.test(p.pid) && /^\d+$/.test(p.start) && /^\d+:\d+$/.test(p.user));
+    if (hostJvm) return found;
     // 入口用户和 JVM 用户不同时，按 JVM UID/GID 读取被 /proc 权限保护的可执行文件。
     for (const process of found.filter((item) => !item.executable)) {
       const output = await this.targetExec({ ...process, host, container },
@@ -374,7 +420,17 @@ class RuntimeWorkbench {
   }
 
   async target(data, signal) {
-    const container = requireContainer(data.container);
+    const container = requireTarget(data.host, data.container);
+    if (container === LOCAL_JVM) {
+      const process = await confirmLocalProcess({ pid: data.pid, start: data.start }, signal);
+      return { ...process, host: LOCAL_HOST, container };
+    }
+    if (container === WINDOWS_JVM) {
+      const process = (await windowsProcesses(data.host, signal, data.pid))
+        .find((row) => row.pid === data.pid && row.start === data.start);
+      if (!process) throw new Error('目标 Java 进程已变化，请重新选择实例');
+      return { ...process, host: data.host, container };
+    }
     const processes = await this.processes(data.host, container, signal);
     const process = processes.find((candidate) => candidate.pid === data.pid && candidate.start === data.start);
     if (!process) throw new Error('目标 Java 进程已变化，请重新选择实例');
@@ -388,21 +444,25 @@ class RuntimeWorkbench {
   }
 
   async ports(target, signal) {
-    const output = await this.targetExec(target, CHECK_TARGET + FIND_PORTS, [], { signal });
+    if (target.container === WINDOWS_JVM) throw new Error('Windows 宿主机使用应用原有入口触发请求');
+    const ports = target.container === LOCAL_JVM ? await localPorts(target, signal)
+      : readLines(await this.targetExec(target, CHECK_TARGET + FIND_PORTS, [], { signal }))
+        .filter((line) => /^[0-9A-F]{4}$/i.test(line)).map((hex) => parseInt(hex, 16));
     const active = this.session;
     const diagnosticPort = active?.host === target.host && active.container === target.container && active.pid === target.pid
       ? active.port : undefined;
-    return [...new Set(readLines(output).filter((line) => /^[0-9A-F]{4}$/i.test(line)).map((hex) => parseInt(hex, 16)))]
+    return [...new Set(ports)]
       .filter((port) => port !== diagnosticPort).sort((a, b) => a - b);
   }
 
   logs(data, signal, emit) {
-    const container = requireContainer(data.container);
+    const container = requireTarget(data.host, data.container);
+    if (container === LOCAL_JVM || container === WINDOWS_JVM) throw new Error('请从应用控制台或日志文件读取已有日志');
     const tail = Number(data.tail);
     if (!Number.isInteger(tail) || tail < 1 || tail > 1000) throw new Error('日志行数应为 1 至 1000');
-    if (!data.follow) return this.targets.logs(data.host, container, { tail }, { signal })
-      .catch((error) => { throw new Error('读取容器标准输出日志失败：' + throwableMessage(error)); });
-    return this.targets.logs(data.host, container, { tail, follow: true, seconds: LOG_SECONDS },
+    if (!data.follow) return this.targets.logs(data.host, container, { tail, source: data.logSource }, { signal })
+      .catch((error) => { throw new Error('读取应用日志失败：' + throwableMessage(error)); });
+    return this.targets.logs(data.host, container, { tail, source: data.logSource, follow: true, seconds: LOG_SECONDS },
       { signal, timeout: (LOG_SECONDS + 10) * 1000, onChunk: (value) => emit('log', value) })
       .catch((error) => {
         if (!error.message.startsWith('远端操作退出码 124')) throw error;
@@ -418,20 +478,53 @@ class RuntimeWorkbench {
     let starting = false;
     try {
       const target = await this.target(data, signal);
-      const executable = target.crossMount
-        ? (await this.targetExec(target, CHECK_TARGET + 'command -v java', [], { signal })).trim()
-        : target.executable.replace(/\/jre\/bin\/java$/, '/bin/java');
-      const directory = '/tmp/jarpatch-arthas-' + crypto.randomBytes(12).toString('hex');
-      session = { ...target, directory, port: crypto.randomInt(20000, 40000), secret: crypto.randomBytes(32).toString('hex') };
-      session.patchEnabled = !this.targets.selected(target.host, target.container);
-      emit('status', '检查容器工具和目标 JDK');
-      const extractor = (await this.targetExec(session, PREPARE, [directory, executable], { signal })).trim();
-      created = true;
-      emit('status', '校验 Arthas ' + ARTHAS_VERSION + ' 完整包' + (extractor === 'unzip' ? '' : '（使用 JDK jar 解包）'));
+      const local = target.container === LOCAL_JVM;
+      const hostJvm = target.container === HOST_JVM;
+      const windowsJvm = target.container === WINDOWS_JVM;
+      emit('status', '检查运行环境和目标 JDK');
+      const jdk = local ? await localJdk(target) : undefined;
+      const port = local ? await availablePort() : crypto.randomInt(20000, 40000);
+      const suffix = crypto.randomBytes(12).toString('hex');
+      const directory = local ? await createLocalArthasDirectory() : windowsJvm ? undefined : '/tmp/' + ARTHAS_DIRECTORY + suffix;
+      session = { ...target, directory, port, secret: crypto.randomBytes(32).toString('hex'),
+        patchEnabled: !local && !hostJvm && !windowsJvm && !this.targets.selected(target.host, target.container) };
+      if (windowsJvm) session.staging = WINDOWS_ARTHAS_DIRECTORY + suffix;
+      if (local) created = true;
+      let executable;
+      let extractor;
+      if (!local && !windowsJvm) {
+        executable = target.executable?.replace(/\/jre\/bin\/java$/, '/bin/java');
+        if (hostJvm && !executable) {
+          executable = (await this.targetExec(target, CHECK_TARGET + 'readlink "/proc/$pid/exe"', [], { signal })).trim()
+            .replace(/\/jre\/bin\/java$/, '/bin/java');
+        }
+        if (target.crossMount) executable = (await this.targetExec(target, CHECK_TARGET + 'command -v java', [], { signal })).trim();
+        if (hostJvm) await this.targetExec(target, CHECK_TARGET + '[ -x "${1%/*}/jcmd" ] || exit 194', [executable], { signal });
+        extractor = (await this.targetExec(session, PREPARE, [directory, executable], { signal })).trim();
+        created = true;
+      }
+      emit('status', '校验 Arthas ' + ARTHAS_VERSION + ' 完整包');
       const distribution = await getDistribution(data.file, signal);
-      emit('status', '上传离线包');
-      await this.targets.exec(target.host, target.container, ['sh', '-c', 'umask 077; cat > "$1/package.zip"', 'sh', directory],
-        { signal, user: target.user, input: distribution, timeout: 45000 });
+      if (local) {
+        emit('status', '解包 Arthas');
+        const archive = path.join(directory, 'package.zip');
+        await fs.writeFile(archive, distribution, { signal, mode: 0o600, flag: 'wx' });
+        await runCommand(jdk.archive, ['xf', archive], { cwd: directory, signal, timeout: 30000 });
+        await fs.unlink(archive);
+      } else if (windowsJvm) {
+        emit('status', '上传 Arthas 包到 Windows 宿主机');
+        created = true;
+        try {
+          await uploadWindowsArthas(session, distribution, ARTHAS_SHA256, signal);
+        } catch (error) {
+          if (/^远端操作退出码 198\b/.test(error.message)) created = false;
+          throw error;
+        }
+      } else {
+        emit('status', extractor === 'unzip' ? '上传 Arthas 包' : '上传 Arthas 包（将使用 JDK jar 解包）');
+        await this.targets.exec(target.host, target.container, ['sh', '-c', 'umask 077; cat > "$1/package.zip"', 'sh', directory],
+          { signal, user: target.user, input: distribution, timeout: 45000 });
+      }
       const properties = [
         'arthas.config.overrideAll=true',
         'arthas.ip=127.0.0.1',
@@ -445,11 +538,19 @@ class RuntimeWorkbench {
           + (session.patchEnabled ? '' : ',redefine'),
         ''
       ].join('\n');
+      if (signal.aborted) throw new Error('操作已取消');
       emit('status', '连接 Java 进程 ' + target.pid);
       starting = true;
-      await this.targetExec(session, target.crossMount ? START_ARTHAS_CROSS : START_ARTHAS,
-        [directory, executable, String(session.port), extractor],
-        { input: properties, timeout: 42000, sensitive: true, bootDiagnostics: true });
+      if (local) {
+        session.localStarting = true;
+        await startLocalArthas(session, jdk, properties);
+      } else if (windowsJvm) {
+        await startWindowsArthas(session, properties);
+      } else {
+        await this.targetExec(session, target.crossMount ? START_ARTHAS_CROSS : START_ARTHAS,
+          [directory, executable, String(session.port), extractor],
+          { input: properties, timeout: 42000, sensitive: true, bootDiagnostics: true });
+      }
       let proof;
       for (let attempt = 0; attempt < 5; attempt++) {
         if (signal.aborted) throw new Error('操作已取消');
@@ -477,7 +578,7 @@ class RuntimeWorkbench {
           await this.removeDirectory(session);
         } catch (cleanupError) {
           this.session = session;
-          throw new Error(throwableMessage(error) + '。远端清理未确认，可重新释放会话：' + throwableMessage(cleanupError));
+          throw new Error(throwableMessage(error) + '。Arthas 清理未确认，可重新释放会话：' + throwableMessage(cleanupError));
         }
       }
       throw error;
@@ -486,8 +587,53 @@ class RuntimeWorkbench {
     }
   }
 
+  async connectExisting(data, signal) {
+    if (this.session || this.attaching || this.closing || this.passwordConnecting) throw new Error('请先结束当前连接操作');
+    const options = existingArthasOptions(data);
+    this.attaching = true;
+    let passwordHost;
+    try {
+      let sshHost;
+      if (data.connection === 'password') {
+        if (!this.confirmSshHost) throw new Error('密码认证需要桌面工作台确认服务器指纹');
+        passwordHost = await openPasswordSession(data, this.confirmSshHost, signal);
+        sshHost = passwordHost;
+      } else if (data.connection === 'openssh') {
+        sshDestination(data.host);
+        if (SESSION_ID.test(data.host)) throw new Error('请输入有效的 OpenSSH 主机');
+        sshHost = data.host;
+      }
+      const session = { ...options, host: sshHost || LOCAL_HOST, sshHost, passwordHost, container: EXISTING_ARTHAS,
+        borrowed: true, start: crypto.randomBytes(16).toString('hex'), patchEnabled: false };
+      const proof = await this.arthas(session, { action: 'exec', command: 'session', execTimeout: 4000 }, { signal });
+      const rows = checkArthasResult(proof);
+      const pid = String(rows.find((row) => row.type === 'session')?.javaPid ?? '');
+      session.pid = assertMatch(pid, /^[1-9]\d{0,9}$/, '目标 Arthas 未返回有效的 Java 进程号');
+      if (signal.aborted) throw new Error('操作已取消');
+      this.session = session;
+      return { target: targetIdentity(session), pid: session.pid, borrowed: true, patchEnabled: false };
+    } catch (error) {
+      closePasswordSession(passwordHost);
+      if (error.code === 'ECONNREFUSED') throw new Error('无法连接该 Arthas HTTP 端口，请检查代理是否运行');
+      throw error;
+    } finally {
+      this.attaching = false;
+    }
+  }
+
   async arthas(session, data, options = {}) {
+    if (session.borrowed) {
+      return parseArthasHttp(await arthasHttp(session.port, data,
+        { ...options, authorization: session.authorization, sshHost: session.sshHost }));
+    }
     const auth = Buffer.from(ARTHAS_USER + ':' + session.secret).toString('base64');
+    if (session.container === WINDOWS_JVM) {
+      return parseArthasHttp(await arthasHttp(session.port, data,
+        { ...options, authorization: 'Basic ' + auth, sshHost: session.host }));
+    }
+    if (session.container === LOCAL_JVM) {
+      return parseArthasHttp(await this.localArthasHttp(session, data, auth, options));
+    }
     const entries = [
       ['url', 'http://127.0.0.1:' + session.port + '/api'],
       ['header', 'Authorization: Basic ' + auth], ['header', 'Content-Type: application/json'],
@@ -503,12 +649,28 @@ class RuntimeWorkbench {
     }
   }
 
+  async localArthasHttp(session, data, auth, { signal, timeout } = {}) {
+    await confirmLocalProcess(session, signal);
+    return arthasHttp(session.port, data, { authorization: auth ? 'Basic ' + auth : undefined, signal, timeout });
+  }
+
   checkIdentity(session, rows) {
     const identity = rows.find((row) => row.type === 'session');
     if (String(identity?.javaPid) !== session.pid) throw new Error('Arthas 未返回匹配的 Java 进程');
   }
 
   async checkAuthentication(session, signal) {
+    if (session.container === WINDOWS_JVM) {
+      const response = await arthasHttp(session.port, { action: 'exec', command: 'version' },
+        { sshHost: session.host, signal, timeout: 6500 });
+      if (response.status !== 401) throw new Error('Arthas 身份验证未生效，无法确认代理归属');
+      return;
+    }
+    if (session.container === LOCAL_JVM) {
+      const response = await this.localArthasHttp(session, { action: 'exec', command: 'version' }, null, { signal, timeout: 6500 });
+      if (response.status !== 401) throw new Error('Arthas 本地身份验证未生效，无法确认代理归属');
+      return;
+    }
     const entries = [
       ['url', 'http://127.0.0.1:' + session.port + '/api'],
       ['header', 'Content-Type: application/json'],
@@ -527,7 +689,7 @@ class RuntimeWorkbench {
       this.checkIdentity(session, checkArthasResult(status));
       await this.checkAuthentication(session);
     } catch (error) {
-      if (/^远端操作退出码 (7|191)\b/.test(error.message)) return;
+      if (sessionGone(error) || (session.container === WINDOWS_JVM && !await windowsArthasListening(session))) return;
       throw error;
     }
     let stopError;
@@ -541,7 +703,7 @@ class RuntimeWorkbench {
       try {
         await this.arthas(session, { action: 'exec', command: 'version', execTimeout: 2000 }, { timeout: 6500 });
       } catch (error) {
-        if (/^远端操作退出码 (7|191)\b/.test(error.message)) return;
+        if (sessionGone(error) || (session.container === WINDOWS_JVM && !await windowsArthasListening(session))) return;
         stopError ??= error;
       }
       await delay(350);
@@ -550,6 +712,10 @@ class RuntimeWorkbench {
   }
 
   async removeDirectory(session) {
+    if (session.container === WINDOWS_JVM) return removeWindowsArthas(session);
+    if (session.container === LOCAL_JVM) {
+      return removeLocalArthasDirectory(session.directory, session.localStarting);
+    }
     if (!/^\/tmp\/jarpatch-arthas-[a-f0-9]{24}$/.test(session.directory)) throw new Error('Arthas 临时目录无法确认');
     if (session.targetArtifactsCreated) {
       try {
@@ -570,10 +736,16 @@ class RuntimeWorkbench {
     if (session.observing || session.artifact) throw new Error('请先结束当前采集');
     this.closing = true;
     try {
+      if (session.borrowed) {
+        closePasswordSession(session.passwordHost);
+        this.session = null;
+        return { borrowed: true };
+      }
       if (session.hotPatch) await this.restoreHotPatch(session);
       await this.stopOwnedSession(session);
-      await this.removeDirectory(session);
+      const deferredCleanup = await this.removeDirectory(session);
       this.session = null;
+      return { deferredCleanup: deferredCleanup === true };
     } finally {
       this.closing = false;
     }
@@ -588,6 +760,11 @@ class RuntimeWorkbench {
 
   async diagnose(data, signal, emit) {
     const session = this.requireSession(data);
+    if (session.borrowed) {
+      if (data.type === 'trace') throw new Error('已有 Arthas 连接仅支持查询诊断');
+      const proof = await this.arthas(session, { action: 'exec', command: 'session', execTimeout: 4000 }, { signal });
+      this.checkIdentity(session, checkArthasResult(proof));
+    }
     const command = arthasCommand(data);
     if ((data.type === 'source' || data.type === 'trace') && session.hotPatch?.className === data.className) {
       throw new Error('请先恢复该类的原 class，再执行反编译或追踪');
@@ -699,11 +876,42 @@ class RuntimeWorkbench {
   }
 
   artifactAccess(session) {
+    const exec = async (command, signal) => checkArthasResult(await this.arthas(session, {
+      action: 'exec', command, execTimeout: 6500
+    }, { signal, timeout: 11000 }));
+    if (session.container === LOCAL_JVM) {
+      return {
+        exec,
+        create: (directory) => fs.mkdir(directory, { mode: 0o700 }),
+        remove: (directory) => fs.rm(directory, { recursive: true, force: true }),
+        read: async (location, maxBytes, signal) => {
+          const resolved = await fs.realpath(location);
+          const root = await fs.realpath(session.directory);
+          const relative = path.relative(root, resolved);
+          if (!relative || relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)) {
+            throw new Error('采集文件超出工作台临时目录');
+          }
+          const handle = await fs.open(resolved, 'r');
+          try {
+            const stat = await handle.stat();
+            if (!stat.isFile() || stat.size > maxBytes) throw new Error('本机采集文件类型或大小无效');
+            if (!stat.size) {
+              const error = new Error('JVM 未写出可读取的采集文件');
+              error.code = 'JARPATCH_ARTIFACT_PENDING';
+              throw error;
+            }
+            const contents = await handle.readFile({ signal });
+            if (contents.length > maxBytes) throw new Error('本机采集文件超过大小限制');
+            return contents;
+          } finally {
+            await handle.close();
+          }
+        }
+      };
+    }
     const mount = session.crossMount ? 'mount="/proc/$pid/root"\n' : 'mount=\n';
     return {
-      exec: async (command, commandSignal) => checkArthasResult(await this.arthas(session, {
-        action: 'exec', command, execTimeout: 6500
-      }, { signal: commandSignal, timeout: 11000 })),
+      exec,
       create: (directory, commandSignal) => this.targetExec(session, CHECK_TARGET + mount + 'umask 077; mkdir -- "$mount$1"',
         [directory], { signal: commandSignal }),
       remove: (directory) => this.targetExec(session, CHECK_TARGET + mount + 'exec rm -rf -- "$mount$1"', [directory], { timeout: 10000 }),
@@ -714,6 +922,8 @@ class RuntimeWorkbench {
 
   async captureArtifact(data, signal, emit) {
     const session = this.requireSession(data);
+    if (session.borrowed) throw new Error('已有 Arthas 连接仅支持查询诊断');
+    if (session.container === WINDOWS_JVM) throw new Error('Windows 宿主机暂不支持文件采集');
     if (session.observing || session.artifact) throw new Error('当前 JVM 已有诊断采集，请先结束该任务');
     session.artifact = true;
     const access = this.artifactAccess(session);
@@ -862,6 +1072,9 @@ class RuntimeWorkbench {
   }
 
   async correlate(data, signal) {
+    if (data.container === LOCAL_JVM || data.container === HOST_JVM) {
+      throw new Error('当前运行环境请在应用日志中按 Request ID 或 Trace ID 查询');
+    }
     const record = this.lastRequest;
     if (!record || ['host', 'container', 'pid', 'start'].some((key) => record[key] !== data[key])) {
       throw new Error('请在当前目标执行一次请求后查询关联日志');
@@ -891,7 +1104,7 @@ class RuntimeWorkbench {
           size: response.size, digest: response.digest, assertions: assertionResults(test.assertions, response) });
       } catch (error) {
         if (signal.aborted) throw error;
-        if (/^远端操作退出码 (191|196|255)\b/.test(error.message)) throw error;
+        if (error.code === 'JARPATCH_PROCESS_CHANGED' || /^远端操作退出码 (191|196|255)\b/.test(error.message)) throw error;
         results.push({ name: test.name, method: test.method, error: throwableMessage(error) });
       }
     }
@@ -910,10 +1123,12 @@ class RuntimeWorkbench {
     const host = data.serverName
       ? assertMatch(data.serverName, DNS_NAME, 'TLS 主机名格式无效', 253) : '127.0.0.1';
     const target = resolvedTarget || await this.target(data, signal);
+    if (target.container === WINDOWS_JVM) throw new Error('请通过 Windows 宿主机上原有的应用入口发送请求');
     if (this.session?.host === target.host && this.session.container === target.container && this.session.port === port) {
       throw new Error('请选择业务端口');
     }
     const marker = captureMarker();
+    const headers = [];
     const entries = [
       ['url', protocol + '://' + host + ':' + port + address],
       ['request', method],
@@ -928,6 +1143,7 @@ class RuntimeWorkbench {
         if (!/^[!#$%&'*+.^_\x60|~\w-]+:[^\u0000-\u0008\u000a-\u001f\u007f]*$/.test(header)) {
           throw new Error('请求头每行应为“名称: 值”格式');
         }
+        headers.push(header);
         entries.push(['header', header]);
       }
     }
@@ -936,6 +1152,26 @@ class RuntimeWorkbench {
         throw new Error('请求体须为 64 KiB 以内的文本');
       }
       entries.push(['data-raw', data.body]);
+    }
+    if (target.container === LOCAL_JVM) {
+      if (!(await this.ports(target, signal)).includes(port)) throw new Error('该端口已关闭或不再由所选 JVM 监听，请刷新端口');
+      const requestHeaders = Object.create(null);
+      for (const header of headers) {
+        const colon = header.indexOf(':');
+        const name = header.slice(0, colon).toLowerCase();
+        const value = header.slice(colon + 1).trim();
+        requestHeaders[name] = requestHeaders[name] == null ? value : [].concat(requestHeaders[name], value);
+      }
+      requestHeaders.host ??= host + ':' + port;
+      const started = Date.now();
+      const result = await loopbackHttp({ protocol, port, serverName: data.serverName || undefined, method, address,
+        headers: requestHeaders, body: method !== 'HEAD' && method !== 'GET' ? data.body : undefined, signal });
+      const headerLines = ['HTTP ' + result.status + ' ' + result.reason];
+      for (let i = 0; i < result.headers.length; i += 2) headerLines.push(result.headers[i] + ': ' + result.headers[i + 1]);
+      const summary = marker + result.status + ' ' + ((Date.now() - started) / 1000).toFixed(3) + ' ' + result.body.length + '\n';
+      const output = Buffer.concat([Buffer.from(headerLines.join('\r\n') + '\r\n\r\n'), result.body, Buffer.from(summary)]);
+      const response = parseHttpCapture(output, marker, data.headers);
+      return structured ? response : response.text;
     }
     const send = CHECK_TARGET + 'ports=$(\n' + FIND_PORTS + '\n) || exit 192\n'
       + 'printf "%s\\n" "$ports" | grep -Fxi -- "$1" >/dev/null || exit 196\n'
@@ -947,7 +1183,7 @@ class RuntimeWorkbench {
       return structured ? response : response.text;
     } catch (error) {
       if (/^远端操作退出码 (35|51|60)\b/.test(error.message)) throw new Error('TLS 握手或证书验证失败，请核对协议、端口、证书信任和 TLS 主机名');
-      if (/^远端操作退出码 7\b/.test(error.message)) throw new Error('无法通过容器内回环地址连接该端口');
+      if (/^远端操作退出码 7\b/.test(error.message)) throw new Error('无法通过目标环境的回环地址连接该端口');
       if (/^远端操作退出码 28\b/.test(error.message)) throw new Error('业务请求超时');
       if (/^远端操作退出码 63\b/.test(error.message)) throw new Error('响应超过大小限制');
       throw error;

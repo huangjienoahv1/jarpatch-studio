@@ -180,7 +180,7 @@ public class JavaVersionService {
      * @param javaPath      源码树路径
      * @return class 条目路径
      */
-    private String resolveClassEntry(String compileTarget, String javaPath) {
+    static String resolveClassEntry(String compileTarget, String javaPath) {
         if (javaPath == null || !javaPath.startsWith(JarPatchConstants.TREE_SOURCE_PREFIX)
                 || !javaPath.endsWith(JAVA_SUFFIX)) {
             throw new IllegalArgumentException(JarPatchConstants.MESSAGE_CLASS_VERSION_NOT_FOUND

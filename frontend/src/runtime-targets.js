@@ -4,6 +4,26 @@ const { runSsh, shellCommand, dockerExec } = require('./runtime-transport');
 const RESOURCE = /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/;
 const CONTEXT = /^[A-Za-z0-9][A-Za-z0-9_@.:/-]{0,199}$/;
 const MAX_TARGETS = 2000;
+const HOST_JVM = 'host-jvm';
+const LOCAL_JVM = 'local-jvm';
+const LOCAL_HOST = '本机';
+
+function hostLogCommand(source, { tail, follow }) {
+  if (source?.kind === 'journal') {
+    const unit = source.value;
+    if (typeof unit !== 'string' || !/^[\w@.-]{1,240}\.service$/.test(unit)) {
+      throw new Error('请输入完整的 systemd 服务单元名，例如 app.service');
+    }
+    return ['journalctl', '--no-pager', '--output=short-iso', '--unit=' + unit, '--lines=' + tail,
+      ...(follow ? ['--follow'] : [])];
+  }
+  const file = source?.value;
+  if (source?.kind !== 'file' || typeof file !== 'string' || !/^\/[^\u0000-\u001f\u007f]{1,1023}$/.test(file)) {
+    throw new Error('请输入宿主机上的应用日志绝对路径');
+  }
+  return ['sh', '-c', 'file=$1; shift; [ -f "$file" ] && [ -r "$file" ] || { echo "日志文件不存在或当前 SSH 账号无权读取" >&2; exit 1; }; exec tail "$@" -- "$file"',
+    'sh', file, '-n', String(tail), ...(follow ? ['-F'] : [])];
+}
 
 function requireName(name, label) {
   if (typeof name !== 'string' || !RESOURCE.test(name)) throw new Error(label + '无效');
@@ -103,6 +123,11 @@ class RuntimeTargets {
   }
 
   async exec(host, id, args, options = {}) {
+    if (id === HOST_JVM) {
+      const command = options.user ? ['sh', '-c',
+        '[ "$(id -u):$(id -g)" = "$1" ] || exit 190; shift; exec "$@"', 'sh', options.user, ...args] : args;
+      return runSsh(host, shellCommand(command), options);
+    }
     const target = this.selected(host, id);
     if (!target) return dockerExec(host, id, args, options);
     await this.confirmPod(host, target, options.signal);
@@ -115,6 +140,11 @@ class RuntimeTargets {
   }
 
   async logs(host, id, settings, options = {}) {
+    if (id === HOST_JVM) {
+      let command = hostLogCommand(settings.source, settings);
+      if (settings.follow) command = ['timeout', String(settings.seconds), ...command];
+      return runSsh(host, shellCommand(command), options);
+    }
     const target = this.selected(host, id);
     if (target) await this.confirmPod(host, target, options.signal, false);
     const args = ['--timestamps', '--tail', String(settings.tail)];
@@ -139,4 +169,4 @@ class RuntimeTargets {
   }
 }
 
-module.exports = { RuntimeTargets };
+module.exports = { RuntimeTargets, HOST_JVM, LOCAL_JVM, LOCAL_HOST };

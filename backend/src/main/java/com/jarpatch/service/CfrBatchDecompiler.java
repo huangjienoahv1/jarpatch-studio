@@ -34,20 +34,35 @@ public class CfrBatchDecompiler {
     private static final Logger LOGGER = LoggerFactory.getLogger(CfrBatchDecompiler.class);
     private static final int CFR_BATCH_SIZE = 200;
     private static final String CFR_OPTION_SILENT = "silent";
+    private static final String CFR_OPTION_CLASSPATH = "extraclasspath";
     private static final String CFR_OPTION_VALUE_TRUE = "true";
     private static final String JAVA_FILE_SUFFIX = ".java";
     private static final String MESSAGE_OUTPUT_OUT_OF_RANGE = "CFR 输出路径超出源码目录";
     private static final String LOG_DECOMPILE_FILE_FAILED = "CFR 反编译单文件失败，path={}, message={}";
 
     /**
+     * 反编译仅有 class 字节的输入，例如运行时工作台从 JVM 读取的单个类。
+     *
+     * @param classFiles 需要反编译的 class 文件
+     * @param sourceDir 源码输出目录
+     * @param cancelRequested 取消检查回调
+     * @throws IOException 源码无法写入
+     */
+    public void decompile(List<Path> classFiles, Path sourceDir, BooleanSupplier cancelRequested) throws IOException {
+        decompile(classFiles, sourceDir, JarPatchConstants.EMPTY_TEXT, cancelRequested);
+    }
+
+    /**
      * 批量反编译 class 文件，并在批次边界响应任务取消。
      *
      * @param classFiles 已按稳定顺序排列的 class 文件
      * @param sourceDir 源码输出目录
+     * @param classpath 原包中的类和依赖，供 CFR 恢复泛型和方法签名
      * @param cancelRequested 取消检查回调
      * @throws IOException 创建或写入源码文件失败时抛出
      */
-    public void decompile(List<Path> classFiles, Path sourceDir, BooleanSupplier cancelRequested) throws IOException {
+    public void decompile(List<Path> classFiles, Path sourceDir, String classpath, BooleanSupplier cancelRequested)
+            throws IOException {
         if (classFiles.isEmpty()) {
             return;
         }
@@ -60,8 +75,11 @@ public class CfrBatchDecompiler {
                 List<String> batch = classFiles.subList(start, end).stream()
                         .map(path -> path.toAbsolutePath().normalize().toString())
                         .toList();
+                Map<String, String> options = classpath.isEmpty()
+                        ? Map.of(CFR_OPTION_SILENT, CFR_OPTION_VALUE_TRUE)
+                        : Map.of(CFR_OPTION_SILENT, CFR_OPTION_VALUE_TRUE, CFR_OPTION_CLASSPATH, classpath);
                 CfrDriver driver = new CfrDriver.Builder()
-                        .withOptions(Map.of(CFR_OPTION_SILENT, CFR_OPTION_VALUE_TRUE))
+                        .withOptions(options)
                         .withOutputSink(outputSink)
                         .build();
                 driver.analyse(batch);

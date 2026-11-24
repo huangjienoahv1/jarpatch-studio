@@ -29,10 +29,17 @@ public class CompileProcessRunner {
     private static final long PROCESS_POLL_INTERVAL_MILLIS = 200L;
     private static final String OUTPUT_READER_THREAD_NAME = "jarpatch-javac-output";
     private static final String JAVAC_ARGUMENT_FILE_NAME = "javac-arguments.txt";
-    private static final String JAVAC_FILE_ENCODING_ARGUMENT = "-J-Dfile.encoding=UTF-8";
+    // JDK 17 使用 sun.* 属性，较新版本使用标准流编码属性。Windows 默认代码页可能与文件编码不同。
+    private static final List<String> JAVAC_UTF8_ARGUMENTS = List.of(
+            "-J-Dfile.encoding=UTF-8",
+            "-J-Dstdout.encoding=UTF-8",
+            "-J-Dstderr.encoding=UTF-8",
+            "-J-Dsun.stdout.encoding=UTF-8",
+            "-J-Dsun.stderr.encoding=UTF-8");
 
     /**
-     * 为包编译和运行时单类编译生成 javac 参数文件，避免长 classpath 触及系统命令行限制。
+     * 为包编译和运行时单类编译生成 javac 命令与 UTF-8 参数文件，避免长 classpath 触及命令行限制。
+     * 显式设置子进程标准输出和错误输出的编码，与执行器的 UTF-8 读取保持一致。
      *
      * @param javac 已选定的 JDK 编译器
      * @param output 编译产物和临时参数文件目录
@@ -44,14 +51,18 @@ public class CompileProcessRunner {
      */
     public List<String> prepareCommand(Path javac, Path output, int release, String classpath, List<Path> sources)
             throws IOException {
-        // 参数文件与诊断都按 UTF-8 处理，且不运行原包依赖中发现的注解处理器。
+        // 不运行原包依赖中发现的注解处理器。
         List<String> arguments = new ArrayList<>(List.of("-proc:none", "--release", String.valueOf(release),
                 "-encoding", JarPatchConstants.UTF_8, "-classpath", quoteArgument(classpath),
                 "-d", quoteArgument(output.toString())));
         sources.forEach(source -> arguments.add(quoteArgument(source.toString())));
         Path argumentFile = output.resolve(JAVAC_ARGUMENT_FILE_NAME);
         Files.write(argumentFile, arguments, StandardCharsets.UTF_8);
-        return List.of(javac.toString(), JAVAC_FILE_ENCODING_ARGUMENT, "@" + argumentFile);
+        List<String> command = new ArrayList<>();
+        command.add(javac.toString());
+        command.addAll(JAVAC_UTF8_ARGUMENTS);
+        command.add("@" + argumentFile);
+        return List.copyOf(command);
     }
 
     /**
@@ -68,6 +79,7 @@ public class CompileProcessRunner {
      * @param workDir        工作目录
      * @param cancelRequested 取消检查回调
      * @return javac 合并输出
+     * @throws CompilationFailedException javac 返回非零退出状态，保留原始诊断
      * @throws IOException          进程启动或输出读取失败时抛出
      * @throws InterruptedException 等待进程被中断时抛出
      */
@@ -99,7 +111,7 @@ public class CompileProcessRunner {
         }
         int exitCode = process.waitFor();
         if (exitCode != 0) {
-            throw new IllegalStateException(output.toString());
+            throw new CompilationFailedException(output.toString());
         }
         return output.toString();
     }
@@ -119,6 +131,14 @@ public class CompileProcessRunner {
             }
         } catch (IOException ignored) {
             // 取消会关闭进程流，主线程负责记录最终任务状态。
+        }
+    }
+
+    /** javac 的非零退出结果，供调用方区分诊断失败和取消。 */
+    static final class CompilationFailedException extends IllegalStateException {
+        /** 保存 javac 原始诊断。 */
+        private CompilationFailedException(String diagnostics) {
+            super(diagnostics);
         }
     }
 }

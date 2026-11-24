@@ -718,6 +718,7 @@ body[data-theme="light"] .icon-sun {
   min-height: 0;
   padding: 8px 10px 6px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr) 6px var(--log-panel-height);
   gap: 6px;
   overflow: hidden;
@@ -738,6 +739,7 @@ body[data-theme="light"] .icon-sun {
   border-radius: var(--radius-md);
   padding: 8px 12px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -776,6 +778,8 @@ body[data-theme="light"] .icon-sun {
 
 .toolbar-actions {
   display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
@@ -884,7 +888,6 @@ body[data-theme="light"] .icon-sun {
   }
 
   .toolbar-actions {
-    flex-wrap: wrap;
     padding-top: 6px;
     border-top: 1px solid var(--line-subtle);
   }
@@ -967,6 +970,7 @@ body[data-theme="light"] .icon-sun {
 
 .task-status-text {
   flex: 0 0 auto;
+  white-space: nowrap;
   font-size: 12px;
   font-weight: 700;
   color: var(--text);
@@ -988,6 +992,10 @@ body[data-theme="light"] .icon-sun {
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
+}
+
+.task-bar-right [hidden] {
+  display: none;
 }
 
 .task-progress-track {
@@ -1017,14 +1025,17 @@ body[data-theme="light"] .icon-sun {
   background: var(--success);
 }
 
-.task-bar[data-state="failed"] .task-progress-fill {
-  background: var(--danger);
+.task-bar[data-state="failed"] .task-progress-track {
+  display: none;
 }
 
-.task-cancel {
+.task-action {
   height: 26px;
   padding: 0 10px;
   font-size: 12px;
+}
+
+.task-cancel {
   border-color: var(--danger-border);
   background: var(--danger-soft);
   color: var(--danger);
