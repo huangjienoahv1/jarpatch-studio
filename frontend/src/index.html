@@ -473,6 +473,7 @@
             <a href="#help-editor">文件浏览、编辑与预览</a>
             <a href="#help-analyze">分析与风险</a>
             <a href="#help-compile">编译</a>
+            <a href="#help-patch-directory">导入补丁目录</a>
             <a href="#help-diff-export">差异确认与导出</a>
           </div>
           <div class="help-nav-group">
@@ -535,7 +536,7 @@
             </div>
           </figure>
           <ul>
-            <li><strong>顶部操作栏</strong>分为三组：左侧为当前项目的核心工作流（<code>分析</code>、<code>编译</code>、<code>差异</code>、<code>导出</code>）；中间为扩展与维护入口（<code>运行时工作台</code>、仅管理员可见的 <code>开发能力</code>、以及收纳了项目设置/历史/清理/排错/诊断的 <code>更多</code> 下拉菜单）；右侧为 <code>深浅色主题切换</code>、<code>帮助</code> 与 <code>账号菜单</code>。</li>
+            <li><strong>顶部操作栏</strong>分为三组：左侧为当前项目的核心工作流（<code>分析</code>、<code>编译</code>、<code>导入补丁目录</code>、<code>差异</code>、<code>导出</code>）；中间为扩展与维护入口（<code>运行时工作台</code>、仅管理员可见的 <code>开发能力</code>、以及收纳了项目设置/历史/清理/排错/诊断的 <code>更多</code> 下拉菜单）；右侧为 <code>深浅色主题切换</code>、<code>帮助</code> 与 <code>账号菜单</code>。</li>
             <li><strong>左侧项目栏</strong>支持导入包、按关键词筛选历史项目，收起后仍可通过左上角 <code>+</code> 快捷按钮打开新包。</li>
             <li><strong>中间工作区</strong>支持拖拽文件树与编辑器之间的分隔条调整宽度；右侧「分析与风险」默认收起为窄按钮，不挤占代码视野。</li>
             <li><strong>底部状态栏</strong>集中展示 Java 智能状态灯、光标行列号、当前文件语言、资源文件编码切换与当前登录用户。</li>
@@ -677,6 +678,15 @@
           <p class="help-note">系统不会自动改写你的业务源码。若反编译代码因混淆、泛型擦除或依赖 Lombok/MapStruct 等注解生成逻辑而报错，请先看底部「执行日志」的首条编译错误，再手动修正或改用原项目源码构建。</p>
         </section>
 
+        <section data-help-section="help-patch-directory" data-help-keywords="导入补丁目录 批量替换 java class 类 文件夹">
+          <h3 id="help-patch-directory" tabindex="-1">导入补丁目录</h3>
+          <ol>
+            <li>打开原始 JAR 或 WAR，点击顶部「导入补丁目录」，选择只包含本次改动类的文件夹。</li>
+            <li>核对每个文件对应的包内位置。UTF-8 的 <code>.java</code> 会使用原类版本编译，<code>.class</code> 需要与原类字节码版本一致。</li>
+            <li>确认「应用补丁」，再点击「导出」生成新包。要查看补丁的反编译源码，可打开已导出的新包。</li>
+          </ol>
+          <p class="help-note">存在找不到目标、类名冲突、同一类已有编辑或目标是带签名的嵌套 JAR 时，先处理预览中列出的阻塞项。</p>
+        </section>
         <section data-help-section="help-diff-export" data-help-keywords="差异 diff 导出 签名策略 校验 原子发布 导出路径">
           <h3 id="help-diff-export" tabindex="-1">差异确认与导出</h3>
           <p><strong>查看差异</strong>：点击顶部「差异」对比当前工作区与导入时的固定基线，按「源码」「资源」「class」三类汇总，支持「全部展开 / 全部折叠」及彩色状态标签。修改过 Java 文件时，请先完成编译并确认最新产物已出现在 class 清单中。</p>
@@ -784,6 +794,27 @@
         </section>
       </div>
     </div>
+  </dialog>
+  <dialog id="patchDirectoryDialog" class="modal-backdrop diff-dialog" aria-labelledby="patchDirectoryTitle">
+    <section class="modal-panel diff-panel">
+      <header class="modal-header">
+        <div>
+          <h2 id="patchDirectoryTitle">导入补丁目录</h2>
+          <p id="patchDirectoryPath" class="patch-directory-path"></p>
+        </div>
+        <button class="modal-close-icon" type="button" data-close-dialog="patchDirectoryDialog" aria-label="关闭补丁预览">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <div class="diff-content">
+        <p id="patchDirectoryStatus" class="modal-summary" role="status" tabindex="-1"></p>
+        <ul id="patchDirectoryEntries" class="patch-directory-entries" aria-label="补丁匹配清单"></ul>
+      </div>
+      <form class="modal-footer" method="dialog">
+        <button class="tool-btn" type="submit" value="cancel" autofocus>关闭</button>
+        <button id="applyPatchDirectoryBtn" class="primary-action modal-primary" type="submit" value="apply" disabled>应用补丁</button>
+      </form>
+    </section>
   </dialog>
   <dialog id="diffDialog" class="modal-backdrop diff-dialog" aria-labelledby="diffDialogTitle">
     <section class="modal-panel diff-panel">
@@ -1262,6 +1293,10 @@
               <button id="compileBtn" class="tool-btn" type="button" disabled title="编译已修改的 Java 源码">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 6-6 6 6 6M16 6l6 6-6 6M14 4l-4 16"/></svg>
                 <span class="btn-label">编译</span>
+              </button>
+              <button id="patchDirectoryBtn" class="tool-btn" type="button" disabled aria-haspopup="dialog" aria-controls="patchDirectoryDialog">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 10v6m-3-3h6"/></svg>
+                <span class="btn-label">导入补丁目录</span>
               </button>
               <button id="diffBtn" class="tool-btn" type="button" disabled title="查看与导入基线的源码、资源和 class 差异">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M4 7h5M6.5 4.5v5M15 17h5M15 7h5"/></svg>

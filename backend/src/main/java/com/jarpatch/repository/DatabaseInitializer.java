@@ -37,6 +37,7 @@ public class DatabaseInitializer {
     private static final int MIGRATION_HISTORY_AND_ENCODING = 5;
     private static final int MIGRATION_FILE_ENCODING_SELECTIONS = 6;
     private static final int MIGRATION_USER_AUTH_MANAGEMENT = 7;
+    private static final int MIGRATION_PATCH_ARTIFACTS = 8;
 
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
@@ -87,6 +88,7 @@ public class DatabaseInitializer {
                 this::createFileEncodingSelectionSchema);
         applyMigration(MIGRATION_USER_AUTH_MANAGEMENT, "user_auth_management",
                 this::createUserAuthManagementSchema);
+        applyMigration(MIGRATION_PATCH_ARTIFACTS, "patch_artifacts", this::createPatchArtifactSchema);
     }
 
     /**
@@ -271,6 +273,17 @@ public class DatabaseInitializer {
 
         ensureColumn("operation_journals", "operator",
                 "TEXT NOT NULL DEFAULT '" + JarPatchConstants.DEFAULT_AUDITOR + "'");
+    }
+
+    /**
+     * 记录补丁目录已提交的 class，独立于手工编辑源码形成的待重新编译状态。
+     */
+    private void createPatchArtifactSchema() {
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS patch_artifacts (" +
+                "project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, " +
+                "artifact_path TEXT NOT NULL, " +
+                "created_at TEXT NOT NULL, " +
+                "PRIMARY KEY(project_id, artifact_path))");
     }
 
     /**

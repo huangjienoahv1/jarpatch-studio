@@ -21,7 +21,7 @@ import java.util.function.BooleanSupplier;
 /**
  * 编译产物原子提交与失败恢复服务。
  * <p>
- * CompileService 在全部 javac 目标成功后调用本服务。实际写回点在 extracted 主 classes 或
+ * CompileService 和 PatchDirectoryService 在全部 class 就绪后调用本服务。实际写回点在 extracted 主 classes 或
  * 嵌套 Jar；写回前完整备份被替换文件，调用方失败时使用同一提交对象恢复。
  * </p>
  *
@@ -214,7 +214,7 @@ public class CompileArtifactCommitter {
             throw new IllegalArgumentException(JarPatchConstants.MESSAGE_INVALID_NESTED_JAR_SOURCE_PATH);
         }
         Files.createDirectories(backupRoot);
-        Path backup = backupRoot.resolve(safeTargetName(compileTarget) + ".backup");
+        Path backup = Files.createTempFile(backupRoot, "jar-", ".backup");
         Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
         commit.originalFiles.put(target, backup);
     }

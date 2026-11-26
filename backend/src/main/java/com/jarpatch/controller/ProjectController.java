@@ -9,6 +9,8 @@ import com.jarpatch.model.FileNode;
 import com.jarpatch.model.FileContentView;
 import com.jarpatch.model.ImportProjectRequest;
 import com.jarpatch.model.OperationResult;
+import com.jarpatch.model.PatchDirectoryPreview;
+import com.jarpatch.model.PatchDirectoryRequest;
 import com.jarpatch.model.ProjectImportInspection;
 import com.jarpatch.model.ProjectRecord;
 import com.jarpatch.model.ProjectHistoryView;
@@ -22,6 +24,7 @@ import com.jarpatch.service.ExportService;
 import com.jarpatch.service.DiffService;
 import com.jarpatch.service.FileContentService;
 import com.jarpatch.service.FileTreeService;
+import com.jarpatch.service.PatchDirectoryService;
 import com.jarpatch.service.ProjectInspectionService;
 import com.jarpatch.service.ProjectService;
 import com.jarpatch.service.ProjectHistoryService;
@@ -45,7 +48,7 @@ import java.util.List;
 /**
  * 项目工作台 HTTP 控制器。
  * <p>
- * Electron 前端通过该控制器完成导入、项目列表、文件树、内容读写、分析、编译和导出。
+ * Electron 前端通过该控制器完成导入、项目列表、文件树、内容读写、分析、编译、补丁目录应用和导出。
  * 控制器只负责接口编排，实际执行点在对应服务层，结果写入工作区和 SQLite。
  * </p>
  *
@@ -60,6 +63,7 @@ public class ProjectController {
     private final FileContentService fileContentService;
     private final AnalysisService analysisService;
     private final CompileService compileService;
+    private final PatchDirectoryService patchDirectoryService;
     private final ExportService exportService;
     private final SearchService searchService;
     private final ProjectInspectionService projectInspectionService;
@@ -76,6 +80,7 @@ public class ProjectController {
      * @param fileContentService 文件内容服务
      * @param analysisService    分析服务
      * @param compileService     编译服务
+     * @param patchDirectoryService 补丁目录预览与应用服务
      * @param exportService      导出服务
      * @param searchService      搜索服务
      * @param projectInspectionService 导入前预解析服务
@@ -89,6 +94,7 @@ public class ProjectController {
                              FileContentService fileContentService,
                              AnalysisService analysisService,
                              CompileService compileService,
+                             PatchDirectoryService patchDirectoryService,
                              ExportService exportService,
                              SearchService searchService,
                              ProjectInspectionService projectInspectionService,
@@ -101,6 +107,7 @@ public class ProjectController {
         this.fileContentService = fileContentService;
         this.analysisService = analysisService;
         this.compileService = compileService;
+        this.patchDirectoryService = patchDirectoryService;
         this.exportService = exportService;
         this.searchService = searchService;
         this.projectInspectionService = projectInspectionService;
@@ -357,6 +364,37 @@ public class ProjectController {
                                                 @RequestHeader(value = "X-Task-Id", required = false) String taskId) throws IOException, InterruptedException {
         ProjectRecord project = requireProject(projectId);
         return ApiResponse.success(compileService.compile(project, taskId));
+    }
+
+    /**
+     * 预览目录中的 Java 源码与 class 对应的包内目标。
+     *
+     * @param projectId 当前项目
+     * @param request 用户选择的本机目录
+     * @return 只读的匹配清单及确认标识
+     */
+    @PostMapping("/{projectId}/patch-directory/preview")
+    public ApiResponse<PatchDirectoryPreview> previewPatchDirectory(@PathVariable("projectId") String projectId,
+                                                                    @RequestBody PatchDirectoryRequest request)
+            throws IOException {
+        return ApiResponse.success(patchDirectoryService.preview(requireProject(projectId), request.directory()));
+    }
+
+    /**
+     * 应用已确认的目录补丁，统一写回工作区并登记类产物。
+     *
+     * @param projectId 当前项目
+     * @param request 与预览匹配的目录及确认标识
+     * @param taskId 预创建任务 ID
+     * @return 已写回的包内类清单
+     */
+    @PostMapping("/{projectId}/patch-directory/apply")
+    public ApiResponse<OperationResult> applyPatchDirectory(@PathVariable("projectId") String projectId,
+                                                            @RequestBody PatchDirectoryRequest request,
+                                                            @RequestHeader(value = "X-Task-Id", required = false) String taskId)
+            throws IOException, InterruptedException {
+        return ApiResponse.success(patchDirectoryService.apply(
+                requireProject(projectId), request.directory(), request.confirmation(), taskId));
     }
 
     /**

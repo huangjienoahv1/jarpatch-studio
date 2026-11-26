@@ -21,7 +21,7 @@ import java.util.TreeSet;
  * 项目导出前可靠差异服务。
  * <p>
  * 服务从导入时固定 baseline 与当前工作区收集可编辑文件并按原始字节 SHA-256 比较，
- * 返回真实源码/资源差异；已提交 class 清单直接读取 compiled_artifacts，不用文件名猜测。
+ * 返回真实源码/资源差异；已提交 class 清单直接读取编译和补丁产物记录，不用文件名猜测。
  * </p>
  *
  * @author 黄杰
@@ -95,7 +95,7 @@ public class DiffService {
         DiffReport report = new DiffReport();
         report.setSourceDiffs(sourceDiffs);
         report.setResourceDiffs(resourceDiffs);
-        report.setCompiledArtifacts(compiledArtifactRepository.findPaths(project.getId()));
+        report.setCompiledArtifacts(compiledArtifactRepository.findCommittedPaths(project.getId()));
         return report;
     }
 

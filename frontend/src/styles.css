@@ -2411,6 +2411,34 @@ body[data-theme="light"] .unicode-preview-decoded-active {
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
+.patch-directory-path,
+.patch-directory-entries {
+  overflow-wrap: anywhere;
+}
+
+.patch-directory-entries {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.patch-directory-entries li {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.patch-directory-entries code {
+  white-space: normal;
+}
+
+.patch-directory-problem {
+  font-weight: 600;
+}
+
 .diff-content {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

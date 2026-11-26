@@ -219,7 +219,7 @@ public class ExportService {
             boolean modified = !diffReport.getSourceDiffs().isEmpty()
                     || !diffReport.getResourceDiffs().isEmpty()
                     || !diffReport.getCompiledArtifacts().isEmpty();
-            if (!diffReport.getSourceDiffs().isEmpty() && diffReport.getCompiledArtifacts().isEmpty()) {
+            if (!diffReport.getSourceDiffs().isEmpty() && compiledArtifactRepository.findPaths(project.getId()).isEmpty()) {
                 throw new IllegalStateException(JarPatchConstants.MESSAGE_SOURCE_NOT_COMPILED);
             }
             boolean signed = !signatureService.findSignatureFiles(project).isEmpty();
@@ -246,7 +246,7 @@ public class ExportService {
             taskService.ensureNotCancelled(task.getId());
 
             taskService.running(task, PROGRESS_VALIDATE, MESSAGE_EXPORT_VALIDATE);
-            List<String> compiledArtifacts = compiledArtifactRepository.findPaths(project.getId());
+            List<String> compiledArtifacts = diffReport.getCompiledArtifacts();
             ExportValidationResult validation = exportValidationService.validate(project, temporaryFile,
                     changedFiles, compiledArtifacts, removeSignatures);
             exportValidationRepository.insert(project.getId(), outputFile.toString(), validation, clockService.now());

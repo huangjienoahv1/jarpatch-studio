@@ -122,6 +122,7 @@ const MESSAGE_SETTINGS_PLACEHOLDER = '例如：C:\\Program Files\\Java\\jdk-17';
 const TASK_TYPE_IMPORT = 'IMPORT';
 const TASK_TYPE_ANALYZE = 'ANALYZE';
 const TASK_TYPE_COMPILE = 'COMPILE';
+const TASK_TYPE_PATCH_DIRECTORY = 'PATCH_DIRECTORY';
 const TASK_TYPE_EXPORT = 'EXPORT';
 const MESSAGE_TASK_CANCEL_BUTTON = '取消任务';
 const MESSAGE_TASK_PANEL_LABEL = '任务状态';
@@ -312,6 +313,7 @@ const TASK_LABEL_MAP = {
   IMPORT: MESSAGE_TASK_LABEL_IMPORT,
   ANALYZE: MESSAGE_TASK_LABEL_ANALYZE,
   COMPILE: MESSAGE_TASK_LABEL_COMPILE,
+  [TASK_TYPE_PATCH_DIRECTORY]: '应用补丁',
   EXPORT: MESSAGE_TASK_LABEL_EXPORT
 };
 
@@ -320,6 +322,7 @@ const MESSAGE_SAVE_IN_PROGRESS = '文件正在保存，请稍后再保存后续�
 
 const state = {
   projectSessionId: 0,
+  patchDirectoryOpening: false,
   fileOpenRequestId: 0,
   documentSessionId: 0,
   editorRevision: 0,
@@ -385,6 +388,12 @@ const elements = {
   analyzeBtn: document.getElementById('analyzeBtn'),
   diffBtn: document.getElementById('diffBtn'),
   compileBtn: document.getElementById('compileBtn'),
+  patchDirectoryBtn: document.getElementById('patchDirectoryBtn'),
+  patchDirectoryDialog: document.getElementById('patchDirectoryDialog'),
+  patchDirectoryPath: document.getElementById('patchDirectoryPath'),
+  patchDirectoryStatus: document.getElementById('patchDirectoryStatus'),
+  patchDirectoryEntries: document.getElementById('patchDirectoryEntries'),
+  applyPatchDirectoryBtn: document.getElementById('applyPatchDirectoryBtn'),
   exportBtn: document.getElementById('exportBtn'),
   settingsBtn: document.getElementById('settingsBtn'),
   runtimeBtn: document.getElementById('runtimeBtn'),
@@ -1356,6 +1365,7 @@ function restoreWorkspaceControls() {
   elements.analyzeBtn.disabled = !state.currentProject;
   elements.diffBtn.disabled = !state.currentProject;
   elements.compileBtn.disabled = !state.currentProject;
+  elements.patchDirectoryBtn.disabled = !state.currentProject || state.patchDirectoryOpening;
   elements.exportBtn.disabled = !state.currentProject;
   elements.compileBtn.classList.remove('busy');
   elements.exportBtn.classList.remove('busy');
@@ -1398,6 +1408,7 @@ function lockWorkspaceControls() {
   elements.analyzeBtn.disabled = true;
   elements.diffBtn.disabled = true;
   elements.compileBtn.disabled = true;
+  elements.patchDirectoryBtn.disabled = true;
   elements.exportBtn.disabled = true;
 }
 
@@ -3500,6 +3511,117 @@ async function compileProject() {
   }
 }
 
+/**
+ * 选择外部目录，确认预览后应用整批补丁。
+ */
+async function importPatchDirectory() {
+  if (!state.currentProject || state.patchDirectoryOpening || state.currentTask || state.taskStarting) {
+    return;
+  }
+  if (isEditorDirty()) {
+    notify(MESSAGE_UNSAVED_CHANGES_BLOCK_ACTION, NOTICE_TYPE_INFO);
+    return;
+  }
+  const projectId = state.currentProject.id;
+  const projectSessionId = state.projectSessionId;
+  const dialog = elements.patchDirectoryDialog;
+  state.patchDirectoryOpening = true;
+  restoreWorkspaceControls();
+  try {
+    const directory = await window.jarPatch.pickDirectory(null, '选择改动类文件夹');
+    if (!directory || state.projectSessionId !== projectSessionId || isEditorDirty()) {
+      return;
+    }
+
+    elements.patchDirectoryPath.textContent = directory;
+    elements.patchDirectoryEntries.replaceChildren();
+    elements.patchDirectoryStatus.textContent = '正在匹配包内类…';
+    elements.applyPatchDirectoryBtn.disabled = true;
+    dialog.returnValue = '';
+    dialog.showModal();
+    const closed = new Promise((resolve) => {
+      dialog.addEventListener('close', () => resolve(dialog.returnValue), { once: true });
+    });
+    const previewRequest = api(`/api/projects/${projectId}/patch-directory/preview`, {
+      method: 'POST',
+      body: JSON.stringify({ directory })
+    }).then((preview) => ({ preview }), (error) => ({ error }));
+    const scan = await Promise.race([previewRequest, closed.then(() => null)]);
+    if (!scan || !dialog.open || state.projectSessionId !== projectSessionId) {
+      return;
+    }
+    if (scan.error) {
+      elements.patchDirectoryStatus.textContent = `无法预览补丁目录：${scan.error.message}`;
+      elements.patchDirectoryStatus.focus();
+      await closed;
+      return;
+    }
+
+    const preview = scan.preview;
+    renderPatchDirectoryPreview(preview);
+    const decision = await closed;
+    if (decision !== 'apply' || !preview.applicable || state.projectSessionId !== projectSessionId || isEditorDirty()) {
+      return;
+    }
+    const result = await executeTaskOperation(TASK_TYPE_PATCH_DIRECTORY, projectId, '开始应用补丁目录',
+      (task, signal) => api(`/api/projects/${projectId}/patch-directory/apply`, {
+        method: 'POST',
+        signal,
+        headers: { 'X-Task-Id': task.id },
+        body: JSON.stringify({ directory: preview.directory, confirmation: preview.confirmation })
+      }));
+    if (result && state.projectSessionId === projectSessionId) {
+      notify(`已应用 ${result.changedFiles.length} 个 class，点击「导出」生成新包`, NOTICE_TYPE_SUCCESS);
+      await loadTree(projectId);
+    }
+  } catch (error) {
+    notify(`补丁目录处理失败：${error.message}`, NOTICE_TYPE_ERROR);
+  } finally {
+    state.patchDirectoryOpening = false;
+    restoreWorkspaceControls();
+    if (state.projectSessionId === projectSessionId && !elements.patchDirectoryBtn.disabled) {
+      elements.patchDirectoryBtn.focus();
+    }
+  }
+}
+
+/** 使用文本节点展示外部文件名、目标和阻塞原因。 */
+function renderPatchDirectoryPreview(preview) {
+  const blocked = preview.entries.filter((entry) => entry.problem).length;
+  elements.patchDirectoryPath.textContent = preview.directory;
+  elements.patchDirectoryStatus.textContent = blocked
+    ? `${blocked} 项需要处理，修正后请重新选择目录。`
+    : `已匹配 ${preview.entries.length} 个文件。应用后可导出新包，Java 源码可能同时生成内部类。`;
+  const rows = preview.entries.map((entry) => {
+    const item = document.createElement('li');
+    const title = document.createElement('strong');
+    title.textContent = entry.input;
+    item.append(title);
+    if (entry.className) {
+      const name = document.createElement('span');
+      name.textContent = entry.className;
+      item.append(name);
+    }
+    for (const target of entry.targets) {
+      const path = document.createElement('code');
+      path.textContent = target;
+      item.append(path);
+    }
+    if (entry.problem) {
+      const problem = document.createElement('span');
+      problem.className = 'patch-directory-problem';
+      problem.textContent = entry.problem;
+      item.append(problem);
+    }
+    return item;
+  });
+  elements.patchDirectoryEntries.replaceChildren(...rows);
+  elements.applyPatchDirectoryBtn.disabled = !preview.applicable;
+  if (blocked) {
+    elements.patchDirectoryStatus.focus();
+  }
+}
+
 function renderDiffReport(report) {
   const sourceDiffs = report.sourceDiffs || [];
   const resourceDiffs = report.resourceDiffs || [];
@@ -3899,6 +4021,9 @@ function closeAllWorkbenchOverlays() {
   if (elements.diffDialog.open) {
     elements.diffDialog.close();
   }
+  if (elements.patchDirectoryDialog.open) {
+    elements.patchDirectoryDialog.close();
+  }
   const runtimeDialog = document.getElementById('runtimeDialog');
   if (runtimeDialog && runtimeDialog.open) {
     runtimeDialog.close();
@@ -4120,6 +4245,7 @@ elements.fileEncodingSelect.addEventListener('change', reopenCurrentFileWithEnco
 elements.analyzeBtn.addEventListener('click', analyzeProject);
 elements.diffBtn.addEventListener('click', () => openDiffDialog());
 elements.compileBtn.addEventListener('click', compileProject);
+elements.patchDirectoryBtn.addEventListener('click', importPatchDirectory);
 elements.exportBtn.addEventListener('click', exportProject);
 elements.settingsBtn.addEventListener('click', openSettingsDialog);
 elements.projectSettingsBtn.addEventListener('click', openProjectSettingsDialog);
@@ -4446,7 +4572,7 @@ document.addEventListener('keydown', (event) => {
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault();
-    if (!elements.diffDialog.open && !elements.helpDialog.open) {
+    if (!elements.diffDialog.open && !elements.patchDirectoryDialog.open && !elements.helpDialog.open) {
       saveCurrentFile();
     }
   }
